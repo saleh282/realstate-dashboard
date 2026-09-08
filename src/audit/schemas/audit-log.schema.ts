@@ -10,6 +10,7 @@ export enum AuditAction {
   OTP_FAILED = 'otp_failed',
   PASSWORD_RESET = 'password_reset',
   LOGOUT = 'logout',
+  ACCOUNT_DELETED = 'account_deleted',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false }, collection: 'audit_logs' })

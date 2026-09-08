@@ -83,6 +83,8 @@ export class AuthService {
 
     return {
       message: 'تم إنشاء الحساب، تم إرسال رمز التحقق',
+      userId: user._id.toString(),
+      id: user._id.toString(),
       identifier: dto.identifier,
       requiresVerification: true,
       expiresInMinutes: 5,
@@ -136,8 +138,12 @@ export class AuthService {
 
     return {
       ...tokens,
+      userId: user._id.toString(),
+      id: user._id.toString(),
       user: {
-        id: user._id,
+        userId: user._id.toString(),
+        id: user._id.toString(),
+        _id: user._id.toString(),
         fullName: user.fullName,
         email: user.email,
         phone: user.phone,
@@ -316,7 +322,21 @@ export class AuthService {
       refreshToken,
     );
     const user = await this.usersService.findById(userId);
-    return this.issueTokens(userId, user?.email ?? user?.phone ?? '', true, device ?? existingDevice);
+    const tokens = await this.issueTokens(userId, user?.email ?? user?.phone ?? '', true, device ?? existingDevice);
+    return {
+      ...tokens,
+      userId: userId,
+      id: userId,
+      user: user ? {
+        userId: user._id.toString(),
+        id: user._id.toString(),
+        _id: user._id.toString(),
+        fullName: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        kycStatus: user.kycStatus,
+      } : undefined,
+    };
   }
 
   async logout(userId: string, ip?: string) {

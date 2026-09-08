@@ -59,6 +59,8 @@ export class KycService {
     await this.usersService.save(user);
 
     return {
+      userId: user._id.toString(),
+      id: user._id.toString(),
       message: 'تم إرسال بياناتك للتحقق، سيتم إعلامك بالنتيجة قريباً',
       kycStatus: user.kycStatus,
     };
@@ -69,6 +71,8 @@ export class KycService {
     if (!user) throw new NotFoundException('المستخدم غير موجود');
 
     return {
+      userId: user._id.toString(),
+      id: user._id.toString(),
       kycStatus: user.kycStatus,
       kycSubmittedAt: user.kycSubmittedAt,
       kycReviewedAt: user.kycReviewedAt,
@@ -86,6 +90,10 @@ export class KycService {
     user.kycRejectionReason = dto.decision === 'rejected' ? dto.rejectionReason : undefined;
 
     await this.usersService.save(user);
-    return { kycStatus: user.kycStatus };
+    return {
+      userId: user._id.toString(),
+      id: user._id.toString(),
+      kycStatus: user.kycStatus,
+    };
   }
 }
