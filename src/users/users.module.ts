@@ -5,12 +5,14 @@ import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { RefreshTokenModule } from '../refresh-token/refresh-token.module';
 import { AuditModule } from '../audit/audit.module';
+import { CloudinaryModule } from '../config/cloudinary.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
     RefreshTokenModule,
     AuditModule,
+    CloudinaryModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

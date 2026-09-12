@@ -31,6 +31,7 @@ export class AuthController {
   }
 
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login')
   login(@Body() dto: LoginDto, @Req() req: any) {
     const device = req.headers['x-device-name'] ?? req.headers['user-agent'] ?? 'unknown';
@@ -59,6 +60,7 @@ export class AuthController {
   }
 
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('reset-password')
   resetPassword(@Body() dto: ResetPasswordDto, @Req() req: any) {
     return this.authService.resetPassword(dto, req.ip);

@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
+import { UserRole } from '../../auth/roles.enum';
 
 export type UserDocument = User & Document;
 
@@ -29,6 +30,9 @@ export class User {
   @Prop({ required: true, select: false })
   password: string;
 
+  @Prop({ required: true, enum: UserRole, default: UserRole.USER, index: true })
+  role: UserRole;
+
  
   @Prop({ default: false })
   emailVerified: boolean;
@@ -47,11 +51,20 @@ export class User {
   @Prop()
   idFrontUrl?: string;
 
+  @Prop({ type: Object })
+  idFrontAsset?: KycAssetMetadata;
+
   @Prop()
   idBackUrl?: string;
 
+  @Prop({ type: Object })
+  idBackAsset?: KycAssetMetadata;
+
   @Prop()
   selfieUrl?: string;
+
+  @Prop({ type: Object })
+  selfieAsset?: KycAssetMetadata;
 
   @Prop()
   kycSubmittedAt?: Date;
@@ -61,6 +74,13 @@ export class User {
 
   @Prop()
   kycRejectionReason?: string;
+}
+
+export interface KycAssetMetadata {
+  publicId: string;
+  secureUrl: string;
+  resourceType: 'image';
+  deliveryType: 'authenticated';
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

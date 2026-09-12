@@ -1,10 +1,8 @@
-import { IsNotEmpty, IsString, Matches, Validate } from 'class-validator';
+import { IsNotEmpty, IsString, Validate } from 'class-validator';
 import { ValidatorConstraint, ValidatorConstraintInterface } from 'class-validator';
 import {
+  IsApplicationPassword,
   Match,
-  NotSameAsIdentifier,
-  STRONG_PASSWORD_REGEX,
-  STRONG_PASSWORD_MESSAGE,
 } from '../../common/validators/password.validator';
 
 @ValidatorConstraint({ name: 'isEmailOrPhone', async: false })
@@ -29,8 +27,7 @@ export class RegisterDto {
   identifier: string; // email OR phone - screen has a single combined field
 
   @IsNotEmpty({ message: 'كلمة المرور مطلوبة' })
-  @Matches(STRONG_PASSWORD_REGEX, { message: STRONG_PASSWORD_MESSAGE })
-  @NotSameAsIdentifier('identifier', { message: 'كلمة المرور لا يجب أن تكون نفس البريد الإلكتروني أو رقم الهاتف' })
+  @IsApplicationPassword()
   password: string;
 
   @IsNotEmpty({ message: 'تأكيد كلمة المرور مطلوب' })

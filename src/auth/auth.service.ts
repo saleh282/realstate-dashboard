@@ -24,6 +24,8 @@ import { OtpPurpose as OtpCollectionPurpose } from '../otp/schemas/otp-verificat
 import { RefreshTokenService } from '../refresh-token/refresh-token.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
+import { hashPassword } from '../common/security/password-hashing';
+import { UserRole } from './roles.enum';
 
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
@@ -54,7 +56,7 @@ export class AuthService {
   // REGISTER (screen 5)
   // ---------------------------------------------------------------------
   async register(dto: RegisterDto, ip?: string) {
-    // password strength + confirmPassword match are enforced by RegisterDto itself now
+    // The shared password policy + confirmPassword match are enforced by RegisterDto.
 
     const existing = await this.usersService.findByIdentifier(dto.identifier);
     if (existing) {
@@ -62,7 +64,7 @@ export class AuthService {
     }
 
     const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dto.identifier);
-    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const passwordHash = await hashPassword(dto.password);
 
     const user = await this.usersService.create({
       fullName: dto.fullName,
@@ -133,7 +135,13 @@ export class AuthService {
     user.accountLockedUntil = undefined;
     await this.usersService.save(user);
 
-    const tokens = await this.issueTokens(user._id.toString(), dto.identifier, dto.rememberMe, device);
+    const tokens = await this.issueTokens(
+      user._id.toString(),
+      dto.identifier,
+      user.role ?? UserRole.USER,
+      dto.rememberMe,
+      device,
+    );
     await this.auditLogService.log(AuditAction.LOGIN_SUCCESS, user._id.toString(), ip);
 
     return {
@@ -147,6 +155,7 @@ export class AuthService {
         fullName: user.fullName,
         email: user.email,
         phone: user.phone,
+        role: user.role ?? UserRole.USER,
         kycStatus: user.kycStatus,
       },
     };
@@ -237,7 +246,7 @@ export class AuthService {
   // RESET PASSWORD (screen 2)
   // ---------------------------------------------------------------------
   async resetPassword(dto: ResetPasswordDto, ip?: string) {
-    // password strength + confirmPassword match are enforced by ResetPasswordDto itself now
+    // The shared password policy + confirmPassword match are enforced by ResetPasswordDto.
 
     let payload: { sub: string; purpose: string };
     try {
@@ -257,7 +266,7 @@ export class AuthService {
       throw new BadRequestException('المستخدم غير موجود');
     }
 
-    user.password = await bcrypt.hash(dto.newPassword, 10);
+    user.password = await hashPassword(dto.newPassword);
     user.failedLoginAttempts = 0;
     user.accountLockedUntil = undefined;
     await this.usersService.save(user);
@@ -276,11 +285,12 @@ export class AuthService {
   private async issueTokens(
     userId: string,
     identifier: string,
+    role: UserRole,
     rememberMe = true,
     device = 'unknown',
   ) {
     const accessToken = this.jwtService.sign(
-      { sub: userId, identifier },
+      { sub: userId, identifier, role },
       {
         secret: this.config.get('JWT_ACCESS_SECRET'),
         expiresIn: this.config.get('JWT_ACCESS_EXPIRES_IN') ?? '15m',
@@ -322,7 +332,13 @@ export class AuthService {
       refreshToken,
     );
     const user = await this.usersService.findById(userId);
-    const tokens = await this.issueTokens(userId, user?.email ?? user?.phone ?? '', true, device ?? existingDevice);
+    const tokens = await this.issueTokens(
+      userId,
+      user?.email ?? user?.phone ?? '',
+      user?.role ?? UserRole.USER,
+      true,
+      device ?? existingDevice,
+    );
     return {
       ...tokens,
       userId: userId,
@@ -334,6 +350,7 @@ export class AuthService {
         fullName: user.fullName,
         email: user.email,
         phone: user.phone,
+        role: user.role ?? UserRole.USER,
         kycStatus: user.kycStatus,
       } : undefined,
     };

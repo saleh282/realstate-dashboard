@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { randomInt } from 'crypto';
 import {
   OtpVerification,
   OtpVerificationDocument,
@@ -25,7 +26,7 @@ export class OtpVerificationService {
   }
 
   private generateCode(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return randomInt(100000, 1000000).toString();
   }
 
   /** Checks the resend cooldown (matches the "00:56 إعادة الإرسال بعد" countdown on the OTP screen) */
@@ -65,7 +66,6 @@ export class OtpVerificationService {
       expiresAt: new Date(Date.now() + this.expiresMinutes * 60 * 1000),
     });
 
-    console.log(`🔑 OTP: ${code}`);  
     return code;
   }
 

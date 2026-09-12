@@ -6,11 +6,27 @@ import {
   ValidationArguments,
 } from 'class-validator';
 
-export const STRONG_PASSWORD_REGEX =
-  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@#$!%*?&])[A-Za-z\d@#$!%*?&]{8,}$/;
+export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_POLICY_MESSAGE = 'كلمة المرور يجب أن تحتوي على 8 أحرف على الأقل';
 
-export const STRONG_PASSWORD_MESSAGE =
-  'كلمة المرور يجب أن تحتوي على 8 أحرف على الأقل، وتشمل حرف كبير وحرف صغير ورقم ورمز خاص (@#$!%*?&)';
+export function isValidPassword(password: unknown): password is string {
+  return typeof password === 'string' && password.length >= PASSWORD_MIN_LENGTH;
+}
+
+export function IsApplicationPassword(validationOptions?: ValidationOptions) {
+  return (object: object, propertyName: string) => {
+    registerDecorator({
+      name: 'IsApplicationPassword',
+      target: object.constructor,
+      propertyName,
+      options: {
+        message: PASSWORD_POLICY_MESSAGE,
+        ...validationOptions,
+      },
+      validator: { validate: isValidPassword },
+    });
+  };
+}
 
 export function Match(property: string, validationOptions?: ValidationOptions) {
   return (object: object, propertyName: string) => {
@@ -34,28 +50,3 @@ class MatchConstraint implements ValidatorConstraintInterface {
   }
 }
 
-export function NotSameAsIdentifier(
-  identifierProperty: string,
-  validationOptions?: ValidationOptions,
-) {
-  return (object: object, propertyName: string) => {
-    registerDecorator({
-      name: 'NotSameAsIdentifier',
-      target: object.constructor,
-      propertyName,
-      options: validationOptions,
-      constraints: [identifierProperty],
-      validator: NotSameAsIdentifierConstraint,
-    });
-  };
-}
-
-@ValidatorConstraint({ name: 'NotSameAsIdentifier' })
-class NotSameAsIdentifierConstraint implements ValidatorConstraintInterface {
-  validate(value: any, args: ValidationArguments) {
-    const [identifierProperty] = args.constraints;
-    const identifierValue = (args.object as any)[identifierProperty];
-    if (typeof value !== 'string' || typeof identifierValue !== 'string') return true;
-    return value.toLowerCase() !== identifierValue.toLowerCase();
-  }
-}

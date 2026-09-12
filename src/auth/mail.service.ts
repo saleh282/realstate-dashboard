@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 
@@ -8,25 +8,32 @@ export class MailService {
   private transporter;
 
   constructor(private config: ConfigService) {
-    this.transporter = nodemailer.createTransport({
-      host: this.config.get('MAIL_HOST'),
-      port: Number(this.config.get('MAIL_PORT')),
-      secure: false,
+    const host = this.config.get<string>('MAIL_HOST');
+    const port = Number(this.config.get<string>('MAIL_PORT'));
+    const user = this.config.get<string>('MAIL_USER');
+    const pass = this.config.get<string>('MAIL_PASS');
+    const secure = this.config.get<string>('MAIL_SECURE') === 'true';
+    const rejectUnauthorized = this.config.get<string>('MAIL_TLS_REJECT_UNAUTHORIZED') !== 'false';
+
+    this.transporter = host && port && user && pass ? nodemailer.createTransport({
+      host,
+      port,
+      secure,
       auth: {
-        user: this.config.get('MAIL_USER'),
-        pass: this.config.get('MAIL_PASS'),
+        user,
+        pass,
       },
-      // بعض الشبكات المحلية أو برامج الأنتي فايروس بتعمل SSL inspection
-      // وبتحط شهادة self-signed بتخلي Node يرفض الاتصال بالغلط.
-      // ⚠️ ده تجاوز مؤقت للتطوير المحلي بس على جهازك — لازم يتشال قبل رفع
-      // المشروع على أي سيرفر حقيقي (production).
-      tls: { rejectUnauthorized: false },
-    });
+      tls: { rejectUnauthorized },
+    }) : null;
   }
 
   async sendOtp(email: string, code: string) {
+    if (!this.transporter) {
+      throw new ServiceUnavailableException('خدمة البريد غير مهيأة حالياً');
+    }
+
     try {
-      await this.transporter.sendMail({
+      const info = await this.transporter.sendMail({
         from: this.config.get('MAIL_FROM'),
         to: email,
         subject: 'رمز التحقق - منصة مزادات العقار',
@@ -36,9 +43,26 @@ export class MailService {
                  <p>صالح لمدة 5 دقائق. لا تشارك هذا الرمز مع أي شخص.</p>
                </div>`,
       });
-    } catch (err) {
-      // Don't leak SMTP errors to the client; log for ops instead
-      this.logger.error(`Failed to send OTP email to ${email}: ${err.message}`);
+      this.logger.log(`OTP email accepted by SMTP${info?.messageId ? ` (messageId: ${info.messageId})` : ''}`);
+    } catch {
+      this.logger.error('SMTP rejected OTP email delivery');
+      throw new ServiceUnavailableException('تعذر إرسال رسالة التحقق، حاول مرة أخرى لاحقاً');
+    }
+  }
+
+  async sendTestEmail(email: string): Promise<void> {
+    if (!this.transporter) throw new ServiceUnavailableException('خدمة البريد غير مهيأة حالياً');
+    try {
+      const info = await this.transporter.sendMail({
+        from: this.config.get('MAIL_FROM'),
+        to: email,
+        subject: 'اختبار إعداد البريد - منصة مزادات العقار',
+        text: 'نجح اتصال SMTP. لا تحتوي هذه الرسالة على رمز تحقق.',
+      });
+      this.logger.log(`SMTP test email accepted${info?.messageId ? ` (messageId: ${info.messageId})` : ''}`);
+    } catch {
+      this.logger.error('SMTP test email delivery failed');
+      throw new ServiceUnavailableException('فشل اختبار إرسال البريد');
     }
   }
 }

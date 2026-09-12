@@ -5,10 +5,14 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { KycModule } from './kyc/kyc.module';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard } from '@nestjs/throttler';
+import { validateEnvironment } from './config/environment.validation';
+import { CloudinaryModule } from './config/cloudinary.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnvironment }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -22,6 +26,8 @@ import { KycModule } from './kyc/kyc.module';
     AuthModule,
     UsersModule,
     KycModule,
+    CloudinaryModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

@@ -1,89 +1,95 @@
-# Real Estate Auction Backend — Auth + KYC (منصة مزادات العقار)
+# Real Estate Auction Backend — Phase 0 baseline
 
-NestJS + MongoDB backend covering the 6 screens: login, forgot password, OTP
-verification, reset password, register, and national-ID KYC.
+NestJS + MongoDB backend for authentication and KYC. Phase 0 adds production-safe configuration, role authorization, secure OTP handling, real SMTP delivery, and request throttling.
 
-## Setup
+## Local setup
+
+1. Copy `.env.example` to `.env` and replace every placeholder needed by the features you use.
+2. Run `npm install`.
+3. Run `npm run typecheck` and `npm test`.
+4. Run `npm run start:dev` only when you intentionally want the API server.
+
+All routes use the `/api/v1` prefix.
+
+## Environment
+
+Always required:
+
+- `NODE_ENV=development|test|production`
+- `MONGO_URI`
+- `JWT_ACCESS_SECRET`, `JWT_ACCESS_EXPIRES_IN`
+- `JWT_REFRESH_SECRET`, `JWT_REFRESH_EXPIRES_IN`
+
+Production additionally requires complete SMTP and Cloudinary values plus `CORS_ORIGINS`. JWT secrets must be at least 32 characters. `MAIL_TLS_REJECT_UNAUTHORIZED=false` is rejected in production.
+
+SMTP variables:
+
+- `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`
+- `MAIL_USER`, `MAIL_PASS`
+- `MAIL_FROM`
+- `MAIL_TLS_REJECT_UNAUTHORIZED` (normally `true`)
+- `TEST_EMAIL_TO` only for the private CLI mail test
+
+SMTP is optional in development only when all SMTP variables are omitted. Email registration/reset attempts fail with a controlled `503` if SMTP is unavailable; the API never reports a successful delivery in that case.
+
+Cloudinary variables:
+
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
+
+KYC images are checked for JPEG/PNG/WebP MIME and magic bytes, retain the 5 MB limit, and upload with Cloudinary authenticated delivery. New uploads store their `public_id` metadata so account deletion can remove them. Old records that contain only URLs cannot be automatically cleaned up.
+
+## Development admin seed
+
+Configure:
+
+```dotenv
+ADMIN_EMAIL=admin@example.test
+ADMIN_PASSWORD=ChangeThisDev1!
+ADMIN_FULL_NAME=Development Admin
+```
+
+Use your own development password; never commit a real production secret. Then run:
 
 ```bash
-npm install
-cp .env.example .env   # fill in Mongo URI, JWT secrets, Cloudinary, SMTP
-npm run start:dev
+npm run seed:admin
 ```
 
-All routes are prefixed with `/api/v1`.
+The seed is idempotent. It creates a verified admin if the email is absent, or promotes the existing account to `admin`. It does not reset an existing password. Log in through `POST /api/v1/auth/login` with `ADMIN_EMAIL` and the password originally used to create that account.
 
-## Flow → Endpoint map
+## SMTP verification
 
-| Screen | Endpoint |
-|---|---|
-| 1. تسجيل الدخول (Login) | `POST /auth/login` |
-| 4. نسيت كلمة المرور (Forgot password) | `POST /auth/forgot-password` |
-| 3. رمز التحقق (OTP) | `POST /auth/verify-otp` |
-| 2. تعيين كلمة مرور جديدة (Reset password) | `POST /auth/reset-password` |
-| 5. إنشاء حساب جديد, step 1 (Register) | `POST /auth/register` |
-| 6. التحقق من الهوية KYC, step 2 | `POST /kyc/submit` (multipart) |
+Set the SMTP variables and `TEST_EMAIL_TO` to an inbox you control, then run:
 
-## Auth endpoints
-
-### `POST /auth/register`
-```json
-{ "fullName": "...", "identifier": "email or 05xxxxxxxx", "password": "...", "confirmPassword": "..." }
-```
-→ `{ accessToken, refreshToken }`. Frontend should proceed straight to the KYC screen after this.
-
-### `POST /auth/login`
-```json
-{ "identifier": "...", "password": "...", "rememberMe": true }
-```
-→ `{ accessToken, refreshToken, user }`
-
-### `POST /auth/forgot-password`
-```json
-{ "identifier": "..." }
-```
-Sends a 6-digit OTP by email or SMS depending on which was registered. Always returns a generic success message (doesn't reveal if the account exists).
-
-### `POST /auth/resend-otp`
-Same body as forgot-password. Blocked by a cooldown (`OTP_RESEND_SECONDS`, default 60s — matches the countdown on the OTP screen).
-
-### `POST /auth/verify-otp`
-```json
-{ "identifier": "...", "otp": "123456" }
-```
-→ `{ resetToken }` — a short-lived (10 min) token used only for the next call.
-
-### `POST /auth/reset-password`
-```json
-{ "resetToken": "...", "newPassword": "...", "confirmPassword": "..." }
+```bash
+npm run mail:test
 ```
 
-### `POST /auth/refresh`
-```json
-{ "refreshToken": "..." }
+This command sends a message without an OTP and does not expose a public test endpoint. Successful SMTP acceptance and controlled failure are logged without recipient credentials or message content.
+
+## Authorization
+
+Users default to role `user`. Admin accounts use role `admin`. JWT authentication attaches the current database role; `RolesGuard` performs authorization separately.
+
+- `POST /kyc/submit` and `GET /kyc/status`: authenticated users.
+- `POST /kyc/review/:userId`: authenticated admins only (`401` unauthenticated, `403` normal user).
+
+No other current endpoint is an admin operation.
+
+## Throttling and HTTP hardening
+
+`ThrottlerGuard` is globally active at 20 requests/minute. Sensitive auth routes have tighter per-minute limits: register/forgot/resend at 3, and login/verify/reset at 5. Helmet is active. Development CORS allows local clients unless `CORS_ORIGINS` is set; production requires a comma-separated allowlist.
+
+## SMS limitation
+
+SMS remains intentionally unimplemented in Phase 0. The stub never logs an OTP or phone number and returns a controlled `503`; it does not claim delivery. Phone-flow normalization and provider integration remain Phase 1 work.
+
+## Commands
+
+```bash
+npm run typecheck
+npm test
+npm run seed:admin
+npm run mail:test
 ```
-
-### `POST /auth/logout`
-Requires `Authorization: Bearer <accessToken>`.
-
-## KYC endpoints (require `Authorization: Bearer <accessToken>`)
-
-### `POST /kyc/submit`
-`multipart/form-data` with three file fields: `idFront`, `idBack`, `selfie` (max 5MB each). Uploads to Cloudinary and sets `kycStatus` to `pending`.
-
-### `GET /kyc/status`
-→ `{ kycStatus, kycSubmittedAt, kycReviewedAt, kycRejectionReason }`
-`kycStatus` is one of `not_submitted | pending | verified | rejected`.
-
-### `POST /kyc/review/:userId`
-Back-office endpoint to approve/reject — **add an admin-role guard before shipping this**, it currently only requires being logged in.
-```json
-{ "decision": "verified" | "rejected", "rejectionReason": "..." }
-```
-
-## Notes
-
-- The identifier field (email or phone) is auto-detected everywhere via regex — same behavior as the app's combined input.
-- SMS sending is a stub (`sms.service.ts`) — wire up Unifonic/Msegat/Twilio for real phone OTP delivery.
-- Password reset uses a two-step token handoff (OTP → resetToken → new password) so the OTP can't be replayed.
-- Rate limiting: `forgot-password` and `resend-otp` are throttled to 3 requests/min per IP on top of the per-user resend cooldown.

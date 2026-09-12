@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 
 /**
  * Stub SMS sender. Since the identifier field accepts a Saudi phone number
@@ -9,8 +9,8 @@ import { Injectable, Logger } from '@nestjs/common';
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
 
-  async sendOtp(phone: string, code: string) {
-    // TODO: integrate real SMS provider
-    this.logger.log(`[SMS STUB] OTP ${code} would be sent to ${phone}`);
+  async sendOtp(_phone: string, _code: string): Promise<never> {
+    this.logger.warn('Phone OTP requested, but no SMS provider is configured');
+    throw new ServiceUnavailableException('إرسال رمز التحقق عبر الهاتف غير متاح حالياً');
   }
 }

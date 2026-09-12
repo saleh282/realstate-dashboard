@@ -1,8 +1,7 @@
-import { IsIn, IsNotEmpty, IsString, Length, Matches } from 'class-validator';
+import { IsIn, IsNotEmpty, IsString, Length } from 'class-validator';
 import {
+  IsApplicationPassword,
   Match,
-  STRONG_PASSWORD_REGEX,
-  STRONG_PASSWORD_MESSAGE,
 } from '../../common/validators/password.validator';
 
 export enum OtpPurpose {
@@ -50,7 +49,7 @@ export class ResetPasswordDto {
   resetToken: string;
 
   @IsNotEmpty({ message: 'كلمة المرور الجديدة مطلوبة' })
-  @Matches(STRONG_PASSWORD_REGEX, { message: STRONG_PASSWORD_MESSAGE })
+  @IsApplicationPassword()
   newPassword: string;
 
   @IsNotEmpty({ message: 'تأكيد كلمة المرور مطلوب' })

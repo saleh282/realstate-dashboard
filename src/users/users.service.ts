@@ -10,6 +10,7 @@ import { User, UserDocument } from './schemas/user.schema';
 import { RefreshTokenService } from '../refresh-token/refresh-token.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
+import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
 
 @Injectable()
 export class UsersService {
@@ -17,6 +18,7 @@ export class UsersService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private refreshTokenService: RefreshTokenService,
     private auditLogService: AuditLogService,
+    private cloudinaryAssetService: CloudinaryAssetService,
   ) {}
 
   static isEmail(identifier: string): boolean {
@@ -57,6 +59,7 @@ export class UsersService {
       email: user.email,
       phone: user.phone,
       emailVerified: user.emailVerified,
+      role: user.role,
       kycStatus: user.kycStatus,
       idFrontUrl: user.idFrontUrl,
       idBackUrl: user.idBackUrl,
@@ -79,6 +82,14 @@ export class UsersService {
     if (!isMatch) {
       throw new UnauthorizedException('كلمة المرور غير صحيحة لتأكيد حذف الحساب');
     }
+
+    // Delete KYC assets whose Cloudinary identifiers are available before removing
+    // their only database references. Legacy URL-only assets are documented separately.
+    await this.cloudinaryAssetService.deleteAssets([
+      user.idFrontAsset,
+      user.idBackAsset,
+      user.selfieAsset,
+    ]);
 
     // 1. Revoke all refresh tokens
     await this.refreshTokenService.revokeAllForUser(userId);

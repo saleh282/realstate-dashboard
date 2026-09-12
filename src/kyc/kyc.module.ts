@@ -3,11 +3,12 @@ import { PassportModule } from '@nestjs/passport';
 import { UsersModule } from '../users/users.module';
 import { KycService } from './kyc.service';
 import { KycController } from './kyc.controller';
-import { CloudinaryProvider } from '../config/cloudinary.provider';
+import { CloudinaryModule } from '../config/cloudinary.module';
+import { RolesGuard } from '../auth/roles.guard';
 
 @Module({
-  imports: [UsersModule, PassportModule],
+  imports: [UsersModule, PassportModule, CloudinaryModule],
   controllers: [KycController],
-  providers: [KycService, CloudinaryProvider],
+  providers: [KycService, RolesGuard],
 })
 export class KycModule {}
