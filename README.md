@@ -1,4 +1,4 @@
-# Real Estate Auction Backend — Phase 0 baseline
+# Real Estate Auction Backend — Phase 0 baseline and Phase 1 accounts
 
 NestJS + MongoDB backend for authentication and KYC. Phase 0 adds production-safe configuration, role authorization, secure OTP handling, real SMTP delivery, and request throttling.
 
@@ -38,7 +38,7 @@ Cloudinary variables:
 - `CLOUDINARY_API_KEY`
 - `CLOUDINARY_API_SECRET`
 
-KYC images are checked for JPEG/PNG/WebP MIME and magic bytes, retain the 5 MB limit, and upload with Cloudinary authenticated delivery. New uploads store their `public_id` metadata so account deletion can remove them. Old records that contain only URLs cannot be automatically cleaned up.
+KYC images are checked for JPEG/PNG/WebP MIME and magic bytes, retain the 5 MB limit, and upload with Cloudinary authenticated delivery. New uploads store their `public_id` metadata so account deletion can remove them. The admin dashboard retrieves documents through an admin-protected streaming endpoint; direct Cloudinary URLs are not returned by the admin details response. Old records that contain only URLs cannot be streamed or automatically cleaned up until their asset metadata is migrated.
 
 ## Development admin seed
 
@@ -74,8 +74,11 @@ Users default to role `user`. Admin accounts use role `admin`. JWT authenticatio
 
 - `POST /kyc/submit` and `GET /kyc/status`: authenticated users.
 - `POST /kyc/review/:userId`: authenticated admins only (`401` unauthenticated, `403` normal user).
+- `/admin/users`: admin-only listing, details, status, session revocation, role management, and protected deletion.
+- `/admin/kyc`: admin-only listing, review, and authenticated document streaming.
+- `/admin/audit-logs` and `/admin/dashboard/metrics`: admin-only audit and metrics APIs.
 
-No other current endpoint is an admin operation.
+Suspended accounts are rejected on login, access-token validation, and token refresh. The refresh endpoint expects `{ "refreshToken": "..." }` in its JSON request body.
 
 ## Throttling and HTTP hardening
 
@@ -83,7 +86,18 @@ No other current endpoint is an admin operation.
 
 ## SMS limitation
 
-SMS remains intentionally unimplemented in Phase 0. The stub never logs an OTP or phone number and returns a controlled `503`; it does not claim delivery. Phone-flow normalization and provider integration remain Phase 1 work.
+SMS remains intentionally unimplemented. The stub never logs an OTP or phone number and returns a controlled `503`; it does not claim delivery. Phone identifiers are now normalized, but production phone OTP delivery still requires a real provider.
+
+## Phase 1 account contracts
+
+- Email identifiers are trimmed and lowercased.
+- Egyptian mobile numbers (`01...`, `20...`, `0020...`, `+20...`) are normalized to `+20...`.
+- Saudi mobile numbers (`05...`, `966...`, `00966...`, `+966...`) are normalized to `+966...`.
+- Lookup keeps compatibility with common legacy local/international phone representations; new users are stored canonically.
+- `PATCH /api/v1/users/me` updates the authenticated user's full name. Email/phone changes remain intentionally unavailable until a re-verification flow is added.
+- `PATCH /api/v1/users/me/password` verifies the current password, applies the shared 8-character minimum policy, hashes with the existing bcrypt flow, and revokes all refresh sessions.
+- Refresh tokens are single-use. Concurrent requests cannot consume the same stored token more than once.
+- Authentication failures expose stable machine-readable `code` values, including `ACCOUNT_NOT_VERIFIED`, `ACCOUNT_SUSPENDED`, `INVALID_CREDENTIALS`, and the OTP error codes.
 
 ## Commands
 

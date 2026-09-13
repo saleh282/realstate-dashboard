@@ -24,8 +24,10 @@ export class RefreshTokenService {
       const isMatch = await bcrypt.compare(refreshToken, doc.tokenHash);
       if (isMatch) {
         const device = doc.device;
-        await doc.deleteOne();
-        return { device };
+        // Only one concurrent refresh request may consume this single-use token.
+        const consumed = await this.tokenModel.deleteOne({ _id: doc._id }).exec();
+        if (consumed.deletedCount === 1) return { device };
+        break;
       }
     }
 

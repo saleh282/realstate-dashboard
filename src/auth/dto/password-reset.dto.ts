@@ -3,6 +3,7 @@ import {
   IsApplicationPassword,
   Match,
 } from '../../common/validators/password.validator';
+import { IsApplicationIdentifier } from '../../common/validators/identifier.validator';
 
 export enum OtpPurpose {
   REGISTER = 'register',
@@ -11,13 +12,13 @@ export enum OtpPurpose {
 
 export class ForgotPasswordDto {
   @IsNotEmpty({ message: 'البريد الإلكتروني أو رقم الهاتف مطلوب' })
-  @IsString()
+  @IsApplicationIdentifier()
   identifier: string;
 }
 
 export class ResendOtpDto {
   @IsNotEmpty()
-  @IsString()
+  @IsApplicationIdentifier()
   identifier: string;
 
   // نفس منطق verify-otp: لازم نعرف الغرض عشان نبعت للـ otp_verifications الصح
@@ -28,7 +29,7 @@ export class ResendOtpDto {
 
 export class VerifyOtpDto {
   @IsNotEmpty()
-  @IsString()
+  @IsApplicationIdentifier()
   identifier: string;
 
   @IsNotEmpty({ message: 'رمز التحقق مطلوب' })

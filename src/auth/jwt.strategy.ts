@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
@@ -18,6 +18,9 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   async validate(payload: { sub: string; identifier: string; role?: UserRole }) {
     const user = await this.usersService.findById(payload.sub);
     if (!user) throw new UnauthorizedException('المستخدم غير موجود');
+    if (user.isActive === false) {
+      throw new ForbiddenException('تم تجميد هذا الحساب من قِبل الإدارة');
+    }
 
     // Authentication establishes the current database role; RolesGuard makes
     // the separate authorization decision for protected operations.

@@ -7,6 +7,13 @@ type Environment = Record<string, unknown>;
 
 const durationPattern = /^\d+[smhd]$/;
 const urlPattern = /^https?:\/\//i;
+const emailAddressPattern = /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/;
+
+function isValidMailbox(value: string): boolean {
+  if (emailAddressPattern.test(value)) return true;
+  const namedMailbox = /^(?:"[^"\r\n]+"|[^<>\r\n]+)\s*<([^<>\s]+)>$/.exec(value);
+  return Boolean(namedMailbox && emailAddressPattern.test(namedMailbox[1]));
+}
 
 function valueOf(config: Environment, key: string): string {
   return String(config[key] ?? '').trim();
@@ -65,6 +72,10 @@ export function validateEnvironment(config: Environment): Environment {
   }
   validateBoolean(config, 'MAIL_SECURE', errors);
   validateBoolean(config, 'MAIL_TLS_REJECT_UNAUTHORIZED', errors);
+  const mailFrom = valueOf(config, 'MAIL_FROM');
+  if (mailFrom && !isValidMailbox(mailFrom)) {
+    errors.push('MAIL_FROM must be an email address or a named mailbox');
+  }
   if (
     nodeEnv === 'production' &&
     valueOf(config, 'MAIL_TLS_REJECT_UNAUTHORIZED').toLowerCase() === 'false'

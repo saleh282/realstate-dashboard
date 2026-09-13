@@ -21,4 +21,105 @@ export class AuditLogService {
       this.logger.warn(`Failed to write audit log (${action}): ${err.message}`);
     }
   }
+
+  async logAdminAction(
+    action: AuditAction,
+    actorUserId: string,
+    targetUserId: string,
+    reason: string,
+    ip?: string,
+  ): Promise<void> {
+    try {
+      await this.auditModel.create({
+        action,
+        userId: new Types.ObjectId(actorUserId),
+        actorUserId: new Types.ObjectId(actorUserId),
+        targetUserId: new Types.ObjectId(targetUserId),
+        reason,
+        ip: ip ?? 'unknown',
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to write admin audit log (${action})`);
+    }
+  }
+
+  async listForAdmin(options: {
+    page?: number;
+    limit?: number;
+    action?: string;
+    targetUserId?: string;
+    actorUserId?: string;
+  }) {
+    const page = Math.max(Number(options.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(options.limit) || 20, 1), 100);
+    const filter: any = {};
+
+    if (options.action && options.action !== 'all') {
+      filter.action = options.action;
+    }
+    if (options.targetUserId && Types.ObjectId.isValid(options.targetUserId)) {
+      filter.targetUserId = new Types.ObjectId(options.targetUserId);
+    }
+    if (options.actorUserId && Types.ObjectId.isValid(options.actorUserId)) {
+      filter.actorUserId = new Types.ObjectId(options.actorUserId);
+    }
+
+    const [logs, total] = await Promise.all([
+      this.auditModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('actorUserId', 'fullName email phone role')
+        .populate('targetUserId', 'fullName email phone role')
+        .lean()
+        .exec(),
+      this.auditModel.countDocuments(filter).exec(),
+    ]);
+
+    return {
+      message: 'تم تحميل سجلات العمليات بنجاح',
+      items: logs.map((log: any) => ({
+        id: log._id.toString(),
+        action: log.action,
+        ip: log.ip,
+        reason: log.reason,
+        actorUserId: log.actorUserId?._id?.toString() ?? log.actorUserId?.toString(),
+        actorName: log.actorUserId?.fullName,
+        actorEmail: log.actorUserId?.email,
+        targetUserId: log.targetUserId?._id?.toString() ?? log.targetUserId?.toString(),
+        targetName: log.targetUserId?.fullName,
+        targetEmail: log.targetUserId?.email,
+        createdAt: log.createdAt,
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getRecentForAdmin(limit = 5) {
+    const logs = await this.auditModel
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate('actorUserId', 'fullName email')
+      .populate('targetUserId', 'fullName email')
+      .lean()
+      .exec();
+
+    return logs.map((log: any) => ({
+      id: log._id.toString(),
+      action: log.action,
+      ip: log.ip,
+      reason: log.reason,
+      actorName: log.actorUserId?.fullName,
+      targetName: log.targetUserId?.fullName,
+      createdAt: log.createdAt,
+    }));
+  }
+
 }

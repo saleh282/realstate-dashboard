@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
+import { AuthErrorCode } from '../common/errors/auth-error-codes';
 import {
   OtpVerification,
   OtpVerificationDocument,
@@ -40,7 +41,11 @@ export class OtpVerificationService {
       const secondsSince = (Date.now() - (last as any).createdAt.getTime()) / 1000;
       if (secondsSince < this.resendSeconds) {
         const wait = Math.ceil(this.resendSeconds - secondsSince);
-        throw new BadRequestException(`يرجى الانتظار ${wait} ثانية قبل إعادة الإرسال`);
+        throw new BadRequestException({
+          message: `يرجى الانتظار ${wait} ثانية قبل إعادة الإرسال`,
+          code: AuthErrorCode.OTP_RESEND_TOO_SOON,
+          retryAfterSeconds: wait,
+        });
       }
     }
   }
@@ -77,20 +82,32 @@ export class OtpVerificationService {
       .exec();
 
     if (!otpDoc) {
-      throw new BadRequestException('لم يتم إرسال رمز تحقق، يرجى طلب رمز جديد');
+      throw new BadRequestException({
+        message: 'لم يتم إرسال رمز تحقق، يرجى طلب رمز جديد',
+        code: AuthErrorCode.OTP_NOT_REQUESTED,
+      });
     }
     if (otpDoc.expiresAt.getTime() < Date.now()) {
-      throw new BadRequestException('انتهت صلاحية رمز التحقق، يرجى طلب رمز جديد');
+      throw new BadRequestException({
+        message: 'انتهت صلاحية رمز التحقق، يرجى طلب رمز جديد',
+        code: AuthErrorCode.OTP_EXPIRED,
+      });
     }
     if (otpDoc.attempts >= 5) {
-      throw new BadRequestException('تم تجاوز عدد المحاولات المسموح بها، يرجى طلب رمز جديد');
+      throw new BadRequestException({
+        message: 'تم تجاوز عدد المحاولات المسموح بها، يرجى طلب رمز جديد',
+        code: AuthErrorCode.OTP_ATTEMPTS_EXCEEDED,
+      });
     }
 
     const isMatch = await bcrypt.compare(code, otpDoc.otpHash);
     if (!isMatch) {
       otpDoc.attempts += 1;
       await otpDoc.save();
-      throw new BadRequestException('رمز التحقق غير صحيح');
+      throw new BadRequestException({
+        message: 'رمز التحقق غير صحيح',
+        code: AuthErrorCode.OTP_INVALID,
+      });
     }
 
     otpDoc.isUsed = true;

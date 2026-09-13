@@ -27,4 +27,40 @@ export class CloudinaryAssetService {
       throw new ServiceUnavailableException('تعذر حذف مستندات التحقق بأمان، حاول مرة أخرى لاحقاً');
     }
   }
+
+  async downloadAuthenticatedAsset(
+    asset: KycAssetMetadata,
+  ): Promise<{ buffer: Buffer; contentType: string }> {
+    const signedUrl = this.cloudinary.url(asset.publicId, {
+      secure: true,
+      sign_url: true,
+      resource_type: asset.resourceType,
+      type: asset.deliveryType,
+    });
+
+    try {
+      const response = await fetch(signedUrl, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) throw new Error('Cloudinary download rejected');
+
+      const contentType = response.headers.get('content-type')?.split(';')[0] ?? '';
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) {
+        throw new Error('Unexpected KYC asset content type');
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (!buffer.length || buffer.length > 5 * 1024 * 1024) {
+        throw new Error('Unexpected KYC asset size');
+      }
+
+      return { buffer, contentType };
+    } catch {
+      this.logger.error('Cloudinary authenticated KYC asset download failed');
+      throw new ServiceUnavailableException(
+        'تعذر تحميل مستند التحقق بأمان، حاول مرة أخرى لاحقاً',
+      );
+    }
+  }
 }

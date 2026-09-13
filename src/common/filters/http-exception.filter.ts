@@ -17,6 +17,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string = 'حدث خطأ غير متوقع، حاول مرة أخرى';
     let errors: string[] | undefined;
+    let responseMetadata: Record<string, unknown> = {};
 
     if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
@@ -33,6 +34,21 @@ export class HttpExceptionFilter implements ExceptionFilter {
         } else if (resObj.message) {
           message = resObj.message;
         }
+
+        const exposedKeys = [
+          'code',
+          'isVerified',
+          'requiresVerification',
+          'otpSent',
+          'identifier',
+          'expiresInMinutes',
+          'retryAfterSeconds',
+        ];
+        responseMetadata = Object.fromEntries(
+          exposedKeys
+            .filter((key) => Object.prototype.hasOwnProperty.call(resObj, key))
+            .map((key) => [key, resObj[key]]),
+        );
       }
     }
 
@@ -40,6 +56,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       success: false,
       message,
       ...(errors ? { errors } : {}),
+      ...responseMetadata,
     });
   }
 }

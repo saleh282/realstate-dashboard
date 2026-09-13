@@ -33,9 +33,17 @@ export class User {
   @Prop({ required: true, enum: UserRole, default: UserRole.USER, index: true })
   role: UserRole;
 
- 
   @Prop({ default: false })
   emailVerified: boolean;
+
+  @Prop({ default: true })
+  isActive: boolean;
+
+  @Prop({ trim: true })
+  suspendReason?: string;
+
+  @Prop()
+  suspendedAt?: Date;
 
   // ---- Brute-force login protection ----
   @Prop({ default: 0, select: false })
