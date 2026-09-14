@@ -10,6 +10,7 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 import { validateEnvironment } from './config/environment.validation';
 import { CloudinaryModule } from './config/cloudinary.module';
 import { AdminModule } from './admin/admin.module';
+import { PropertyTypesModule } from './property-types/property-types.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { AdminModule } from './admin/admin.module';
     KycModule,
     CloudinaryModule,
     AdminModule,
+    PropertyTypesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

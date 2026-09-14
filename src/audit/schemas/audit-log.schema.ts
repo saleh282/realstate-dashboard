@@ -18,6 +18,9 @@ export enum AuditAction {
   ADMIN_USER_SESSIONS_REVOKED = 'admin_user_sessions_revoked',
   ADMIN_USER_ROLE_UPDATED = 'admin_user_role_updated',
   ADMIN_KYC_REVIEWED = 'admin_kyc_reviewed',
+  ADMIN_PROPERTY_TYPE_CREATED = 'admin_property_type_created',
+  ADMIN_PROPERTY_TYPE_UPDATED = 'admin_property_type_updated',
+  ADMIN_PROPERTY_TYPE_DELETED = 'admin_property_type_deleted',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false }, collection: 'audit_logs' })
@@ -39,6 +42,9 @@ export class AuditLog {
 
   @Prop({ maxlength: 500 })
   reason?: string;
+
+  @Prop({ maxlength: 100 })
+  targetResourceId?: string;
 }
 
 export const AuditLogSchema = SchemaFactory.createForClass(AuditLog);
