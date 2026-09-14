@@ -15,6 +15,7 @@ import { AmenitiesModule } from './amenities/amenities.module';
 import { PropertyOptionsModule } from './property-options/property-options.module';
 import { GovernoratesModule } from './governorates/governorates.module';
 import { PropertyFormOptionsModule } from './property-form-options/property-form-options.module';
+import { PropertiesModule } from './properties/properties.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { PropertyFormOptionsModule } from './property-form-options/property-form
     PropertyOptionsModule,
     GovernoratesModule,
     PropertyFormOptionsModule,
+    PropertiesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

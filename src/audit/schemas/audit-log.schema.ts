@@ -30,6 +30,7 @@ export enum AuditAction {
   ADMIN_GOVERNORATE_CREATED = 'admin_governorate_created',
   ADMIN_GOVERNORATE_UPDATED = 'admin_governorate_updated',
   ADMIN_GOVERNORATE_DELETED = 'admin_governorate_deleted',
+  ADMIN_PROPERTY_STATUS_UPDATED = 'admin_property_status_updated',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false }, collection: 'audit_logs' })

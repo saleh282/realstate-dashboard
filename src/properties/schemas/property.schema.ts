@@ -1,0 +1,57 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument, Types } from 'mongoose';
+
+export type PropertyDocument = HydratedDocument<Property>;
+
+@Schema({ _id: false })
+export class PropertyAsset {
+  @Prop({ required: true }) url: string;
+  @Prop({ required: true }) publicId: string;
+  @Prop({ required: true, enum: ['image', 'raw'] }) resourceType: 'image' | 'raw';
+  @Prop() label?: string;
+}
+
+const PropertyAssetSchema = SchemaFactory.createForClass(PropertyAsset);
+
+@Schema({ timestamps: true, collection: 'properties' })
+export class Property {
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true }) ownerId: Types.ObjectId;
+  @Prop({ required: true, enum: ['sale', 'rent'], index: true }) operationType: string;
+  @Prop({ required: true, trim: true, maxlength: 50, index: true }) propertyTypeCode: string;
+  @Prop({ required: true, trim: true, maxlength: 150 }) title: string;
+  @Prop({ required: true, trim: true, maxlength: 3000 }) description: string;
+  @Prop({ required: true, trim: true, maxlength: 50, index: true }) governorateCode: string;
+  @Prop({ required: true, trim: true, maxlength: 100 }) city: string;
+  @Prop({ required: true, trim: true, maxlength: 100 }) district: string;
+  @Prop({ trim: true, maxlength: 200 }) street?: string;
+  @Prop({ trim: true, maxlength: 500 }) additionalAddressDetails?: string;
+  @Prop({ required: true, min: -90, max: 90 }) latitude: number;
+  @Prop({ required: true, min: -180, max: 180 }) longitude: number;
+  @Prop({ required: true, min: 1 }) area: number;
+  @Prop({ required: true, min: 0, max: 100 }) bedrooms: number;
+  @Prop({ required: true, min: 0, max: 100 }) livingRooms: number;
+  @Prop({ required: true, min: 0, max: 100 }) kitchens: number;
+  @Prop({ required: true, min: 0, max: 100 }) bathrooms: number;
+  @Prop({ required: true, min: -10, max: 300 }) floor: number;
+  @Prop({ required: true, min: 1, max: 300 }) totalFloors: number;
+  @Prop({ required: true, min: 1800, max: 2200 }) buildingYear: number;
+  @Prop({ required: true, trim: true, maxlength: 50 }) finishingStatusCode: string;
+  @Prop({ required: true, trim: true, maxlength: 50 }) deliveryStatusCode: string;
+  @Prop({ type: [String], default: [] }) amenityCodes: string[];
+  @Prop({ required: true, min: 1 }) totalPrice: number;
+  @Prop({ required: true, min: 0, default: 0 }) downPayment: number;
+  @Prop({ default: false }) isPriceNegotiable: boolean;
+  @Prop({ required: true, trim: true, maxlength: 50 }) paymentMethodCode: string;
+  @Prop({ type: [PropertyAssetSchema], required: true }) images: PropertyAsset[];
+  @Prop({ required: true, min: 0 }) coverImageIndex: number;
+  @Prop({ type: PropertyAssetSchema }) titleDeed?: PropertyAsset;
+  @Prop({ required: true, enum: ['owner', 'office', 'broker'] }) advertiserType: string;
+  @Prop({ default: false }) hidePhone: boolean;
+  @Prop({ required: true, enum: ['pending_review', 'approved', 'rejected', 'hidden'], default: 'pending_review', index: true }) status: string;
+  @Prop({ trim: true, maxlength: 1000 }) reviewReason?: string;
+  @Prop({ type: Types.ObjectId, ref: 'User' }) reviewedBy?: Types.ObjectId;
+  @Prop() reviewedAt?: Date;
+}
+
+export const PropertySchema = SchemaFactory.createForClass(Property);
+PropertySchema.index({ createdAt: -1 });
