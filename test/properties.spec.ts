@@ -58,4 +58,28 @@ describe('property publishing validation', () => {
     expect(result.property.status).toBe('approved');
     expect(audit.logAdminResourceAction).toHaveBeenCalledWith('admin_property_status_updated', '64b000000000000000000002', '64b000000000000000000099', expect.stringContaining('approved'), undefined);
   });
+
+  it('lets only the owner hide a property without changing review status', async () => {
+    const item = {
+      _id: { toString: () => '64b000000000000000000099' },
+      status: 'approved', isOwnerVisible: false, images: [],
+    };
+    const lean = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(item) });
+    const findOneAndUpdate = jest.fn().mockReturnValue({ lean });
+    const instance = service({ properties: { findOneAndUpdate } }) as any;
+
+    const result = await instance.updateOwnerVisibility(
+      '64b000000000000000000001',
+      '64b000000000000000000099',
+      false,
+    );
+
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: '64b000000000000000000099' }),
+      { isOwnerVisible: false },
+      expect.objectContaining({ new: true }),
+    );
+    expect(result.property.status).toBe('approved');
+    expect(result.property.isOwnerVisible).toBe(false);
+  });
 });

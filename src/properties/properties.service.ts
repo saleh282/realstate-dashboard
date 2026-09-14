@@ -70,6 +70,40 @@ export class PropertiesService {
 
   async listMine(ownerId: string) { const items = await this.properties.find({ ownerId: new Types.ObjectId(ownerId) }).sort({ createdAt: -1 }).lean().exec(); return { items: items.map(i => this.toPublic(i)) }; }
   async getMine(ownerId: string, id: string) { if (!Types.ObjectId.isValid(id)) throw new BadRequestException('معرّف العقار غير صالح'); const item = await this.properties.findOne({ _id: id, ownerId }).lean().exec(); if (!item) throw new NotFoundException('العقار غير موجود'); return { property: this.toPublic(item) }; }
+  async listPublished(options: { page?: number; limit?: number }) {
+    const page = Number.isFinite(options.page) ? Math.max(options.page!, 1) : 1;
+    const limit = Number.isFinite(options.limit) ? Math.min(Math.max(options.limit!, 1), 50) : 20;
+    const filter = { status: 'approved', isOwnerVisible: { $ne: false } };
+    const [items, total] = await Promise.all([
+      this.properties.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean().exec(),
+      this.properties.countDocuments(filter).exec(),
+    ]);
+    const [governorates, propertyTypes] = await Promise.all([
+      this.governorates.find({ code: { $in: [...new Set(items.map(item => item.governorateCode))] } }).lean().exec(),
+      this.propertyTypes.find({ code: { $in: [...new Set(items.map(item => item.propertyTypeCode))] } }).lean().exec(),
+    ]);
+    const governorateNames = new Map(governorates.map(item => [item.code, item.nameAr]));
+    const propertyTypeNames = new Map(propertyTypes.map(item => [item.code, item.nameAr]));
+    return {
+      items: items.map(item => ({
+        ...this.toPublic(item),
+        governorateNameAr: governorateNames.get(item.governorateCode) ?? item.governorateCode,
+        propertyTypeNameAr: propertyTypeNames.get(item.propertyTypeCode) ?? item.propertyTypeCode,
+      })),
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  async updateOwnerVisibility(ownerId: string, id: string, isVisible: boolean) {
+    this.assertId(id);
+    const item = await this.properties.findOneAndUpdate(
+      { _id: id, ownerId: new Types.ObjectId(ownerId) },
+      { isOwnerVisible: isVisible },
+      { new: true, runValidators: true },
+    ).lean().exec();
+    if (!item) throw new NotFoundException('العقار غير موجود');
+    return { message: isVisible ? 'تم إظهار العقار للمستخدمين' : 'تم إخفاء العقار عن المستخدمين', property: this.toPublic(item) };
+  }
   async listForAdmin(options: { page?: number; limit?: number; status?: string; search?: string }) {
     const page = Math.max(options.page || 1, 1);
     const limit = Math.min(Math.max(options.limit || 20, 1), 100);
@@ -110,7 +144,7 @@ export class PropertiesService {
 
   private assertId(id: string) { if (!Types.ObjectId.isValid(id)) throw new BadRequestException('معرّف العقار غير صالح'); }
   private upload(file: Express.Multer.File, folder: string): Promise<PropertyAsset> { return new Promise((resolve, reject) => { const resourceType = file.mimetype === 'application/pdf' ? 'raw' : 'image'; const stream = this.cloudinary.uploader.upload_stream({ folder, resource_type: resourceType }, (error, result) => error || !result ? reject(error ?? new Error('Upload failed')) : resolve({ url: result.secure_url, publicId: result.public_id, resourceType })); streamifier.createReadStream(file.buffer).pipe(stream); }); }
-  private toPublic(item: any) { return { id: item._id.toString(), operationType: item.operationType, propertyTypeCode: item.propertyTypeCode, title: item.title, description: item.description, governorateCode: item.governorateCode, city: item.city, district: item.district, area: item.area, totalPrice: item.totalPrice, images: item.images, coverImageIndex: item.coverImageIndex, status: item.status, reviewReason: item.reviewReason, reviewedAt: item.reviewedAt, createdAt: item.createdAt }; }
+  private toPublic(item: any) { return { id: item._id.toString(), operationType: item.operationType, propertyTypeCode: item.propertyTypeCode, title: item.title, description: item.description, governorateCode: item.governorateCode, city: item.city, district: item.district, area: item.area, bedrooms: item.bedrooms, bathrooms: item.bathrooms, floor: item.floor, totalPrice: item.totalPrice, images: item.images, coverImageIndex: item.coverImageIndex, hasTitleDeed: Boolean(item.titleDeed), advertiserType: item.advertiserType, isOwnerVisible: item.isOwnerVisible !== false, status: item.status, reviewReason: item.reviewReason, reviewedAt: item.reviewedAt, createdAt: item.createdAt }; }
   private toAdmin(item: any, detailed = false) {
     const populatedOwner = item.ownerId && typeof item.ownerId === 'object' && item.ownerId.fullName;
     const owner = populatedOwner ? { id: item.ownerId._id.toString(), fullName: item.ownerId.fullName, email: item.ownerId.email, phone: item.ownerId.phone } : undefined;

@@ -47,6 +47,7 @@ export class Property {
   @Prop({ type: PropertyAssetSchema }) titleDeed?: PropertyAsset;
   @Prop({ required: true, enum: ['owner', 'office', 'broker'] }) advertiserType: string;
   @Prop({ default: false }) hidePhone: boolean;
+  @Prop({ default: true, index: true }) isOwnerVisible: boolean;
   @Prop({ required: true, enum: ['pending_review', 'approved', 'rejected', 'hidden'], default: 'pending_review', index: true }) status: string;
   @Prop({ trim: true, maxlength: 1000 }) reviewReason?: string;
   @Prop({ type: Types.ObjectId, ref: 'User' }) reviewedBy?: Types.ObjectId;
