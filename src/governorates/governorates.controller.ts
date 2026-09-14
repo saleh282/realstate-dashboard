@@ -1,0 +1,1 @@
+import { Controller, Get } from '@nestjs/common'; import { GovernoratesService } from './governorates.service'; @Controller('governorates') export class GovernoratesController{constructor(private readonly service:GovernoratesService){} @Get() list(){return this.service.listPublic();}}

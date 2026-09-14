@@ -24,6 +24,12 @@ export enum AuditAction {
   ADMIN_AMENITY_CREATED = 'admin_amenity_created',
   ADMIN_AMENITY_UPDATED = 'admin_amenity_updated',
   ADMIN_AMENITY_DELETED = 'admin_amenity_deleted',
+  ADMIN_PROPERTY_OPTION_CREATED = 'admin_property_option_created',
+  ADMIN_PROPERTY_OPTION_UPDATED = 'admin_property_option_updated',
+  ADMIN_PROPERTY_OPTION_DELETED = 'admin_property_option_deleted',
+  ADMIN_GOVERNORATE_CREATED = 'admin_governorate_created',
+  ADMIN_GOVERNORATE_UPDATED = 'admin_governorate_updated',
+  ADMIN_GOVERNORATE_DELETED = 'admin_governorate_deleted',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false }, collection: 'audit_logs' })
