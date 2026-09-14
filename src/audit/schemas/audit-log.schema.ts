@@ -21,6 +21,9 @@ export enum AuditAction {
   ADMIN_PROPERTY_TYPE_CREATED = 'admin_property_type_created',
   ADMIN_PROPERTY_TYPE_UPDATED = 'admin_property_type_updated',
   ADMIN_PROPERTY_TYPE_DELETED = 'admin_property_type_deleted',
+  ADMIN_AMENITY_CREATED = 'admin_amenity_created',
+  ADMIN_AMENITY_UPDATED = 'admin_amenity_updated',
+  ADMIN_AMENITY_DELETED = 'admin_amenity_deleted',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false }, collection: 'audit_logs' })

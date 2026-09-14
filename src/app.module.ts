@@ -11,6 +11,7 @@ import { validateEnvironment } from './config/environment.validation';
 import { CloudinaryModule } from './config/cloudinary.module';
 import { AdminModule } from './admin/admin.module';
 import { PropertyTypesModule } from './property-types/property-types.module';
+import { AmenitiesModule } from './amenities/amenities.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { PropertyTypesModule } from './property-types/property-types.module';
     CloudinaryModule,
     AdminModule,
     PropertyTypesModule,
+    AmenitiesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
