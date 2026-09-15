@@ -81,6 +81,7 @@ export class AdminKycController {
       targetUserId,
       decision: dto.decision,
       rejectionReason: dto.rejectionReason,
+      expectedVersion: dto.version,
       ip: req.ip,
     });
   }

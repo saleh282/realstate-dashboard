@@ -3,7 +3,6 @@ import * as streamifier from 'streamifier';
 import { UsersService } from '../users/users.service';
 import { KycAssetMetadata, KycStatus } from '../users/schemas/user.schema';
 import { CLOUDINARY } from '../config/cloudinary.provider';
-import { ReviewKycDto } from './dto/review-kyc.dto';
 
 @Injectable()
 export class KycService {
@@ -104,7 +103,9 @@ export class KycService {
     user.selfieAsset = selfieAsset;
     user.kycStatus = KycStatus.PENDING;
     user.kycSubmittedAt = new Date();
+    user.kycReviewedAt = undefined;
     user.kycRejectionReason = undefined;
+    user.kycVersion = (user.kycVersion ?? 0) + 1;
 
     await this.usersService.save(user);
 
@@ -125,6 +126,7 @@ export class KycService {
       id: user._id.toString(),
       message: 'تم إرسال بياناتك للتحقق، سيتم إعلامك بالنتيجة قريباً',
       kycStatus: user.kycStatus,
+      kycVersion: user.kycVersion,
     };
   }
 
@@ -136,26 +138,11 @@ export class KycService {
       userId: user._id.toString(),
       id: user._id.toString(),
       kycStatus: user.kycStatus,
+      kycVersion: user.kycVersion,
       kycSubmittedAt: user.kycSubmittedAt,
       kycReviewedAt: user.kycReviewedAt,
       kycRejectionReason: user.kycRejectionReason,
     };
   }
 
-  // Admin/back-office action - approve or reject a pending submission
-  async review(userId: string, dto: ReviewKycDto) {
-    const user = await this.usersService.findById(userId);
-    if (!user) throw new NotFoundException('المستخدم غير موجود');
-
-    user.kycStatus = dto.decision === 'verified' ? KycStatus.VERIFIED : KycStatus.REJECTED;
-    user.kycReviewedAt = new Date();
-    user.kycRejectionReason = dto.decision === 'rejected' ? dto.rejectionReason : undefined;
-
-    await this.usersService.save(user);
-    return {
-      userId: user._id.toString(),
-      id: user._id.toString(),
-      kycStatus: user.kycStatus,
-    };
-  }
 }

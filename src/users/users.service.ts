@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -173,6 +174,7 @@ export class UsersService {
         role: user.role,
         emailVerified: user.emailVerified,
         kycStatus: user.kycStatus,
+        kycVersion: user.kycVersion ?? 0,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       })),
@@ -204,6 +206,7 @@ export class UsersService {
       suspendReason: user.suspendReason,
       suspendedAt: user.suspendedAt,
       kycStatus: user.kycStatus,
+      kycVersion: user.kycVersion ?? 0,
       kycSubmittedAt: user.kycSubmittedAt,
       kycReviewedAt: user.kycReviewedAt,
       kycRejectionReason: user.kycRejectionReason,
@@ -368,6 +371,7 @@ export class UsersService {
         email: user.email,
         phone: user.phone,
         kycStatus: user.kycStatus,
+        kycVersion: user.kycVersion ?? 0,
         kycSubmittedAt: user.kycSubmittedAt,
         kycReviewedAt: user.kycReviewedAt,
         kycRejectionReason: user.kycRejectionReason,
@@ -395,6 +399,7 @@ export class UsersService {
       email: user.email,
       phone: user.phone,
       kycStatus: user.kycStatus,
+      kycVersion: user.kycVersion ?? 0,
       hasIdFront: Boolean(user.idFrontAsset?.publicId),
       hasIdBack: Boolean(user.idBackAsset?.publicId),
       hasSelfie: Boolean(user.selfieAsset?.publicId),
@@ -435,24 +440,74 @@ export class UsersService {
     targetUserId: string;
     decision: 'verified' | 'rejected';
     rejectionReason?: string;
+    expectedVersion: number;
     ip?: string;
   }) {
-    const { actorUserId, targetUserId, decision, rejectionReason, ip } = options;
+    const {
+      actorUserId,
+      targetUserId,
+      decision,
+      rejectionReason,
+      expectedVersion,
+      ip,
+    } = options;
     if (!Types.ObjectId.isValid(targetUserId)) {
       throw new BadRequestException('معرف المستخدم غير صالح');
     }
-    const user = await this.findById(targetUserId);
-    if (!user) throw new NotFoundException('المستخدم غير موجود');
-
     if (decision === 'rejected' && (!rejectionReason || rejectionReason.trim().length < 5)) {
       throw new BadRequestException('سبب رفض التوثيق يجب ألا يقل عن 5 أحرف');
     }
 
-    user.kycStatus = decision === 'verified' ? KycStatus.VERIFIED : KycStatus.REJECTED;
-    user.kycReviewedAt = new Date();
-    user.kycRejectionReason = decision === 'rejected' ? rejectionReason?.trim() : undefined;
+    const nextStatus =
+      decision === 'verified' ? KycStatus.VERIFIED : KycStatus.REJECTED;
+    const reviewedAt = new Date();
+    const normalizedReason =
+      decision === 'rejected' ? rejectionReason?.trim() : undefined;
+    const versionPredicate =
+      expectedVersion === 0
+        ? { $or: [{ kycVersion: 0 }, { kycVersion: { $exists: false } }] }
+        : { kycVersion: expectedVersion };
+    const update: Record<string, unknown> = {
+      $set: {
+        kycStatus: nextStatus,
+        kycReviewedAt: reviewedAt,
+        ...(normalizedReason
+          ? { kycRejectionReason: normalizedReason }
+          : {}),
+      },
+      $inc: { kycVersion: 1 },
+      ...(normalizedReason ? {} : { $unset: { kycRejectionReason: 1 } }),
+    };
+    const user = await this.userModel
+      .findOneAndUpdate(
+        {
+          _id: new Types.ObjectId(targetUserId),
+          kycStatus: KycStatus.PENDING,
+          ...versionPredicate,
+        },
+        update,
+        { new: true, runValidators: true },
+      )
+      .exec();
 
-    await this.save(user);
+    if (!user) {
+      const current = await this.userModel
+        .findById(targetUserId)
+        .select('kycStatus kycVersion')
+        .lean()
+        .exec();
+      if (!current) throw new NotFoundException('المستخدم غير موجود');
+      if (current.kycStatus !== KycStatus.PENDING) {
+        throw new ConflictException({
+          message: 'تمت مراجعة طلب التحقق بالفعل',
+          code: 'KYC_ALREADY_REVIEWED',
+        });
+      }
+      throw new ConflictException({
+        message: 'تم تحديث طلب التحقق، يرجى إعادة تحميل البيانات',
+        code: 'KYC_REVIEW_VERSION_CONFLICT',
+      });
+    }
 
     await this.auditLogService.logAdminAction(
       AuditAction.ADMIN_KYC_REVIEWED,
@@ -460,14 +515,30 @@ export class UsersService {
       targetUserId,
       decision === 'verified'
         ? 'قبول وتوثيق الهوية بنجاح'
-        : 'رفض طلب التوثيق مع السبب: ' + rejectionReason?.trim(),
+        : 'رفض طلب التوثيق مع السبب: ' + normalizedReason,
       ip,
+      {
+        before: {
+          kycStatus: KycStatus.PENDING,
+          kycVersion: expectedVersion,
+        },
+        after: {
+          kycStatus: nextStatus,
+          kycVersion: expectedVersion + 1,
+          kycReviewedAt: reviewedAt.toISOString(),
+          ...(normalizedReason
+            ? { kycRejectionReason: normalizedReason }
+            : {}),
+        },
+      },
     );
 
     return {
       message: decision === 'verified' ? 'تم توثيق هوية المستخدم بنجاح' : 'تم رفض طلب التوثيق',
       userId: targetUserId,
       kycStatus: user.kycStatus,
+      kycVersion: user.kycVersion,
+      kycReviewedAt: user.kycReviewedAt,
     };
   }
 

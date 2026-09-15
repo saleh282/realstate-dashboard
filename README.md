@@ -4,8 +4,11 @@ NestJS + MongoDB backend for authentication and KYC. Phase 0 adds production-saf
 
 ## Local setup
 
+Use Node.js 22 LTS and npm 10. The supported ranges are enforced by
+`package.json`, and `.nvmrc` selects the Node major for compatible tools.
+
 1. Copy `.env.example` to `.env` and replace every placeholder needed by the features you use.
-2. Run `npm install`.
+2. Run `npm ci`.
 3. Run `npm run typecheck` and `npm test`.
 4. Run `npm run start:dev` only when you intentionally want the API server.
 
@@ -104,6 +107,11 @@ SMS remains intentionally unimplemented. The stub never logs an OTP or phone num
 ```bash
 npm run typecheck
 npm test
+npm run build
 npm run seed:admin
 npm run mail:test
 ```
+
+The repository currently has no ESLint configuration, so CI uses TypeScript
+typechecking as the static code check. Adding and adopting a lint policy is a
+separate task rather than silently accepting lint failures.
