@@ -3,6 +3,7 @@ import {
   ExecutionContext,
   INestApplication,
   UnauthorizedException,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -38,6 +39,11 @@ describe('admin controller authorization', () => {
     listKycForAdmin: jest.fn().mockResolvedValue({ items: [], pagination: {} }),
     getDashboardMetricsForAdmin: jest.fn().mockResolvedValue({ users: {}, kyc: {} }),
     getKycAssetForAdmin: jest.fn().mockResolvedValue({ publicId: 'front' }),
+    reviewKycForAdmin: jest.fn().mockResolvedValue({
+      userId: '64b000000000000000000002',
+      kycStatus: 'verified',
+      kycVersion: 2,
+    }),
   };
   const auditLogService = {
     listForAdmin: jest.fn().mockResolvedValue({ items: [], pagination: {} }),
@@ -71,6 +77,7 @@ describe('admin controller authorization', () => {
       .useClass(TestJwtAuthGuard)
       .compile();
     app = moduleRef.createNestApplication();
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
     await app.init();
   });
 
@@ -119,4 +126,37 @@ describe('admin controller authorization', () => {
       .expect('Cache-Control', 'private, no-store, max-age=0')
       .expect(200);
   });
+
+  it('protects the canonical KYC review route', async () => {
+    const path = '/admin/kyc/64b000000000000000000002/review';
+    const payload = { decision: 'verified', version: 1 };
+
+    await request(app.getHttpServer()).post(path).send(payload).expect(401);
+    await request(app.getHttpServer())
+      .post(path)
+      .set('Authorization', 'Bearer user')
+      .send(payload)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(path)
+      .set('Authorization', 'Bearer admin')
+      .send(payload)
+      .expect(201);
+
+    expect(usersService.reviewKycForAdmin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorUserId: '64b000000000000000000001',
+        targetUserId: '64b000000000000000000002',
+        decision: 'verified',
+        expectedVersion: 1,
+      }),
+    );
+  });
+
+  it('rejects a KYC rejection without a reason', () =>
+    request(app.getHttpServer())
+      .post('/admin/kyc/64b000000000000000000002/review')
+      .set('Authorization', 'Bearer admin')
+      .send({ decision: 'rejected', version: 1 })
+      .expect(400));
 });

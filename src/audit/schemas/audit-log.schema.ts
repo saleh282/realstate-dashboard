@@ -55,6 +55,9 @@ export class AuditLog {
 
   @Prop({ maxlength: 100 })
   targetResourceId?: string;
+
+  @Prop({ type: Object })
+  metadata?: Record<string, unknown>;
 }
 
 export const AuditLogSchema = SchemaFactory.createForClass(AuditLog);

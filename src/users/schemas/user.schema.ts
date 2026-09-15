@@ -82,6 +82,9 @@ export class User {
 
   @Prop()
   kycRejectionReason?: string;
+
+  @Prop({ default: 0, min: 0 })
+  kycVersion: number;
 }
 
 export interface KycAssetMetadata {

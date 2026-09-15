@@ -2,6 +2,11 @@
   "name": "real-estate-auction-backend",
   "version": "1.0.0",
   "description": "Backend for منصة مزادات العقار (Real Estate Auction Platform) - Auth + KYC",
+  "engines": {
+    "node": ">=22 <25",
+    "npm": ">=10 <12"
+  },
+  "packageManager": "npm@10.9.4",
   "scripts": {
     "build": "nest build",
     "start": "nest start",

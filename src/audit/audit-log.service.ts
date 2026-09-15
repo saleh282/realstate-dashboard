@@ -28,6 +28,7 @@ export class AuditLogService {
     targetUserId: string,
     reason: string,
     ip?: string,
+    metadata?: Record<string, unknown>,
   ): Promise<void> {
     try {
       await this.auditModel.create({
@@ -37,6 +38,7 @@ export class AuditLogService {
         targetUserId: new Types.ObjectId(targetUserId),
         reason,
         ip: ip ?? 'unknown',
+        metadata,
       });
     } catch (err) {
       this.logger.warn(`Failed to write admin audit log (${action})`);

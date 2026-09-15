@@ -1,12 +1,8 @@
-import { BadRequestException, Controller, Get, Param, Post, Req, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Req, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { UploadedFiles, Body } from '@nestjs/common';
+import { UploadedFiles } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { KycService } from './kyc.service';
-import { ReviewKycDto } from './dto/review-kyc.dto';
-import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
-import { UserRole } from '../auth/roles.enum';
 
 const allowedKycMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
@@ -51,10 +47,4 @@ export class KycController {
     return this.kycService.getStatus(req.user.userId);
   }
 
-  @Roles(UserRole.ADMIN)
-  @UseGuards(RolesGuard)
-  @Post('review/:userId')
-  review(@Param('userId') userId: string, @Body() dto: ReviewKycDto) {
-    return this.kycService.review(userId, dto);
-  }
 }
