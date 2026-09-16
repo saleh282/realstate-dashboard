@@ -9,7 +9,7 @@ const registration = {
   confirmPassword: 'password',
 };
 
-function createAuthService(existing?: { emailVerified: boolean }) {
+function createAuthService(existing?: { emailVerified: boolean; email: string }) {
   const usersService = {
     findByIdentifier: jest.fn().mockResolvedValue(existing ?? null),
     create: jest.fn().mockResolvedValue({
@@ -49,11 +49,22 @@ describe('registration verification response', () => {
       otpSent: true,
     });
     expect(mailService.sendOtp).toHaveBeenCalledWith(registration.identifier, '123456');
+    expect((service as any).usersService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemRole: 'USER',
+        accountType: 'USER',
+        accountStatus: 'ACTIVE',
+        brokerStatus: 'NOT_APPLIED',
+        verificationTrustState: 'UNVERIFIED',
+        primaryIdentifierType: 'email',
+      }),
+    );
   });
 
   it('resends OTP and returns a structured conflict for an existing unverified account', async () => {
     const { service, otpVerificationService, mailService } = createAuthService({
       emailVerified: false,
+      email: registration.identifier,
     });
 
     const error = await service.register(registration).catch((caught) => caught);
@@ -72,6 +83,7 @@ describe('registration verification response', () => {
   it('does not send OTP for an existing verified account', async () => {
     const { service, otpVerificationService, mailService } = createAuthService({
       emailVerified: true,
+      email: registration.identifier,
     });
 
     const error = await service.register(registration).catch((caught) => caught);

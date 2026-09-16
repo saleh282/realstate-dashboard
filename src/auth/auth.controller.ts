@@ -18,7 +18,7 @@ import {
   VerifyOtpDto,
 } from './dto/password-reset.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
-import { JwtRefreshGuard } from './jwt-refresh.guard';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -66,18 +66,25 @@ export class AuthController {
     return this.authService.resetPassword(dto, req.ip);
   }
 
-  @UseGuards(JwtRefreshGuard)
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('refresh')
-  refresh(@Req() req: any) {
+  refresh(@Body() dto: RefreshTokenDto, @Req() req: any) {
     const device = req.headers['x-device-name'] ?? req.headers['user-agent'] ?? undefined;
-    return this.authService.refresh(req.user.userId, req.user.refreshToken, device);
+    return this.authService.refresh(dto.refreshToken, device);
   }
 
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @Post('logout')
   logout(@Req() req: any) {
-    return this.authService.logout(req.user.userId, req.ip);
+    return this.authService.logout(req.user.userId, req.user.sessionId, req.ip);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @Post('logout-all')
+  logoutAll(@Req() req: any) {
+    return this.authService.logoutAll(req.user.userId, req.ip);
   }
 }

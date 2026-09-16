@@ -1,6 +1,13 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
-import { UserRole } from '../../auth/roles.enum';
+import { SystemRole } from '../../auth/roles.enum';
+import {
+  AccountStatus,
+  AccountType,
+  BrokerStatus,
+  PrimaryIdentifierType,
+  VerificationTrustState,
+} from '../identity.types';
 
 export type UserDocument = User & Document;
 
@@ -30,8 +37,45 @@ export class User {
   @Prop({ required: true, select: false })
   password: string;
 
-  @Prop({ required: true, enum: UserRole, default: UserRole.USER, index: true })
-  role: UserRole;
+  @Prop({ enum: SystemRole, index: true })
+  systemRole?: SystemRole;
+
+  @Prop({ enum: AccountType, index: true })
+  accountType?: AccountType;
+
+  @Prop({ enum: AccountStatus, index: true })
+  accountStatus?: AccountStatus;
+
+  @Prop({ enum: BrokerStatus, index: true })
+  brokerStatus?: BrokerStatus;
+
+  @Prop({ enum: VerificationTrustState, index: true })
+  verificationTrustState?: VerificationTrustState;
+
+  @Prop({ enum: PrimaryIdentifierType })
+  primaryIdentifierType?: PrimaryIdentifierType;
+
+  @Prop()
+  emailVerifiedAt?: Date;
+
+  @Prop()
+  phoneVerifiedAt?: Date;
+
+  @Prop({ enum: PrimaryIdentifierType })
+  legacyVerifiedIdentifierType?: PrimaryIdentifierType;
+
+  @Prop()
+  identityMigratedAt?: Date;
+
+  @Prop()
+  identityMigrationRunId?: string;
+
+  @Prop()
+  identityMigrationVersion?: number;
+
+  // Legacy compatibility fields retained temporarily during rollout.
+  @Prop({ enum: ['user', 'admin'], index: true })
+  role?: 'user' | 'admin';
 
   @Prop({ default: false })
   emailVerified: boolean;
@@ -92,6 +136,7 @@ export interface KycAssetMetadata {
   secureUrl: string;
   resourceType: 'image';
   deliveryType: 'authenticated';
+  format?: 'jpg' | 'jpeg' | 'png' | 'webp';
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

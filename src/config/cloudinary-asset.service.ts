@@ -8,6 +8,22 @@ export class CloudinaryAssetService {
 
   constructor(@Inject(CLOUDINARY) private readonly cloudinary: any) {}
 
+  private assetFormat(asset: KycAssetMetadata): string | undefined {
+    if (asset.format) return asset.format;
+
+    try {
+      const extension = new URL(asset.secureUrl).pathname
+        .split('.')
+        .pop()
+        ?.toLowerCase();
+      return ['jpg', 'jpeg', 'png', 'webp'].includes(extension ?? '')
+        ? extension
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async deleteAssets(assets: Array<KycAssetMetadata | undefined>): Promise<void> {
     const existingAssets = assets.filter((asset): asset is KycAssetMetadata => Boolean(asset?.publicId));
     if (!existingAssets.length) return;
@@ -31,11 +47,13 @@ export class CloudinaryAssetService {
   async downloadAuthenticatedAsset(
     asset: KycAssetMetadata,
   ): Promise<{ buffer: Buffer; contentType: string }> {
+    const format = this.assetFormat(asset);
     const signedUrl = this.cloudinary.url(asset.publicId, {
       secure: true,
       sign_url: true,
       resource_type: asset.resourceType,
       type: asset.deliveryType,
+      ...(format ? { format } : {}),
     });
 
     try {

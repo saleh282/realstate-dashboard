@@ -1,13 +1,13 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
-import { UserRole } from '../auth/roles.enum';
+import { SystemRole } from '../auth/roles.enum';
 import { RolesGuard } from '../auth/roles.guard';
 import { CreatePropertyTypeDto } from './dto/create-property-type.dto';
 import { UpdatePropertyTypeDto } from './dto/update-property-type.dto';
 import { PropertyTypesService } from './property-types.service';
 
-@Roles(UserRole.ADMIN)
+@Roles(SystemRole.ADMIN)
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('admin/property-types')
 export class AdminPropertyTypesController {

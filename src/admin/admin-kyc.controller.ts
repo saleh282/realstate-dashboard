@@ -14,14 +14,14 @@ import {
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
-import { UserRole } from '../auth/roles.enum';
+import { SystemRole } from '../auth/roles.enum';
 import { RolesGuard } from '../auth/roles.guard';
 import { UsersService } from '../users/users.service';
 import { ListKycQueryDto } from './dto/list-kyc-query.dto';
 import { AdminReviewKycDto } from './dto/admin-review-kyc.dto';
 import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
 
-@Roles(UserRole.ADMIN)
+@Roles(SystemRole.ADMIN)
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('admin/kyc')
 export class AdminKycController {

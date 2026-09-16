@@ -12,6 +12,7 @@ import { CreatePropertyDto } from './dto/create-property.dto';
 import { Property, PropertyAsset, PropertyDocument } from './schemas/property.schema';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
+import { normalizePropertyMoneyInput, propertyMoneyFromStoredRecord } from '../common/money/money';
 
 @Injectable()
 export class PropertiesService {
@@ -26,12 +27,21 @@ export class PropertiesService {
   ) {}
 
   async create(ownerId: string, dto: CreatePropertyDto, files: { images?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] }) {
+    let money: ReturnType<typeof normalizePropertyMoneyInput>;
+    try {
+      money = normalizePropertyMoneyInput(dto);
+    } catch (error) {
+      if (error instanceof RangeError && error.message.includes('down payment exceeds')) {
+        throw new BadRequestException('المقدم لا يمكن أن يتجاوز السعر الإجمالي');
+      }
+      throw new BadRequestException('بيانات السعر يجب أن تكون أعدادًا صحيحة بوحدات العملة الصغرى ضمن النطاق الآمن');
+    }
     const images = files?.images ?? [];
     if (!images.length) throw new BadRequestException('يجب إرفاق صورة واحدة للعقار على الأقل');
     if (dto.imageLabels.length !== images.length) throw new BadRequestException('عدد مسميات الصور لا يطابق عدد الصور');
     if (dto.coverImageIndex >= images.length) throw new BadRequestException('صورة الغلاف المحددة غير صالحة');
     if (dto.floor > dto.totalFloors) throw new BadRequestException('رقم الطابق لا يمكن أن يتجاوز عدد الطوابق');
-    if (dto.downPayment > dto.totalPrice) throw new BadRequestException('المقدم لا يمكن أن يتجاوز السعر الإجمالي');
+    if (money.downPaymentMinor > money.totalPriceMinor) throw new BadRequestException('المقدم لا يمكن أن يتجاوز السعر الإجمالي');
 
     const [type, governorate, finishing, delivery, payment, amenityCount] = await Promise.all([
       this.propertyTypes.findOne({ code: dto.propertyTypeCode, isActive: true }).lean().exec(),
@@ -52,7 +62,8 @@ export class PropertiesService {
       if (files.titleDeed?.[0]) titleDeed = await this.upload(files.titleDeed[0], 'properties/title-deeds');
       if (titleDeed) uploaded.push(titleDeed);
 
-      const property = await this.properties.create({ ownerId: new Types.ObjectId(ownerId), ...dto, images: uploaded.slice(0, images.length), titleDeed, status: 'pending_review' });
+      const { totalPriceMinor: _totalPriceMinor, downPaymentMinor: _downPaymentMinor, currency: _currency, totalPrice: _totalPrice, downPayment: _downPayment, ...propertyData } = dto;
+      const property = await this.properties.create({ ownerId: new Types.ObjectId(ownerId), ...propertyData, ...money, images: uploaded.slice(0, images.length), titleDeed, status: 'pending_review' });
       createdPropertyId = property._id;
       await Promise.all([
         this.propertyTypes.updateOne({ code: dto.propertyTypeCode }, { $inc: { usageCount: 1 } }).exec(),
@@ -144,11 +155,14 @@ export class PropertiesService {
 
   private assertId(id: string) { if (!Types.ObjectId.isValid(id)) throw new BadRequestException('معرّف العقار غير صالح'); }
   private upload(file: Express.Multer.File, folder: string): Promise<PropertyAsset> { return new Promise((resolve, reject) => { const resourceType = file.mimetype === 'application/pdf' ? 'raw' : 'image'; const stream = this.cloudinary.uploader.upload_stream({ folder, resource_type: resourceType }, (error, result) => error || !result ? reject(error ?? new Error('Upload failed')) : resolve({ url: result.secure_url, publicId: result.public_id, resourceType })); streamifier.createReadStream(file.buffer).pipe(stream); }); }
-  private toPublic(item: any) { return { id: item._id.toString(), operationType: item.operationType, propertyTypeCode: item.propertyTypeCode, title: item.title, description: item.description, governorateCode: item.governorateCode, city: item.city, district: item.district, area: item.area, bedrooms: item.bedrooms, bathrooms: item.bathrooms, floor: item.floor, totalPrice: item.totalPrice, images: item.images, coverImageIndex: item.coverImageIndex, hasTitleDeed: Boolean(item.titleDeed), advertiserType: item.advertiserType, isOwnerVisible: item.isOwnerVisible !== false, status: item.status, reviewReason: item.reviewReason, reviewedAt: item.reviewedAt, createdAt: item.createdAt }; }
+  private toPublic(item: any) {
+    const money = propertyMoneyFromStoredRecord(item);
+    return { id: item._id.toString(), operationType: item.operationType, propertyTypeCode: item.propertyTypeCode, title: item.title, description: item.description, governorateCode: item.governorateCode, city: item.city, district: item.district, area: item.area, bedrooms: item.bedrooms, bathrooms: item.bathrooms, floor: item.floor, ...money, images: item.images, coverImageIndex: item.coverImageIndex, hasTitleDeed: Boolean(item.titleDeed), advertiserType: item.advertiserType, isOwnerVisible: item.isOwnerVisible !== false, status: item.status, reviewReason: item.reviewReason, reviewedAt: item.reviewedAt, createdAt: item.createdAt };
+  }
   private toAdmin(item: any, detailed = false) {
     const populatedOwner = item.ownerId && typeof item.ownerId === 'object' && item.ownerId.fullName;
     const owner = populatedOwner ? { id: item.ownerId._id.toString(), fullName: item.ownerId.fullName, email: item.ownerId.email, phone: item.ownerId.phone } : undefined;
     const base = { ...this.toPublic(item), owner, reviewReason: item.reviewReason, reviewedAt: item.reviewedAt };
-    return detailed ? { ...base, street: item.street, additionalAddressDetails: item.additionalAddressDetails, latitude: item.latitude, longitude: item.longitude, bedrooms: item.bedrooms, livingRooms: item.livingRooms, kitchens: item.kitchens, bathrooms: item.bathrooms, floor: item.floor, totalFloors: item.totalFloors, buildingYear: item.buildingYear, finishingStatusCode: item.finishingStatusCode, deliveryStatusCode: item.deliveryStatusCode, amenityCodes: item.amenityCodes, downPayment: item.downPayment, isPriceNegotiable: item.isPriceNegotiable, paymentMethodCode: item.paymentMethodCode, titleDeed: item.titleDeed, advertiserType: item.advertiserType, hidePhone: item.hidePhone } : base;
+    return detailed ? { ...base, street: item.street, additionalAddressDetails: item.additionalAddressDetails, latitude: item.latitude, longitude: item.longitude, bedrooms: item.bedrooms, livingRooms: item.livingRooms, kitchens: item.kitchens, bathrooms: item.bathrooms, floor: item.floor, totalFloors: item.totalFloors, buildingYear: item.buildingYear, finishingStatusCode: item.finishingStatusCode, deliveryStatusCode: item.deliveryStatusCode, amenityCodes: item.amenityCodes, isPriceNegotiable: item.isPriceNegotiable, paymentMethodCode: item.paymentMethodCode, titleDeed: item.titleDeed, advertiserType: item.advertiserType, hidePhone: item.hidePhone } : base;
   }
 }

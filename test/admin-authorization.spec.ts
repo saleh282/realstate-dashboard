@@ -25,8 +25,12 @@ class TestJwtAuthGuard implements CanActivate {
     if (!authorization) throw new UnauthorizedException();
     httpRequest.user = {
       userId: '64b000000000000000000001',
-      role:
-        authorization === 'Bearer admin' ? UserRole.ADMIN : UserRole.USER,
+      systemRole:
+        authorization === 'Bearer admin'
+          ? UserRole.ADMIN
+          : authorization === 'Bearer super-admin'
+            ? UserRole.SUPER_ADMIN
+            : UserRole.USER,
     };
     return true;
   }
@@ -96,6 +100,12 @@ describe('admin controller authorization', () => {
     request(app.getHttpServer())
       .get('/admin/users')
       .set('Authorization', 'Bearer admin')
+      .expect(200));
+
+  it('allows SUPER_ADMIN through ADMIN-guarded operational routes', () =>
+    request(app.getHttpServer())
+      .get('/admin/users')
+      .set('Authorization', 'Bearer super-admin')
       .expect(200));
 
   it.each([

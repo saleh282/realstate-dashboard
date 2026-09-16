@@ -1,8 +1,9 @@
-import { IsBoolean, IsNotEmpty, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsString, MaxLength, MinLength } from 'class-validator';
+import { AccountStatus } from '../../users/identity.types';
 
 export class UpdateUserStatusDto {
-  @IsBoolean()
-  isActive: boolean;
+  @IsEnum(AccountStatus)
+  accountStatus: AccountStatus;
 
   @IsString()
   @IsNotEmpty()

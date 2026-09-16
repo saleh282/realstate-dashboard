@@ -8,7 +8,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { UserRole } from '../../auth/roles.enum';
+import { SystemRole } from '../../auth/roles.enum';
 
 export class ListUsersQueryDto {
   @Type(() => Number)
@@ -28,10 +28,10 @@ export class ListUsersQueryDto {
   search?: string;
 
   @IsOptional()
-  @IsIn(Object.values(UserRole))
-  role?: UserRole;
+  @IsIn(Object.values(SystemRole))
+  systemRole?: SystemRole;
 
   @IsOptional()
   @IsIn(['true', 'false'])
-  emailVerified?: 'true' | 'false';
+  contactVerified?: 'true' | 'false';
 }
