@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  ServiceUnavailableException,
   UnauthorizedException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -87,19 +88,31 @@ export class AuthService {
     };
   }
 
-  private async sendOtp(identifier: string, code: string) {
+  /**
+   * V1 authentication is email-only. Phone numbers remain valid profile/contact
+   * data, but must never enter an authentication or OTP workflow until a real
+   * SMS provider and the POST-V1 policy are enabled.
+   */
+  private normalizeEmailAuthIdentifier(identifier: string): string {
     const normalized = normalizeIdentifier(identifier);
     if (!normalized) {
       throw new BadRequestException({
-        message: 'البريد الإلكتروني أو رقم الهاتف غير صالح',
+        message: 'البريد الإلكتروني غير صالح',
         code: AuthErrorCode.INVALID_IDENTIFIER,
       });
     }
-    if (normalized.kind === 'email') {
-      await this.mailService.sendOtp(identifier, code);
-    } else {
-      await this.smsService.sendOtp(identifier, code);
+    if (normalized.kind === 'phone') {
+      throw new ServiceUnavailableException({
+        message: 'المصادقة برقم الهاتف غير متاحة في الإصدار الحالي. يرجى استخدام البريد الإلكتروني',
+        code: AuthErrorCode.PHONE_AUTH_UNAVAILABLE,
+      });
     }
+    return normalized.value;
+  }
+
+  private async sendOtp(identifier: string, code: string) {
+    const email = this.normalizeEmailAuthIdentifier(identifier);
+    await this.mailService.sendOtp(email, code);
   }
 
   // ---------------------------------------------------------------------
@@ -108,8 +121,7 @@ export class AuthService {
   async register(dto: RegisterDto, ip?: string) {
     // The shared password policy + confirmPassword match are enforced by RegisterDto.
 
-    const normalized = normalizeIdentifier(dto.identifier)!;
-    const identifier = normalized.value;
+    const identifier = this.normalizeEmailAuthIdentifier(dto.identifier);
     const existing = await this.usersService.findByIdentifier(identifier);
     if (existing) {
       if (!isIdentifierVerified(existing, identifier)) {
@@ -144,18 +156,14 @@ export class AuthService {
 
     const user = await this.usersService.create({
       fullName: dto.fullName,
-      email: normalized.kind === 'email' ? identifier : undefined,
-      phone: normalized.kind === 'phone' ? identifier : undefined,
+      email: identifier,
       password: passwordHash,
       systemRole: SystemRole.USER,
       accountType: AccountType.USER,
       accountStatus: AccountStatus.ACTIVE,
       brokerStatus: BrokerStatus.NOT_APPLIED,
       verificationTrustState: VerificationTrustState.UNVERIFIED,
-      primaryIdentifierType:
-        normalized.kind === 'email'
-          ? PrimaryIdentifierType.EMAIL
-          : PrimaryIdentifierType.PHONE,
+      primaryIdentifierType: PrimaryIdentifierType.EMAIL,
     });
 
     // مفيش تسجيل دخول تلقائي هنا. لازم يتبعت OTP الأول والمستخدم يتحقق منه
@@ -184,7 +192,7 @@ export class AuthService {
   // LOGIN (screen 1) - with brute-force lockout
   // ---------------------------------------------------------------------
   async login(dto: LoginDto, ip?: string, device?: string) {
-    const identifier = normalizeIdentifier(dto.identifier)!.value;
+    const identifier = this.normalizeEmailAuthIdentifier(dto.identifier);
     const user = await this.usersService.findByIdentifier(identifier, true);
     if (!user) {
       await this.auditLogService.log(AuditAction.LOGIN_FAILED, null, ip);
@@ -262,10 +270,10 @@ export class AuthService {
   }
 
   // ---------------------------------------------------------------------
-  // FORGOT PASSWORD (screen 4) - sends a 6-digit OTP to email or phone
+  // FORGOT PASSWORD (screen 4) - sends a 6-digit OTP to email
   // ---------------------------------------------------------------------
   async forgotPassword(dto: ForgotPasswordDto) {
-    const identifier = normalizeIdentifier(dto.identifier)!.value;
+    const identifier = this.normalizeEmailAuthIdentifier(dto.identifier);
     const user = await this.usersService.findByIdentifier(identifier);
     // Don't reveal whether the account exists
     if (!user) {
@@ -288,7 +296,7 @@ export class AuthService {
         ? OtpCollectionPurpose.REGISTER
         : OtpCollectionPurpose.PASSWORD_RESET;
 
-    const identifier = normalizeIdentifier(dto.identifier)!.value;
+    const identifier = this.normalizeEmailAuthIdentifier(dto.identifier);
     const user = await this.usersService.findByIdentifier(identifier);
     if (!user) {
       return { message: 'إذا كان الحساب موجوداً، تم إرسال رمز التحقق' };
@@ -321,7 +329,7 @@ export class AuthService {
         ? OtpCollectionPurpose.REGISTER
         : OtpCollectionPurpose.PASSWORD_RESET;
 
-    const identifier = normalizeIdentifier(dto.identifier)!.value;
+    const identifier = this.normalizeEmailAuthIdentifier(dto.identifier);
     try {
       await this.otpVerificationService.verify(identifier, dto.otp, purpose);
     } catch (err) {
@@ -337,11 +345,7 @@ export class AuthService {
     this.assertCanAuthenticate(user);
 
     if (dto.purpose === OtpPurpose.REGISTER) {
-      if (normalizeIdentifier(identifier)?.kind === 'email') {
-        user.emailVerifiedAt = new Date();
-      } else {
-        user.phoneVerifiedAt = new Date();
-      }
+      user.emailVerifiedAt = new Date();
       await this.usersService.save(user);
 
       return {

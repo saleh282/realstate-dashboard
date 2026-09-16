@@ -1,4 +1,8 @@
-import { ForbiddenException, ValidationPipe } from '@nestjs/common';
+import {
+  ForbiddenException,
+  ServiceUnavailableException,
+  ValidationPipe,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from '../src/auth/auth.service';
 import { RegisterDto } from '../src/auth/dto/register.dto';
@@ -62,14 +66,11 @@ describe('MAZAD-007 identity contract', () => {
     expect(isIdentifierVerified(phoneOnly, 'other@example.com')).toBe(false);
   });
 
-  it.each([
-    ['channel@example.com', 'emailVerifiedAt', 'phoneVerifiedAt'],
-    ['+201001234567', 'phoneVerifiedAt', 'emailVerifiedAt'],
-  ])('records verification only for the exact %s channel', async (identifier, setField, unsetField) => {
+  it('records email verification without changing phone verification', async () => {
+    const identifier = 'channel@example.com';
     const user: Record<string, any> = {
       _id: { toString: () => '64b000000000000000000001' },
-      email: identifier.includes('@') ? identifier : undefined,
-      phone: identifier.includes('@') ? undefined : identifier,
+      email: identifier,
       accountStatus: AccountStatus.ACTIVE,
     };
     const users = {
@@ -88,8 +89,20 @@ describe('MAZAD-007 identity contract', () => {
     );
 
     await service.verifyOtp({ identifier, otp: '123456', purpose: OtpPurpose.REGISTER });
-    expect(user[setField]).toBeInstanceOf(Date);
-    expect(user[unsetField]).toBeUndefined();
+    expect(user.emailVerifiedAt).toBeInstanceOf(Date);
+    expect(user.phoneVerifiedAt).toBeUndefined();
+  });
+
+  it('preserves legacy phone verification data but rejects phone OTP auth', async () => {
+    const service = Object.create(AuthService.prototype) as AuthService;
+
+    await expect(
+      service.verifyOtp({
+        identifier: '+201001234567',
+        otp: '123456',
+        purpose: OtpPurpose.REGISTER,
+      }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 
   it.each([AccountStatus.ACTIVE, AccountStatus.SUSPENDED])(
