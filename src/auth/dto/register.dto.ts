@@ -10,9 +10,9 @@ export class RegisterDto {
   @IsString()
   fullName: string;
 
-  @IsNotEmpty({ message: 'البريد الإلكتروني أو رقم الهاتف مطلوب' })
+  @IsNotEmpty({ message: 'البريد الإلكتروني مطلوب' })
   @IsApplicationIdentifier()
-  identifier: string; // email OR phone - screen has a single combined field
+  identifier: string; // V1 auth accepts email only; phone remains contact data.
 
   @IsNotEmpty({ message: 'كلمة المرور مطلوبة' })
   @IsApplicationPassword()

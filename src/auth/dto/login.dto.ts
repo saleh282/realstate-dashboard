@@ -2,7 +2,7 @@ import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { IsApplicationIdentifier } from '../../common/validators/identifier.validator';
 
 export class LoginDto {
-  @IsNotEmpty({ message: 'البريد الإلكتروني أو رقم الهاتف مطلوب' })
+  @IsNotEmpty({ message: 'البريد الإلكتروني مطلوب' })
   @IsApplicationIdentifier()
   identifier: string;
 

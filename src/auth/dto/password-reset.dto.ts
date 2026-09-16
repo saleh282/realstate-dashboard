@@ -11,7 +11,7 @@ export enum OtpPurpose {
 }
 
 export class ForgotPasswordDto {
-  @IsNotEmpty({ message: 'البريد الإلكتروني أو رقم الهاتف مطلوب' })
+  @IsNotEmpty({ message: 'البريد الإلكتروني مطلوب' })
   @IsApplicationIdentifier()
   identifier: string;
 }
