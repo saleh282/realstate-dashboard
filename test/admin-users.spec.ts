@@ -3,6 +3,8 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { UserRole } from '../src/auth/roles.enum';
+import { SystemRole } from '../src/auth/roles.enum';
+import { AccountStatus } from '../src/users/identity.types';
 import { UsersService } from '../src/users/users.service';
 import { AuditAction } from '../src/audit/schemas/audit-log.schema';
 
@@ -140,8 +142,9 @@ describe('admin user status management', () => {
     await expect(
       service.updateStatusForAdmin({
         actorUserId,
+        actorSystemRole: SystemRole.ADMIN,
         targetUserId: actorUserId,
-        isActive: false,
+        accountStatus: AccountStatus.SUSPENDED,
         reason: 'Suspension test',
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
@@ -157,14 +160,15 @@ describe('admin user status management', () => {
     await expect(
       service.updateStatusForAdmin({
         actorUserId,
+        actorSystemRole: SystemRole.ADMIN,
         targetUserId,
-        isActive: false,
+        accountStatus: AccountStatus.SUSPENDED,
         reason: 'Suspension test',
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('suspends user, revokes their sessions, and logs action', async () => {
+  it('blocks user, revokes their sessions, and logs action', async () => {
     const { service, refreshTokenService, auditLogService } = createService();
     const mockUser = {
       role: UserRole.USER,
@@ -176,13 +180,14 @@ describe('admin user status management', () => {
 
     const result = await service.updateStatusForAdmin({
       actorUserId,
+      actorSystemRole: SystemRole.ADMIN,
       targetUserId,
-      isActive: false,
+      accountStatus: AccountStatus.BLOCKED,
       reason: 'Violation of terms',
       ip: '127.0.0.1',
     });
 
-    expect(result.isActive).toBe(false);
+    expect(result.accountStatus).toBe(AccountStatus.BLOCKED);
     expect(refreshTokenService.revokeAllForUser).toHaveBeenCalledWith(targetUserId);
     expect(auditLogService.logAdminAction).toHaveBeenCalledWith(
       AuditAction.ADMIN_USER_STATUS_UPDATED,
@@ -190,6 +195,10 @@ describe('admin user status management', () => {
       targetUserId,
       'Violation of terms',
       '127.0.0.1',
+      {
+        before: { accountStatus: AccountStatus.ACTIVE },
+        after: { accountStatus: AccountStatus.BLOCKED },
+      },
     );
   });
 });
@@ -201,6 +210,7 @@ describe('admin session revocation and role update', () => {
 
     await service.revokeSessionsForAdmin({
       actorUserId,
+      actorSystemRole: SystemRole.ADMIN,
       targetUserId,
       reason: 'Security breach suspected',
     });
@@ -215,13 +225,42 @@ describe('admin session revocation and role update', () => {
     );
   });
 
+  it('prevents an ADMIN from revoking another ADMIN sessions', async () => {
+    const { service, refreshTokenService } = createService();
+    jest.spyOn(service, 'findById').mockResolvedValue({ systemRole: SystemRole.ADMIN } as any);
+
+    await expect(
+      service.revokeSessionsForAdmin({
+        actorUserId,
+        actorSystemRole: SystemRole.ADMIN,
+        targetUserId,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(refreshTokenService.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it('prevents product session control over SUPER_ADMIN', async () => {
+    const { service, refreshTokenService } = createService();
+    jest.spyOn(service, 'findById').mockResolvedValue({ systemRole: SystemRole.SUPER_ADMIN } as any);
+
+    await expect(
+      service.revokeSessionsForAdmin({
+        actorUserId,
+        actorSystemRole: SystemRole.SUPER_ADMIN,
+        targetUserId,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(refreshTokenService.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
   it('prevents changing own role', async () => {
     const { service } = createService();
     await expect(
       service.updateRoleForAdmin({
         actorUserId,
+        actorSystemRole: SystemRole.SUPER_ADMIN,
         targetUserId: actorUserId,
-        role: UserRole.USER,
+        systemRole: SystemRole.USER,
         reason: 'Role demotion test',
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
@@ -238,12 +277,13 @@ describe('admin session revocation and role update', () => {
 
     const result = await service.updateRoleForAdmin({
       actorUserId,
+      actorSystemRole: SystemRole.SUPER_ADMIN,
       targetUserId,
-      role: UserRole.ADMIN,
+      systemRole: SystemRole.ADMIN,
       reason: 'Promoted to support admin',
     });
 
-    expect(result.role).toBe(UserRole.ADMIN);
+    expect(result.systemRole).toBe(SystemRole.ADMIN);
     expect(refreshTokenService.revokeAllForUser).toHaveBeenCalledWith(targetUserId);
     expect(auditLogService.logAdminAction).toHaveBeenCalledWith(
       AuditAction.ADMIN_USER_ROLE_UPDATED,
@@ -251,6 +291,10 @@ describe('admin session revocation and role update', () => {
       targetUserId,
       'Promoted to support admin',
       undefined,
+      {
+        before: { systemRole: SystemRole.USER },
+        after: { systemRole: SystemRole.ADMIN },
+      },
     );
   });
 });

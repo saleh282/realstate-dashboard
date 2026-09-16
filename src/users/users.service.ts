@@ -14,13 +14,20 @@ import { RefreshTokenService } from '../refresh-token/refresh-token.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
 import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
-import { UserRole } from '../auth/roles.enum';
+import { SystemRole } from '../auth/roles.enum';
 import {
   identifierLookupValues,
   normalizeIdentifier,
 } from '../common/validators/identifier.validator';
 import { hashPassword } from '../common/security/password-hashing';
 import { AuthErrorCode } from '../common/errors/auth-error-codes';
+import {
+  AccountStatus,
+  VerificationTrustState,
+  identityProjection,
+  resolveAccountStatus,
+  resolveSystemRole,
+} from './identity.types';
 
 @Injectable()
 export class UsersService {
@@ -69,12 +76,10 @@ export class UsersService {
       fullName: user.fullName,
       email: user.email,
       phone: user.phone,
-      emailVerified: user.emailVerified,
-      role: user.role,
+      ...identityProjection(user),
       kycStatus: user.kycStatus,
-        isActive: user.isActive !== false,
-        suspendReason: user.suspendReason,
-        suspendedAt: user.suspendedAt,
+      suspendReason: user.suspendReason,
+      suspendedAt: user.suspendedAt,
       idFrontUrl: user.idFrontUrl,
       idBackUrl: user.idBackUrl,
       selfieUrl: user.selfieUrl,
@@ -134,10 +139,10 @@ export class UsersService {
     page: number;
     limit: number;
     search?: string;
-    role?: UserRole;
-    emailVerified?: boolean;
+    systemRole?: SystemRole;
+    contactVerified?: boolean;
   }) {
-    const { page, limit, search, role, emailVerified } = options;
+    const { page, limit, search, systemRole, contactVerified } = options;
     const filter: Record<string, any> = {};
 
     if (search) {
@@ -149,13 +154,34 @@ export class UsersService {
         { phone: expression },
       ];
     }
-    if (role) filter.role = role;
-    if (emailVerified !== undefined) filter.emailVerified = emailVerified;
+    const compatibilityPredicates: Record<string, unknown>[] = [];
+    if (systemRole) {
+      compatibilityPredicates.push({
+        $or: [
+          { systemRole },
+          ...(systemRole === SystemRole.USER ? [{ role: 'user' }] : []),
+          ...(systemRole === SystemRole.ADMIN ? [{ role: 'admin' }] : []),
+        ],
+      });
+    }
+    if (contactVerified !== undefined) {
+      const verifiedPredicate = {
+        $or: [
+          { emailVerifiedAt: { $exists: true } },
+          { phoneVerifiedAt: { $exists: true } },
+          { emailVerified: true },
+        ],
+      };
+      compatibilityPredicates.push(
+        contactVerified ? verifiedPredicate : { $nor: verifiedPredicate.$or },
+      );
+    }
+    if (compatibilityPredicates.length) filter.$and = compatibilityPredicates;
 
     const [users, total] = await Promise.all([
       this.userModel
         .find(filter)
-        .select('fullName email phone role emailVerified kycStatus createdAt updatedAt')
+        .select('fullName email phone systemRole accountType accountStatus brokerStatus verificationTrustState primaryIdentifierType emailVerifiedAt phoneVerifiedAt legacyVerifiedIdentifierType role emailVerified isActive kycStatus createdAt updatedAt')
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -171,8 +197,7 @@ export class UsersService {
         fullName: user.fullName,
         email: user.email,
         phone: user.phone,
-        role: user.role,
-        emailVerified: user.emailVerified,
+        ...identityProjection(user),
         kycStatus: user.kycStatus,
         kycVersion: user.kycVersion ?? 0,
         createdAt: user.createdAt,
@@ -200,9 +225,7 @@ export class UsersService {
       fullName: user.fullName,
       email: user.email,
       phone: user.phone,
-      role: user.role,
-      emailVerified: user.emailVerified,
-      isActive: user.isActive !== false,
+      ...identityProjection(user),
       suspendReason: user.suspendReason,
       suspendedAt: user.suspendedAt,
       kycStatus: user.kycStatus,
@@ -217,12 +240,13 @@ export class UsersService {
 
   async updateStatusForAdmin(options: {
     actorUserId: string;
+    actorSystemRole: SystemRole;
     targetUserId: string;
-    isActive: boolean;
+    accountStatus: AccountStatus;
     reason: string;
     ip?: string;
   }) {
-    const { actorUserId, targetUserId, isActive, reason, ip } = options;
+    const { actorUserId, actorSystemRole, targetUserId, accountStatus, reason, ip } = options;
     if (!Types.ObjectId.isValid(targetUserId)) {
       throw new BadRequestException('معرف المستخدم غير صالح');
     }
@@ -233,16 +257,31 @@ export class UsersService {
     const user = await this.findById(targetUserId);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
 
-    if (user.role === UserRole.ADMIN && !isActive) {
-      throw new ForbiddenException('لا يمكن تجميد حساب إداري');
+    const targetRole = resolveSystemRole(user);
+    if (targetRole === SystemRole.SUPER_ADMIN) {
+      throw new ForbiddenException('لا يمكن إدارة حساب SUPER_ADMIN من المنتج');
+    }
+    if (actorSystemRole !== SystemRole.SUPER_ADMIN && targetRole !== SystemRole.USER) {
+      throw new ForbiddenException('إدارة حسابات ADMIN متاحة لـ SUPER_ADMIN فقط');
+    }
+    const previousStatus = resolveAccountStatus(user);
+    if (
+      previousStatus === AccountStatus.PERMANENTLY_BANNED &&
+      accountStatus !== AccountStatus.PERMANENTLY_BANNED &&
+      actorSystemRole !== SystemRole.SUPER_ADMIN
+    ) {
+      throw new ForbiddenException('استعادة الحظر الدائم متاحة لـ SUPER_ADMIN فقط');
     }
 
-    user.isActive = isActive;
-    user.suspendReason = isActive ? undefined : reason;
-    user.suspendedAt = isActive ? undefined : new Date();
+    user.accountStatus = accountStatus;
+    user.suspendReason = accountStatus === AccountStatus.ACTIVE ? undefined : reason;
+    user.suspendedAt = accountStatus === AccountStatus.ACTIVE ? undefined : new Date();
     await this.save(user);
 
-    if (!isActive) {
+    if (
+      accountStatus === AccountStatus.BLOCKED ||
+      accountStatus === AccountStatus.PERMANENTLY_BANNED
+    ) {
       await this.refreshTokenService.revokeAllForUser(targetUserId);
     }
 
@@ -252,28 +291,44 @@ export class UsersService {
       targetUserId,
       reason,
       ip,
+      {
+        before: { accountStatus: previousStatus },
+        after: { accountStatus },
+      },
     );
 
     return {
-      message: isActive ? 'تم تفعيل الحساب بنجاح' : 'تم تجميد الحساب بنجاح',
+      message: 'تم تحديث حالة الحساب بنجاح',
       userId: targetUserId,
-      isActive: user.isActive,
+      accountStatus,
+      isActive: accountStatus === AccountStatus.ACTIVE,
     };
   }
 
   async revokeSessionsForAdmin(options: {
     actorUserId: string;
+    actorSystemRole: SystemRole;
     targetUserId: string;
     reason?: string;
     ip?: string;
   }) {
-    const { actorUserId, targetUserId, reason, ip } = options;
+    const { actorUserId, actorSystemRole, targetUserId, reason, ip } = options;
     if (!Types.ObjectId.isValid(targetUserId)) {
       throw new BadRequestException('معرف المستخدم غير صالح');
     }
 
     const user = await this.findById(targetUserId);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
+    const targetSystemRole = resolveSystemRole(user);
+    if (targetSystemRole === SystemRole.SUPER_ADMIN) {
+      throw new ForbiddenException('لا يمكن للمنتج التحكم في حساب المدير الأعلى');
+    }
+    if (
+      actorSystemRole !== SystemRole.SUPER_ADMIN &&
+      targetSystemRole !== SystemRole.USER
+    ) {
+      throw new ForbiddenException('يمكن للمدير الأعلى فقط التحكم في جلسات المديرين');
+    }
 
     await this.refreshTokenService.revokeAllForUser(targetUserId);
 
@@ -293,23 +348,31 @@ export class UsersService {
 
   async updateRoleForAdmin(options: {
     actorUserId: string;
+    actorSystemRole: SystemRole;
     targetUserId: string;
-    role: UserRole;
+    systemRole: SystemRole.USER | SystemRole.ADMIN;
     reason: string;
     ip?: string;
   }) {
-    const { actorUserId, targetUserId, role, reason, ip } = options;
+    const { actorUserId, actorSystemRole, targetUserId, systemRole, reason, ip } = options;
     if (!Types.ObjectId.isValid(targetUserId)) {
       throw new BadRequestException('معرف المستخدم غير صالح');
     }
     if (actorUserId === targetUserId) {
       throw new ForbiddenException('لا يمكنك تغيير دورك الخاص');
     }
+    if (actorSystemRole !== SystemRole.SUPER_ADMIN) {
+      throw new ForbiddenException('إدارة أدوار النظام متاحة لـ SUPER_ADMIN فقط');
+    }
 
     const user = await this.findById(targetUserId);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
 
-    user.role = role;
+    const previousSystemRole = resolveSystemRole(user);
+    if (previousSystemRole === SystemRole.SUPER_ADMIN) {
+      throw new ForbiddenException('لا يمكن التحكم في SUPER_ADMIN من المنتج');
+    }
+    user.systemRole = systemRole;
     await this.save(user);
 
     // Revoke sessions so new role takes effect on next login/token issuance
@@ -321,12 +384,17 @@ export class UsersService {
       targetUserId,
       reason,
       ip,
+      {
+        before: { systemRole: previousSystemRole },
+        after: { systemRole },
+      },
     );
 
     return {
       message: 'تم تحديث دور المستخدم بنجاح',
       userId: targetUserId,
-      role: user.role,
+      systemRole: user.systemRole,
+      role: user.systemRole === SystemRole.USER ? 'user' : 'admin',
     };
   }
 
@@ -470,6 +538,10 @@ export class UsersService {
     const update: Record<string, unknown> = {
       $set: {
         kycStatus: nextStatus,
+        verificationTrustState:
+          decision === 'verified'
+            ? VerificationTrustState.VERIFIED
+            : VerificationTrustState.UNVERIFIED,
         kycReviewedAt: reviewedAt,
         ...(normalizedReason
           ? { kycRejectionReason: normalizedReason }
@@ -524,6 +596,10 @@ export class UsersService {
         },
         after: {
           kycStatus: nextStatus,
+          verificationTrustState:
+            decision === 'verified'
+              ? VerificationTrustState.VERIFIED
+              : VerificationTrustState.UNVERIFIED,
           kycVersion: expectedVersion + 1,
           kycReviewedAt: reviewedAt.toISOString(),
           ...(normalizedReason
@@ -543,6 +619,25 @@ export class UsersService {
   }
 
   async getDashboardMetricsForAdmin() {
+    const verifiedContact = {
+      $or: [
+        { emailVerifiedAt: { $exists: true } },
+        { phoneVerifiedAt: { $exists: true } },
+        { emailVerified: true },
+      ],
+    };
+    const activeAccount = {
+      $or: [
+        { accountStatus: AccountStatus.ACTIVE },
+        { accountStatus: { $exists: false }, isActive: { $ne: false } },
+      ],
+    };
+    const suspendedAccount = {
+      $or: [
+        { accountStatus: AccountStatus.SUSPENDED },
+        { accountStatus: { $exists: false }, isActive: false },
+      ],
+    };
     const [
       totalUsers,
       verifiedUsers,
@@ -556,10 +651,10 @@ export class UsersService {
       recentAuditLogs,
     ] = await Promise.all([
       this.userModel.countDocuments().exec(),
-      this.userModel.countDocuments({ emailVerified: true }).exec(),
-      this.userModel.countDocuments({ emailVerified: false }).exec(),
-      this.userModel.countDocuments({ isActive: { $ne: false } }).exec(),
-      this.userModel.countDocuments({ isActive: false }).exec(),
+      this.userModel.countDocuments(verifiedContact).exec(),
+      this.userModel.countDocuments({ $nor: verifiedContact.$or }).exec(),
+      this.userModel.countDocuments(activeAccount).exec(),
+      this.userModel.countDocuments(suspendedAccount).exec(),
       this.userModel.countDocuments({ kycStatus: KycStatus.PENDING }).exec(),
       this.userModel.countDocuments({ kycStatus: KycStatus.VERIFIED }).exec(),
       this.userModel.countDocuments({ kycStatus: KycStatus.REJECTED }).exec(),
@@ -567,7 +662,7 @@ export class UsersService {
         .find()
         .sort({ createdAt: -1 })
         .limit(5)
-        .select('fullName email phone emailVerified kycStatus createdAt')
+        .select('fullName email phone systemRole accountType accountStatus brokerStatus verificationTrustState primaryIdentifierType emailVerifiedAt phoneVerifiedAt legacyVerifiedIdentifierType role emailVerified isActive kycStatus createdAt')
         .lean()
         .exec(),
       this.auditLogService.getRecentForAdmin(5),
@@ -591,7 +686,7 @@ export class UsersService {
         fullName: u.fullName,
         email: u.email,
         phone: u.phone,
-        emailVerified: u.emailVerified,
+        ...identityProjection(u),
         kycStatus: u.kycStatus,
         createdAt: u.createdAt,
       })),
@@ -616,7 +711,7 @@ export class UsersService {
 
     const user = await this.findById(targetUserId);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
-    if (user.role === UserRole.ADMIN) {
+    if (resolveSystemRole(user) !== SystemRole.USER) {
       throw new ForbiddenException('لا يمكن حذف حساب إداري من هذه الشاشة');
     }
 

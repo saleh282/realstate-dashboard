@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
-import { UserRole } from '../auth/roles.enum';
+import { SystemRole } from '../auth/roles.enum';
 import { RolesGuard } from '../auth/roles.guard';
 import { UsersService } from '../users/users.service';
 import { DeleteAdminUserDto } from './dto/delete-admin-user.dto';
@@ -21,7 +21,7 @@ import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { RevokeSessionsDto } from './dto/revoke-sessions.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 
-@Roles(UserRole.ADMIN)
+@Roles(SystemRole.ADMIN)
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('admin/users')
 export class AdminUsersController {
@@ -33,11 +33,11 @@ export class AdminUsersController {
       page: query.page,
       limit: query.limit,
       search: query.search?.trim(),
-      role: query.role,
-      emailVerified:
-        query.emailVerified === undefined
+      systemRole: query.systemRole,
+      contactVerified:
+        query.contactVerified === undefined
           ? undefined
-          : query.emailVerified === 'true',
+          : query.contactVerified === 'true',
     });
   }
 
@@ -54,8 +54,9 @@ export class AdminUsersController {
   ) {
     return this.usersService.updateStatusForAdmin({
       actorUserId: req.user.userId,
+      actorSystemRole: req.user.systemRole,
       targetUserId,
-      isActive: dto.isActive,
+      accountStatus: dto.accountStatus,
       reason: dto.reason.trim(),
       ip: req.ip,
     });
@@ -69,6 +70,7 @@ export class AdminUsersController {
   ) {
     return this.usersService.revokeSessionsForAdmin({
       actorUserId: req.user.userId,
+      actorSystemRole: req.user.systemRole,
       targetUserId,
       reason: dto?.reason?.trim(),
       ip: req.ip,
@@ -83,8 +85,9 @@ export class AdminUsersController {
   ) {
     return this.usersService.updateRoleForAdmin({
       actorUserId: req.user.userId,
+      actorSystemRole: req.user.systemRole,
       targetUserId,
-      role: dto.role,
+      systemRole: dto.systemRole,
       reason: dto.reason.trim(),
       ip: req.ip,
     });

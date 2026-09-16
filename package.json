@@ -13,7 +13,10 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "seed:admin": "ts-node src/seeds/admin.seed.ts",
+    "seed:super-admin": "ts-node src/seeds/super-admin.seed.ts",
     "mail:test": "ts-node src/scripts/send-test-email.ts",
+    "migrate:006-money": "ts-node src/migrations/006-property-money-minor-units.ts",
+    "migrate:007-identity": "ts-node src/migrations/007-user-identity-contract.ts",
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "typecheck": "tsc --noEmit"

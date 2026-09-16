@@ -26,10 +26,20 @@ import { RefreshTokenService } from '../refresh-token/refresh-token.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
 import { hashPassword } from '../common/security/password-hashing';
-import { UserRole } from './roles.enum';
+import { SystemRole } from './roles.enum';
 import { normalizeIdentifier } from '../common/validators/identifier.validator';
 import { AuthErrorCode } from '../common/errors/auth-error-codes';
-import { randomUUID } from 'crypto';
+import {
+  AccountStatus,
+  AccountType,
+  BrokerStatus,
+  PrimaryIdentifierType,
+  VerificationTrustState,
+  identityProjection,
+  isIdentifierVerified,
+  resolveAccountStatus,
+  resolveSystemRole,
+} from '../users/identity.types';
 
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
@@ -46,6 +56,36 @@ export class AuthService {
     private refreshTokenService: RefreshTokenService,
     private auditLogService: AuditLogService,
   ) {}
+
+  private assertCanAuthenticate(user: any): AccountStatus {
+    const status = resolveAccountStatus(user);
+    if (status === AccountStatus.BLOCKED) {
+      throw new ForbiddenException({
+        message: 'هذا الحساب محظور مؤقتاً',
+        code: AuthErrorCode.ACCOUNT_BLOCKED,
+      });
+    }
+    if (status === AccountStatus.PERMANENTLY_BANNED) {
+      throw new ForbiddenException({
+        message: 'هذا الحساب محظور نهائياً',
+        code: AuthErrorCode.ACCOUNT_PERMANENTLY_BANNED,
+      });
+    }
+    return status;
+  }
+
+  private userResponse(user: any) {
+    return {
+      userId: user._id.toString(),
+      id: user._id.toString(),
+      _id: user._id.toString(),
+      fullName: user.fullName,
+      email: user.email,
+      phone: user.phone,
+      ...identityProjection(user),
+      kycStatus: user.kycStatus,
+    };
+  }
 
   private async sendOtp(identifier: string, code: string) {
     const normalized = normalizeIdentifier(identifier);
@@ -72,7 +112,7 @@ export class AuthService {
     const identifier = normalized.value;
     const existing = await this.usersService.findByIdentifier(identifier);
     if (existing) {
-      if (!existing.emailVerified) {
+      if (!isIdentifierVerified(existing, identifier)) {
         const code = await this.otpVerificationService.generateAndStore(
           identifier,
           OtpCollectionPurpose.REGISTER,
@@ -107,6 +147,15 @@ export class AuthService {
       email: normalized.kind === 'email' ? identifier : undefined,
       phone: normalized.kind === 'phone' ? identifier : undefined,
       password: passwordHash,
+      systemRole: SystemRole.USER,
+      accountType: AccountType.USER,
+      accountStatus: AccountStatus.ACTIVE,
+      brokerStatus: BrokerStatus.NOT_APPLIED,
+      verificationTrustState: VerificationTrustState.UNVERIFIED,
+      primaryIdentifierType:
+        normalized.kind === 'email'
+          ? PrimaryIdentifierType.EMAIL
+          : PrimaryIdentifierType.PHONE,
     });
 
     // مفيش تسجيل دخول تلقائي هنا. لازم يتبعت OTP الأول والمستخدم يتحقق منه
@@ -169,16 +218,13 @@ export class AuthService {
       });
     }
 
-    if (user.isActive === false) {
+    try {
+      this.assertCanAuthenticate(user);
+    } catch (error) {
       await this.auditLogService.log(AuditAction.LOGIN_FAILED, user._id.toString(), ip);
-      throw new ForbiddenException({
-        message: user.suspendReason
-          ? 'تم تجميد هذا الحساب: ' + user.suspendReason
-          : 'تم تجميد هذا الحساب من قِبل الإدارة',
-        code: AuthErrorCode.ACCOUNT_SUSPENDED,
-      });
+      throw error;
     }
-    if (!user.emailVerified) {
+    if (!isIdentifierVerified(user, identifier)) {
       await this.auditLogService.log(AuditAction.LOGIN_FAILED, user._id.toString(), ip);
       const code = await this.otpVerificationService.generateAndStore(
         identifier,
@@ -202,8 +248,6 @@ export class AuthService {
 
     const tokens = await this.issueTokens(
       user._id.toString(),
-      identifier,
-      user.role ?? UserRole.USER,
       dto.rememberMe,
       device,
     );
@@ -213,18 +257,7 @@ export class AuthService {
       ...tokens,
       userId: user._id.toString(),
       id: user._id.toString(),
-      user: {
-        userId: user._id.toString(),
-        id: user._id.toString(),
-        _id: user._id.toString(),
-        fullName: user.fullName,
-        email: user.email,
-        phone: user.phone,
-        emailVerified: user.emailVerified,
-        isActive: true,
-        role: user.role ?? UserRole.USER,
-        kycStatus: user.kycStatus,
-      },
+      user: this.userResponse(user),
     };
   }
 
@@ -261,7 +294,7 @@ export class AuthService {
       return { message: 'إذا كان الحساب موجوداً، تم إرسال رمز التحقق' };
     }
 
-    if (purpose === OtpCollectionPurpose.REGISTER && user.emailVerified) {
+    if (purpose === OtpCollectionPurpose.REGISTER && isIdentifierVerified(user, identifier)) {
       throw new ConflictException({
         message: 'الحساب مفعل بالفعل، يمكنك تسجيل الدخول',
         code: AuthErrorCode.ACCOUNT_ALREADY_VERIFIED,
@@ -301,15 +334,14 @@ export class AuthService {
     if (!user) {
       throw new BadRequestException('المستخدم غير موجود');
     }
-    if (user.isActive === false) {
-      throw new ForbiddenException({
-        message: 'تم تجميد هذا الحساب من قِبل الإدارة',
-        code: AuthErrorCode.ACCOUNT_SUSPENDED,
-      });
-    }
+    this.assertCanAuthenticate(user);
 
     if (dto.purpose === OtpPurpose.REGISTER) {
-      user.emailVerified = true;
+      if (normalizeIdentifier(identifier)?.kind === 'email') {
+        user.emailVerifiedAt = new Date();
+      } else {
+        user.phoneVerifiedAt = new Date();
+      }
       await this.usersService.save(user);
 
       return {
@@ -356,12 +388,7 @@ export class AuthService {
     if (!user) {
       throw new BadRequestException('المستخدم غير موجود');
     }
-    if (user.isActive === false) {
-      throw new ForbiddenException({
-        message: 'تم تجميد هذا الحساب من قِبل الإدارة',
-        code: AuthErrorCode.ACCOUNT_SUSPENDED,
-      });
-    }
+    this.assertCanAuthenticate(user);
 
     user.password = await hashPassword(dto.newPassword);
     user.failedLoginAttempts = 0;
@@ -381,37 +408,34 @@ export class AuthService {
   // ---------------------------------------------------------------------
   private async issueTokens(
     userId: string,
-    identifier: string,
-    role: UserRole,
     rememberMe = true,
     device = 'unknown',
   ) {
-    const accessToken = this.jwtService.sign(
-      { sub: userId, identifier, role },
+    const refreshExpiresIn = rememberMe
+      ? this.config.get('JWT_REFRESH_EXPIRES_IN') ?? '7d'
+      : '1d';
+
+    const expiresAt = new Date(
+      Date.now() + this.parseDurationMs(refreshExpiresIn),
+    );
+    const session = await this.refreshTokenService.createSession(
+      userId,
+      expiresAt,
+      device,
+    );
+    const accessToken = this.signAccessToken(userId, session.sessionId);
+
+    return { accessToken, refreshToken: session.refreshToken };
+  }
+
+  private signAccessToken(userId: string, sessionId: string) {
+    return this.jwtService.sign(
+      { sub: userId, sid: sessionId },
       {
         secret: this.config.get('JWT_ACCESS_SECRET'),
         expiresIn: this.config.get('JWT_ACCESS_EXPIRES_IN') ?? '15m',
       },
     );
-
-    const refreshExpiresIn = rememberMe
-      ? this.config.get('JWT_REFRESH_EXPIRES_IN') ?? '7d'
-      : '1d';
-
-    const refreshToken = this.jwtService.sign(
-      { sub: userId, jti: randomUUID() },
-      {
-        secret: this.config.get('JWT_REFRESH_SECRET'),
-        expiresIn: refreshExpiresIn,
-      },
-    );
-
-    const expiresAt = new Date(
-      Date.now() + this.parseDurationMs(refreshExpiresIn),
-    );
-    await this.refreshTokenService.store(userId, refreshToken, expiresAt, device);
-
-    return { accessToken, refreshToken };
   }
 
   private parseDurationMs(duration: string): number {
@@ -423,56 +447,73 @@ export class AuthService {
     return value * unitMs[unit];
   }
 
-  async refresh(userId: string, refreshToken: string, device?: string) {
-    const { device: existingDevice } = await this.refreshTokenService.verifyAndRotate(
-      userId,
+  async refresh(refreshToken: string, device?: string) {
+    let legacyUserId: string | undefined;
+    if (refreshToken.split('.').length === 3) {
+      try {
+        const payload = this.jwtService.verify<{ sub: string }>(refreshToken, {
+          secret: this.config.get('JWT_REFRESH_SECRET'),
+        });
+        legacyUserId = payload.sub;
+      } catch {
+        throw new UnauthorizedException({
+          message: 'يرجى تسجيل الدخول مرة أخرى',
+          code: AuthErrorCode.INVALID_REFRESH_TOKEN,
+        });
+      }
+    }
+    const refreshExpiresIn = this.config.get('JWT_REFRESH_EXPIRES_IN') ?? '7d';
+    const rotated = await this.refreshTokenService.rotate(
       refreshToken,
+      new Date(Date.now() + this.parseDurationMs(refreshExpiresIn)),
+      device,
+      legacyUserId,
     );
+    const userId = rotated.userId;
     const user = await this.usersService.findById(userId);
     if (!user) {
-      throw new UnauthorizedException('المستخدم غير موجود');
-    }
-    if (user.isActive === false) {
-      throw new ForbiddenException({
-        message: 'تم تجميد هذا الحساب من قِبل الإدارة',
-        code: AuthErrorCode.ACCOUNT_SUSPENDED,
+      await this.refreshTokenService.revokeSession(userId, rotated.sessionId, 'ACCOUNT_MISSING');
+      throw new UnauthorizedException({
+        message: 'يرجى تسجيل الدخول مرة أخرى',
+        code: AuthErrorCode.SESSION_REVOKED,
       });
     }
-    if (!user.emailVerified) {
+    try {
+      this.assertCanAuthenticate(user);
+    } catch (error) {
+      await this.refreshTokenService.revokeAllForUser(userId);
+      throw error;
+    }
+    const identifier = user.email ?? user.phone ?? '';
+    if (!isIdentifierVerified(user, identifier)) {
       throw new UnauthorizedException({
         message: 'الحساب غير مفعل، يرجى تسجيل الدخول لإعادة التحقق',
         code: AuthErrorCode.ACCOUNT_NOT_VERIFIED,
       });
     }
-    const tokens = await this.issueTokens(
-      userId,
-      user.email ?? user.phone ?? '',
-      user.role ?? UserRole.USER,
-      true,
-      device ?? existingDevice,
-    );
+    const accessToken = this.signAccessToken(userId, rotated.sessionId);
     return {
-      ...tokens,
+      accessToken,
+      refreshToken: rotated.refreshToken,
       userId: userId,
       id: userId,
-      user: {
-        userId: user._id.toString(),
-        id: user._id.toString(),
-        _id: user._id.toString(),
-        fullName: user.fullName,
-        email: user.email,
-        phone: user.phone,
-        emailVerified: user.emailVerified,
-        isActive: true,
-        role: user.role ?? UserRole.USER,
-        kycStatus: user.kycStatus,
-      },
+      user: this.userResponse(user),
     };
   }
 
-  async logout(userId: string, ip?: string) {
-    await this.refreshTokenService.revokeAllForUser(userId);
+  async logout(userId: string, sessionId: string | undefined, ip?: string) {
+    if (sessionId) {
+      await this.refreshTokenService.revokeSession(userId, sessionId, 'LOGOUT');
+    } else {
+      await this.refreshTokenService.revokeAllForUser(userId, 'LEGACY_LOGOUT');
+    }
     await this.auditLogService.log(AuditAction.LOGOUT, userId, ip);
     return { message: 'تم تسجيل الخروج' };
+  }
+
+  async logoutAll(userId: string, ip?: string) {
+    await this.refreshTokenService.revokeAllForUser(userId, 'LOGOUT_ALL');
+    await this.auditLogService.log(AuditAction.LOGOUT, userId, ip);
+    return { message: 'تم تسجيل الخروج من جميع الأجهزة' };
   }
 }

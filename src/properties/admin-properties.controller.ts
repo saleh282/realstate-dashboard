@@ -1,12 +1,12 @@
 import { Body, Controller, Get, Param, Patch, Query, Req, UseGuards } from '@nestjs/common';
-import { UserRole } from '../auth/roles.enum';
+import { SystemRole } from '../auth/roles.enum';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReviewPropertyDto } from './dto/review-property.dto';
 import { PropertiesService } from './properties.service';
 
-@Roles(UserRole.ADMIN)
+@Roles(SystemRole.ADMIN)
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('admin/properties')
 export class AdminPropertiesController {

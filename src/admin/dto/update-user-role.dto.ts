@@ -1,9 +1,9 @@
-import { IsEnum, IsNotEmpty, IsString, MaxLength, MinLength } from 'class-validator';
-import { UserRole } from '../../auth/roles.enum';
+import { IsIn, IsNotEmpty, IsString, MaxLength, MinLength } from 'class-validator';
+import { SystemRole } from '../../auth/roles.enum';
 
 export class UpdateUserRoleDto {
-  @IsEnum(UserRole, { message: 'الدور المحدد غير صالح' })
-  role: UserRole;
+  @IsIn([SystemRole.USER, SystemRole.ADMIN], { message: 'الدور المحدد غير صالح' })
+  systemRole: SystemRole.USER | SystemRole.ADMIN;
 
   @IsString()
   @IsNotEmpty()

@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { Allow, ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { decodeMinorUnitTransport, EGP_CURRENCY, MONEY_MINOR_MAX } from '../../common/money/money';
 
 const jsonArray = ({ value }: { value: unknown }) => {
   if (Array.isArray(value)) return value;
@@ -31,8 +32,13 @@ export class CreatePropertyDto {
   @IsString() @IsNotEmpty() finishingStatusCode: string;
   @IsString() @IsNotEmpty() deliveryStatusCode: string;
   @Transform(jsonArray) @IsArray() @ArrayUnique() @ArrayMaxSize(100) @IsString({ each: true }) amenityCodes: string[];
-  @Type(() => Number) @IsNumber() @Min(1) totalPrice: number;
-  @Type(() => Number) @IsNumber() @Min(0) downPayment: number;
+  @IsOptional() @Transform(({ value }) => decodeMinorUnitTransport(value)) @IsInt() @Min(1) @Max(MONEY_MINOR_MAX) totalPriceMinor?: number;
+  @IsOptional() @Transform(({ value }) => decodeMinorUnitTransport(value)) @IsInt() @Min(0) @Max(MONEY_MINOR_MAX) downPaymentMinor?: number;
+  @IsOptional() @IsIn([EGP_CURRENCY]) currency?: typeof EGP_CURRENCY;
+  /** @deprecated Temporary request compatibility only; never persisted. */
+  @IsOptional() @Allow() totalPrice?: unknown;
+  /** @deprecated Temporary request compatibility only; never persisted. */
+  @IsOptional() @Allow() downPayment?: unknown;
   @Transform(bool) @IsBoolean() isPriceNegotiable: boolean;
   @IsString() @IsNotEmpty() paymentMethodCode: string;
   @Transform(jsonArray) @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) imageLabels: string[];

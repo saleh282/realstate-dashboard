@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import { EGP_CURRENCY, isMoneyMinorAmount } from '../../common/money/money';
 
 export type PropertyDocument = HydratedDocument<Property>;
 
@@ -38,8 +39,24 @@ export class Property {
   @Prop({ required: true, trim: true, maxlength: 50 }) finishingStatusCode: string;
   @Prop({ required: true, trim: true, maxlength: 50 }) deliveryStatusCode: string;
   @Prop({ type: [String], default: [] }) amenityCodes: string[];
-  @Prop({ required: true, min: 1 }) totalPrice: number;
-  @Prop({ required: true, min: 0, default: 0 }) downPayment: number;
+  /** @deprecated Read-only migration source. New writes use totalPriceMinor. */
+  @Prop() totalPrice?: number;
+  /** @deprecated Read-only migration source. New writes use downPaymentMinor. */
+  @Prop() downPayment?: number;
+  @Prop({
+    required: true,
+    validate: { validator: (value: unknown) => isMoneyMinorAmount(value, { positive: true }), message: 'totalPriceMinor is outside the safe integer range' },
+  })
+  totalPriceMinor: number;
+  @Prop({
+    required: true,
+    validate: { validator: (value: unknown) => isMoneyMinorAmount(value), message: 'downPaymentMinor is outside the safe integer range' },
+  })
+  downPaymentMinor: number;
+  @Prop({ type: String, required: true, enum: [EGP_CURRENCY], default: EGP_CURRENCY, immutable: true }) currency: typeof EGP_CURRENCY;
+  @Prop() moneyMigratedAt?: Date;
+  @Prop({ trim: true }) moneyMigrationRunId?: string;
+  @Prop({ min: 1 }) moneyMigrationVersion?: number;
   @Prop({ default: false }) isPriceNegotiable: boolean;
   @Prop({ required: true, trim: true, maxlength: 50 }) paymentMethodCode: string;
   @Prop({ type: [PropertyAssetSchema], required: true }) images: PropertyAsset[];

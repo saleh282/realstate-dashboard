@@ -2,7 +2,14 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../app.module';
-import { UserRole } from '../auth/roles.enum';
+import { SystemRole } from '../auth/roles.enum';
+import {
+  AccountStatus,
+  AccountType,
+  BrokerStatus,
+  PrimaryIdentifierType,
+  VerificationTrustState,
+} from '../users/identity.types';
 import { hashPassword } from '../common/security/password-hashing';
 import { UsersService } from '../users/users.service';
 
@@ -21,13 +28,36 @@ async function seedAdmin(): Promise<void> {
 
     const existing = await users.findByIdentifier(email);
     if (existing) {
+      if (existing.systemRole === SystemRole.SUPER_ADMIN) {
+        throw new Error('Refusing to demote SUPER_ADMIN through the admin seed');
+      }
       let changed = false;
-      if (existing.role !== UserRole.ADMIN) {
-        existing.role = UserRole.ADMIN;
+      if (existing.systemRole !== SystemRole.ADMIN) {
+        existing.systemRole = SystemRole.ADMIN;
         changed = true;
       }
-      if (!existing.emailVerified) {
-        existing.emailVerified = true;
+      if (!existing.emailVerifiedAt) {
+        existing.emailVerifiedAt = new Date();
+        changed = true;
+      }
+      if (!existing.accountType) {
+        existing.accountType = AccountType.USER;
+        changed = true;
+      }
+      if (existing.accountStatus !== AccountStatus.ACTIVE) {
+        existing.accountStatus = AccountStatus.ACTIVE;
+        changed = true;
+      }
+      if (!existing.brokerStatus) {
+        existing.brokerStatus = BrokerStatus.NOT_APPLIED;
+        changed = true;
+      }
+      if (!existing.verificationTrustState) {
+        existing.verificationTrustState = VerificationTrustState.UNVERIFIED;
+        changed = true;
+      }
+      if (existing.primaryIdentifierType !== PrimaryIdentifierType.EMAIL) {
+        existing.primaryIdentifierType = PrimaryIdentifierType.EMAIL;
         changed = true;
       }
       if (changed) await users.save(existing);
@@ -39,8 +69,13 @@ async function seedAdmin(): Promise<void> {
       fullName,
       email,
       password: await hashPassword(password),
-      emailVerified: true,
-      role: UserRole.ADMIN,
+      emailVerifiedAt: new Date(),
+      systemRole: SystemRole.ADMIN,
+      accountType: AccountType.USER,
+      accountStatus: AccountStatus.ACTIVE,
+      brokerStatus: BrokerStatus.NOT_APPLIED,
+      verificationTrustState: VerificationTrustState.UNVERIFIED,
+      primaryIdentifierType: PrimaryIdentifierType.EMAIL,
     });
     Logger.log('Development admin created', 'AdminSeed');
   } finally {

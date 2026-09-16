@@ -40,6 +40,7 @@ export class KycService {
             secureUrl: result.secure_url,
             resourceType: 'image',
             deliveryType: 'authenticated',
+            format: result.format,
           });
         },
       );

@@ -44,6 +44,7 @@ describe('ThrottlerGuard integration', () => {
       ['resendOtp', 3],
       ['verifyOtp', 5],
       ['resetPassword', 5],
+      ['refresh', 10],
     ];
 
     for (const [method, limit] of expectedLimits) {
