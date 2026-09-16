@@ -300,6 +300,30 @@ describe('admin session revocation and role update', () => {
 });
 
 describe('admin KYC document metadata', () => {
+  it('does not expose legacy KYC URLs in the account profile', async () => {
+    const { service, userModel } = createService();
+    userModel.findById = jest.fn().mockReturnValue({
+      exec: jest.fn().mockResolvedValue({
+        _id: { toString: () => targetUserId },
+        fullName: 'Test User',
+        email: 'user@example.com',
+        kycStatus: 'pending',
+        idFrontUrl: 'https://provider.example/private-front',
+        idBackUrl: 'https://provider.example/private-back',
+        selfieUrl: 'https://provider.example/private-selfie',
+        idFrontAsset: { publicId: 'front' },
+        idBackAsset: { publicId: 'back' },
+        selfieAsset: { publicId: 'selfie' },
+      }),
+    });
+
+    const result = await service.getProfile(targetUserId);
+    expect(result.hasKycEvidence).toBe(true);
+    expect(result).not.toHaveProperty('idFrontUrl');
+    expect(result).not.toHaveProperty('idBackUrl');
+    expect(result).not.toHaveProperty('selfieUrl');
+  });
+
   it('returns availability flags instead of direct Cloudinary URLs', async () => {
     const { service } = createService();
     jest.spyOn(service, 'findById').mockResolvedValue({
@@ -331,7 +355,12 @@ describe('admin KYC document metadata', () => {
 
     await expect(
       service.getKycAssetForAdmin(targetUserId, 'id-back'),
-    ).resolves.toBe(idBackAsset);
+    ).resolves.toMatchObject({
+      ...idBackAsset,
+      resourceType: 'image',
+      deliveryType: 'authenticated',
+      classification: 'private_kyc_evidence',
+    });
   });
 });
 

@@ -1,14 +1,19 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { EGP_CURRENCY, isMoneyMinorAmount } from '../../common/money/money';
+import { AssetClassification, EvidenceDeliveryType } from '../../config/evidence-asset.types';
 
 export type PropertyDocument = HydratedDocument<Property>;
 
 @Schema({ _id: false })
 export class PropertyAsset {
-  @Prop({ required: true }) url: string;
+  @Prop() url?: string;
   @Prop({ required: true }) publicId: string;
   @Prop({ required: true, enum: ['image', 'raw'] }) resourceType: 'image' | 'raw';
+  @Prop({ enum: ['upload', 'authenticated'] }) deliveryType?: EvidenceDeliveryType;
+  @Prop({ enum: AssetClassification }) classification?: AssetClassification;
+  @Prop({ enum: ['jpg', 'jpeg', 'png', 'webp', 'pdf'] }) format?: 'jpg' | 'jpeg' | 'png' | 'webp' | 'pdf';
+  @Prop({ min: 1 }) bytes?: number;
   @Prop() label?: string;
 }
 

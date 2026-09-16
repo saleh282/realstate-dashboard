@@ -3,6 +3,7 @@ import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { UploadedFiles } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { KycService } from './kyc.service';
+import { EvidenceErrorCode } from '../common/errors/evidence-error-codes';
 
 const allowedKycMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
@@ -23,7 +24,7 @@ export class KycController {
         limits: { fileSize: 5 * 1024 * 1024 }, // 5MB per file
         fileFilter: (_req, file, callback) => {
           if (!allowedKycMimeTypes.has(file.mimetype)) {
-            return callback(new BadRequestException('صيغة ملف التحقق غير مدعومة'), false);
+            return callback(new BadRequestException({ message: 'صيغة ملف التحقق غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
           }
           callback(null, true);
         },

@@ -1,104 +1,52 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import * as streamifier from 'streamifier';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { validateEvidenceFile } from '../common/uploads/evidence-file.validator';
+import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
+import { AssetClassification, StoredAssetMetadata } from '../config/evidence-asset.types';
+import { KycStatus } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
-import { KycAssetMetadata, KycStatus } from '../users/schemas/user.schema';
-import { CLOUDINARY } from '../config/cloudinary.provider';
+
+const KYC_POLICY = { kind: 'image' as const, maxBytes: 5 * 1024 * 1024, maxImagePixels: 40_000_000 };
 
 @Injectable()
 export class KycService {
   constructor(
-    private usersService: UsersService,
-    @Inject(CLOUDINARY) private cloudinary: any,
+    private readonly usersService: UsersService,
+    private readonly assets: CloudinaryAssetService,
   ) {}
 
-  private isExpectedImage(file: Express.Multer.File): boolean {
-    const bytes = file.buffer;
-    const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-    const isPng =
-      bytes.length >= 8 &&
-      bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-    const isWebp =
-      bytes.length >= 12 &&
-      bytes.subarray(0, 4).toString('ascii') === 'RIFF' &&
-      bytes.subarray(8, 12).toString('ascii') === 'WEBP';
-    return ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype) && (isJpeg || isPng || isWebp);
-  }
-
-  private uploadToCloudinary(file: Express.Multer.File, folder: string): Promise<KycAssetMetadata> {
-    return new Promise((resolve, reject) => {
-      const uploadStream = this.cloudinary.uploader.upload_stream(
-        {
-          folder: `real-estate-auction/kyc/${folder}`,
-          resource_type: 'image',
-          type: 'authenticated',
-          access_mode: 'authenticated',
-        },
-        (error: any, result: any) => {
-          if (error) return reject(new BadRequestException('فشل رفع الصورة'));
-          resolve({
-            publicId: result.public_id,
-            secureUrl: result.secure_url,
-            resourceType: 'image',
-            deliveryType: 'authenticated',
-            format: result.format,
-          });
-        },
-      );
-      streamifier.createReadStream(file.buffer).pipe(uploadStream);
-    });
-  }
-
-  // Screen 6: (KYC) 
   async submit(
     userId: string,
-    files: {
-      idFront?: Express.Multer.File[];
-      idBack?: Express.Multer.File[];
-      selfie?: Express.Multer.File[];
-    },
+    files: { idFront?: Express.Multer.File[]; idBack?: Express.Multer.File[]; selfie?: Express.Multer.File[] },
   ) {
     const user = await this.usersService.findById(userId);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
-
     if (!files.idFront?.[0] || !files.idBack?.[0] || !files.selfie?.[0]) {
-      throw new BadRequestException(
-        'يرجى إرفاق صورة الهوية (الوجه الأمامي والخلفي) والصورة الشخصية',
-      );
+      throw new BadRequestException('يرجى إرفاق صورة الهوية (الوجه الأمامي والخلفي) والصورة الشخصية');
     }
 
-    const uploadFiles = [files.idFront[0], files.idBack[0], files.selfie[0]];
-    if (uploadFiles.some((file) => !this.isExpectedImage(file))) {
-      throw new BadRequestException('صيغة أحد ملفات التحقق غير مدعومة أو لا تطابق محتواه');
-    }
-
-    const uploaded = await Promise.allSettled([
-      this.uploadToCloudinary(files.idFront[0], 'id-front'),
-      this.uploadToCloudinary(files.idBack[0], 'id-back'),
-      this.uploadToCloudinary(files.selfie[0], 'selfie'),
+    const input = [files.idFront[0], files.idBack[0], files.selfie[0]];
+    const detected = input.map((file) => validateEvidenceFile(file, KYC_POLICY));
+    const uploads = await Promise.allSettled([
+      this.assets.uploadPrivateEvidence(input[0], 'kyc/id-front', AssetClassification.PRIVATE_KYC_EVIDENCE, detected[0]),
+      this.assets.uploadPrivateEvidence(input[1], 'kyc/id-back', AssetClassification.PRIVATE_KYC_EVIDENCE, detected[1]),
+      this.assets.uploadPrivateEvidence(input[2], 'kyc/selfie', AssetClassification.PRIVATE_KYC_EVIDENCE, detected[2]),
     ]);
-
-    const successfulAssets = uploaded
-      .filter((result): result is PromiseFulfilledResult<KycAssetMetadata> => result.status === 'fulfilled')
+    const successful = uploads
+      .filter((result): result is PromiseFulfilledResult<StoredAssetMetadata> => result.status === 'fulfilled')
       .map((result) => result.value);
-    if (uploaded.some((result) => result.status === 'rejected')) {
-      await Promise.allSettled(
-        successfulAssets.map((asset) =>
-          this.cloudinary.uploader.destroy(asset.publicId, {
-            resource_type: asset.resourceType,
-            type: asset.deliveryType,
-            invalidate: true,
-          }),
-        ),
-      );
-      throw new BadRequestException('فشل رفع صور التحقق');
+    if (uploads.some((result) => result.status === 'rejected')) {
+      await this.assets.deleteOrEnqueue(successful, 'partial-kyc-upload');
+      const rejected = uploads.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      throw rejected?.reason ?? new BadRequestException('فشل رفع صور التحقق');
     }
 
-    const [idFrontAsset, idBackAsset, selfieAsset] = successfulAssets;
-    const oldAssets = [user.idFrontAsset, user.idBackAsset, user.selfieAsset];
-
-    user.idFrontUrl = idFrontAsset.secureUrl;
-    user.idBackUrl = idBackAsset.secureUrl;
-    user.selfieUrl = selfieAsset.secureUrl;
+    const [idFrontAsset, idBackAsset, selfieAsset] = successful;
+    const oldAssets = [user.idFrontAsset, user.idBackAsset, user.selfieAsset]
+      .filter(Boolean)
+      .map((asset) => this.normalizeLegacyAsset(asset as StoredAssetMetadata));
+    user.idFrontUrl = undefined;
+    user.idBackUrl = undefined;
+    user.selfieUrl = undefined;
     user.idFrontAsset = idFrontAsset;
     user.idBackAsset = idBackAsset;
     user.selfieAsset = selfieAsset;
@@ -108,19 +56,13 @@ export class KycService {
     user.kycRejectionReason = undefined;
     user.kycVersion = (user.kycVersion ?? 0) + 1;
 
-    await this.usersService.save(user);
-
-    await Promise.allSettled(
-      oldAssets
-        .filter((asset): asset is KycAssetMetadata => Boolean(asset?.publicId))
-        .map((asset) =>
-          this.cloudinary.uploader.destroy(asset.publicId, {
-            resource_type: asset.resourceType,
-            type: asset.deliveryType,
-            invalidate: true,
-          }),
-        ),
-    );
+    try {
+      await this.usersService.save(user);
+    } catch (error) {
+      await this.assets.deleteOrEnqueue(successful, 'kyc-database-write-failed');
+      throw error;
+    }
+    await this.assets.deleteOrEnqueue(oldAssets, 'kyc-evidence-replaced');
 
     return {
       userId: user._id.toString(),
@@ -134,7 +76,6 @@ export class KycService {
   async getStatus(userId: string) {
     const user = await this.usersService.findById(userId);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
-
     return {
       userId: user._id.toString(),
       id: user._id.toString(),
@@ -146,4 +87,12 @@ export class KycService {
     };
   }
 
+  private normalizeLegacyAsset(asset: StoredAssetMetadata): StoredAssetMetadata {
+    return {
+      ...asset,
+      resourceType: asset.resourceType ?? 'image',
+      deliveryType: asset.deliveryType ?? 'authenticated',
+      classification: asset.classification ?? AssetClassification.PRIVATE_KYC_EVIDENCE,
+    };
+  }
 }

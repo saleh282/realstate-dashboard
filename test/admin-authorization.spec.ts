@@ -17,6 +17,9 @@ import { RolesGuard } from '../src/auth/roles.guard';
 import { UserRole } from '../src/auth/roles.enum';
 import { CloudinaryAssetService } from '../src/config/cloudinary-asset.service';
 import { UsersService } from '../src/users/users.service';
+import { AdminPropertiesController } from '../src/properties/admin-properties.controller';
+import { PropertiesController } from '../src/properties/properties.controller';
+import { PropertiesService } from '../src/properties/properties.service';
 
 class TestJwtAuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
@@ -58,6 +61,10 @@ describe('admin controller authorization', () => {
       contentType: 'image/jpeg',
     }),
   };
+  const propertiesService = {
+    downloadTitleDeedForOwner: jest.fn().mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
+    downloadTitleDeedForAdmin: jest.fn().mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
+  };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -66,6 +73,8 @@ describe('admin controller authorization', () => {
         AdminKycController,
         AdminDashboardController,
         AdminAuditController,
+        AdminPropertiesController,
+        PropertiesController,
       ],
       providers: [
         RolesGuard,
@@ -75,6 +84,7 @@ describe('admin controller authorization', () => {
           provide: CloudinaryAssetService,
           useValue: cloudinaryAssetService,
         },
+        { provide: PropertiesService, useValue: propertiesService },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -133,6 +143,24 @@ describe('admin controller authorization', () => {
       .get('/admin/kyc/64b000000000000000000002/documents/id-front')
       .set('Authorization', 'Bearer admin')
       .expect('Content-Type', 'image/jpeg')
+      .expect('Cache-Control', 'private, no-store, max-age=0')
+      .expect(200);
+  });
+
+  it('protects property evidence for the owner and administrative review', async () => {
+    const ownerPath = '/properties/mine/64b000000000000000000099/evidence/title-deed';
+    await request(app.getHttpServer()).get(ownerPath).expect(401);
+    await request(app.getHttpServer())
+      .get(ownerPath)
+      .set('Authorization', 'Bearer user')
+      .expect('Cache-Control', 'private, no-store, max-age=0')
+      .expect(200);
+
+    const adminPath = '/admin/properties/64b000000000000000000099/evidence/title-deed';
+    await request(app.getHttpServer()).get(adminPath).set('Authorization', 'Bearer user').expect(403);
+    await request(app.getHttpServer())
+      .get(adminPath)
+      .set('Authorization', 'Bearer admin')
       .expect('Cache-Control', 'private, no-store, max-age=0')
       .expect(200);
   });
