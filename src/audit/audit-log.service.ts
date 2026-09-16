@@ -66,6 +66,27 @@ export class AuditLogService {
     }
   }
 
+  async logResourceAction(
+    action: AuditAction,
+    actorUserId: string,
+    targetResourceId: string,
+    reason: string,
+    ip?: string,
+  ): Promise<void> {
+    try {
+      await this.auditModel.create({
+        action,
+        userId: new Types.ObjectId(actorUserId),
+        actorUserId: new Types.ObjectId(actorUserId),
+        targetResourceId,
+        reason,
+        ip: ip ?? 'unknown',
+      });
+    } catch {
+      this.logger.warn(`Failed to write resource audit log (${action})`);
+    }
+  }
+
   async listForAdmin(options: {
     page?: number;
     limit?: number;

@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { v2 as Cloudinary } from 'cloudinary';
@@ -13,6 +13,13 @@ import { Property, PropertyAsset, PropertyDocument } from './schemas/property.sc
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
 import { normalizePropertyMoneyInput, propertyMoneyFromStoredRecord } from '../common/money/money';
+import { validateEvidenceFile } from '../common/uploads/evidence-file.validator';
+import { EvidenceErrorCode } from '../common/errors/evidence-error-codes';
+import { AssetClassification, StoredAssetMetadata } from '../config/evidence-asset.types';
+import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
+
+const PROPERTY_IMAGE_POLICY = { kind: 'image' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000 };
+const PROPERTY_EVIDENCE_POLICY = { kind: 'document' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000, allowPdf: true };
 
 @Injectable()
 export class PropertiesService {
@@ -23,6 +30,7 @@ export class PropertiesService {
     @InjectModel(PropertyOption.name) private readonly options: Model<PropertyOptionDocument>,
     @InjectModel(Governorate.name) private readonly governorates: Model<GovernorateDocument>,
     @Inject(CLOUDINARY) private readonly cloudinary: typeof Cloudinary,
+    private readonly evidenceAssets: CloudinaryAssetService,
     private readonly audit: AuditLogService,
   ) {}
 
@@ -38,10 +46,14 @@ export class PropertiesService {
     }
     const images = files?.images ?? [];
     if (!images.length) throw new BadRequestException('يجب إرفاق صورة واحدة للعقار على الأقل');
+    if (images.length > 20) throw new BadRequestException({ message: 'عدد صور العقار يتجاوز الحد المسموح', code: EvidenceErrorCode.FILE_COUNT_EXCEEDED });
     if (dto.imageLabels.length !== images.length) throw new BadRequestException('عدد مسميات الصور لا يطابق عدد الصور');
     if (dto.coverImageIndex >= images.length) throw new BadRequestException('صورة الغلاف المحددة غير صالحة');
     if (dto.floor > dto.totalFloors) throw new BadRequestException('رقم الطابق لا يمكن أن يتجاوز عدد الطوابق');
     if (money.downPaymentMinor > money.totalPriceMinor) throw new BadRequestException('المقدم لا يمكن أن يتجاوز السعر الإجمالي');
+    const detectedImages = images.map((image) => validateEvidenceFile(image, PROPERTY_IMAGE_POLICY));
+    const deedFile = files.titleDeed?.[0];
+    const detectedDeed = deedFile ? validateEvidenceFile(deedFile, PROPERTY_EVIDENCE_POLICY) : undefined;
 
     const [type, governorate, finishing, delivery, payment, amenityCount] = await Promise.all([
       this.propertyTypes.findOne({ code: dto.propertyTypeCode, isActive: true }).lean().exec(),
@@ -54,16 +66,27 @@ export class PropertiesService {
     const invalid = [!type && 'نوع العقار', !governorate && 'المحافظة', !finishing && 'حالة التشطيب', !delivery && 'جاهزية التسليم', !payment && 'طريقة السداد'].filter(Boolean);
     if (invalid.length || amenityCount !== dto.amenityCodes.length) throw new BadRequestException(`بعض الاختيارات غير موجودة أو غير متاحة: ${invalid.join('، ')}${amenityCount !== dto.amenityCodes.length ? `${invalid.length ? '، ' : ''}المميزات والخدمات` : ''}`);
 
-    const uploaded: PropertyAsset[] = [];
+    const uploadedPublic: PropertyAsset[] = [];
+    let titleDeed: PropertyAsset | undefined;
     let createdPropertyId: Types.ObjectId | undefined;
     try {
-      for (let i = 0; i < images.length; i++) uploaded.push({ ...(await this.upload(images[i], 'properties/images')), label: dto.imageLabels[i] });
-      let titleDeed: PropertyAsset | undefined;
-      if (files.titleDeed?.[0]) titleDeed = await this.upload(files.titleDeed[0], 'properties/title-deeds');
-      if (titleDeed) uploaded.push(titleDeed);
+      for (let i = 0; i < images.length; i++) {
+        uploadedPublic.push({
+          ...(await this.uploadPublicImage(images[i], detectedImages[i].format)),
+          label: dto.imageLabels[i],
+        });
+      }
+      if (deedFile && detectedDeed) {
+        titleDeed = await this.evidenceAssets.uploadPrivateEvidence(
+          deedFile,
+          'properties/title-deeds',
+          AssetClassification.PRIVATE_PROPERTY_EVIDENCE,
+          detectedDeed,
+        ) as PropertyAsset;
+      }
 
       const { totalPriceMinor: _totalPriceMinor, downPaymentMinor: _downPaymentMinor, currency: _currency, totalPrice: _totalPrice, downPayment: _downPayment, ...propertyData } = dto;
-      const property = await this.properties.create({ ownerId: new Types.ObjectId(ownerId), ...propertyData, ...money, images: uploaded.slice(0, images.length), titleDeed, status: 'pending_review' });
+      const property = await this.properties.create({ ownerId: new Types.ObjectId(ownerId), ...propertyData, ...money, images: uploadedPublic, titleDeed, status: 'pending_review' });
       createdPropertyId = property._id;
       await Promise.all([
         this.propertyTypes.updateOne({ code: dto.propertyTypeCode }, { $inc: { usageCount: 1 } }).exec(),
@@ -71,10 +94,14 @@ export class PropertiesService {
         this.options.updateMany({ code: { $in: [dto.finishingStatusCode, dto.deliveryStatusCode, dto.paymentMethodCode] } }, { $inc: { usageCount: 1 } }).exec(),
         dto.amenityCodes.length ? this.amenities.updateMany({ code: { $in: dto.amenityCodes } }, { $inc: { usageCount: 1 } }).exec() : Promise.resolve(),
       ]);
+      if (titleDeed) {
+        await this.audit.logResourceAction(AuditAction.PRIVATE_EVIDENCE_UPLOADED, ownerId, property._id.toString(), 'property-title-deed');
+      }
       return { message: 'تم إرسال العقار للمراجعة بنجاح', property: this.toPublic(property.toObject()) };
     } catch (error) {
       if (createdPropertyId) await this.properties.deleteOne({ _id: createdPropertyId }).exec().catch(() => undefined);
-      await Promise.allSettled(uploaded.map(asset => this.cloudinary.uploader.destroy(asset.publicId, { resource_type: asset.resourceType })));
+      await Promise.allSettled(uploadedPublic.map(asset => this.cloudinary.uploader.destroy(asset.publicId, { resource_type: asset.resourceType, type: 'upload', invalidate: true })));
+      if (titleDeed) await this.evidenceAssets.deleteOrEnqueue([titleDeed as StoredAssetMetadata], 'property-create-failed');
       throw error;
     }
   }
@@ -153,16 +180,77 @@ export class PropertiesService {
     return { message: messages[status], property: this.toAdmin(item, true) };
   }
 
+  async downloadTitleDeedForOwner(ownerId: string, id: string, ip?: string) {
+    this.assertId(id);
+    const item = await this.properties.findById(id).lean().exec();
+    if (!item) throw new NotFoundException({ message: 'العقار غير موجود', code: EvidenceErrorCode.NOT_FOUND });
+    if (item.ownerId.toString() !== ownerId) {
+      throw new ForbiddenException({ message: 'لا يمكنك الوصول إلى مستندات هذا العقار', code: EvidenceErrorCode.ACCESS_FORBIDDEN });
+    }
+    const asset = this.privateTitleDeed(item.titleDeed);
+    const result = await this.evidenceAssets.downloadAuthenticatedAsset(asset);
+    await this.audit.logResourceAction(AuditAction.PRIVATE_EVIDENCE_ACCESSED, ownerId, id, 'property-title-deed-owner-access', ip);
+    return result;
+  }
+
+  async downloadTitleDeedForAdmin(id: string, actorId: string, ip?: string) {
+    this.assertId(id);
+    const item = await this.properties.findById(id).lean().exec();
+    if (!item) throw new NotFoundException({ message: 'العقار غير موجود', code: EvidenceErrorCode.NOT_FOUND });
+    const asset = this.privateTitleDeed(item.titleDeed);
+    const result = await this.evidenceAssets.downloadAuthenticatedAsset(asset);
+    await this.audit.logAdminResourceAction(AuditAction.PRIVATE_EVIDENCE_ACCESSED, actorId, id, 'property-title-deed-admin-access', ip);
+    return result;
+  }
+
   private assertId(id: string) { if (!Types.ObjectId.isValid(id)) throw new BadRequestException('معرّف العقار غير صالح'); }
-  private upload(file: Express.Multer.File, folder: string): Promise<PropertyAsset> { return new Promise((resolve, reject) => { const resourceType = file.mimetype === 'application/pdf' ? 'raw' : 'image'; const stream = this.cloudinary.uploader.upload_stream({ folder, resource_type: resourceType }, (error, result) => error || !result ? reject(error ?? new Error('Upload failed')) : resolve({ url: result.secure_url, publicId: result.public_id, resourceType })); streamifier.createReadStream(file.buffer).pipe(stream); }); }
+  private uploadPublicImage(file: Express.Multer.File, format: 'jpg' | 'png' | 'webp' | 'pdf'): Promise<PropertyAsset> {
+    return new Promise((resolve, reject) => {
+      const stream = this.cloudinary.uploader.upload_stream(
+        { folder: 'real-estate-auction/public/properties/images', resource_type: 'image', type: 'upload', use_filename: false, unique_filename: true, overwrite: false },
+        (error, result) => error || !result
+          ? reject(new ServiceUnavailableException({ message: 'تعذر رفع صورة العقار', code: EvidenceErrorCode.UPLOAD_FAILED }))
+          : resolve({
+              url: result.secure_url,
+              publicId: result.public_id,
+              resourceType: 'image',
+              deliveryType: 'upload',
+              classification: AssetClassification.PUBLIC_PROPERTY_MEDIA,
+              format: format === 'pdf' ? undefined : format,
+              bytes: file.buffer.length,
+            }),
+      );
+      streamifier.createReadStream(file.buffer).pipe(stream);
+    });
+  }
+
+  private privateTitleDeed(asset?: PropertyAsset): StoredAssetMetadata {
+    if (!asset?.publicId) {
+      throw new NotFoundException({ message: 'مستند ملكية العقار غير موجود', code: EvidenceErrorCode.NOT_FOUND });
+    }
+    return {
+      publicId: asset.publicId,
+      resourceType: asset.resourceType,
+      deliveryType: asset.deliveryType ?? 'upload',
+      classification: asset.classification ?? AssetClassification.PRIVATE_PROPERTY_EVIDENCE,
+      format: asset.format,
+      bytes: asset.bytes,
+      secureUrl: asset.url,
+    };
+  }
+
+  private publicImages(images: PropertyAsset[] = []) {
+    return images.map((image) => ({ url: image.url, label: image.label }));
+  }
+
   private toPublic(item: any) {
     const money = propertyMoneyFromStoredRecord(item);
-    return { id: item._id.toString(), operationType: item.operationType, propertyTypeCode: item.propertyTypeCode, title: item.title, description: item.description, governorateCode: item.governorateCode, city: item.city, district: item.district, area: item.area, bedrooms: item.bedrooms, bathrooms: item.bathrooms, floor: item.floor, ...money, images: item.images, coverImageIndex: item.coverImageIndex, hasTitleDeed: Boolean(item.titleDeed), advertiserType: item.advertiserType, isOwnerVisible: item.isOwnerVisible !== false, status: item.status, reviewReason: item.reviewReason, reviewedAt: item.reviewedAt, createdAt: item.createdAt };
+    return { id: item._id.toString(), operationType: item.operationType, propertyTypeCode: item.propertyTypeCode, title: item.title, description: item.description, governorateCode: item.governorateCode, city: item.city, district: item.district, area: item.area, bedrooms: item.bedrooms, bathrooms: item.bathrooms, floor: item.floor, ...money, images: this.publicImages(item.images), coverImageIndex: item.coverImageIndex, hasTitleDeed: Boolean(item.titleDeed?.publicId), advertiserType: item.advertiserType, isOwnerVisible: item.isOwnerVisible !== false, status: item.status, reviewReason: item.reviewReason, reviewedAt: item.reviewedAt, createdAt: item.createdAt };
   }
   private toAdmin(item: any, detailed = false) {
     const populatedOwner = item.ownerId && typeof item.ownerId === 'object' && item.ownerId.fullName;
     const owner = populatedOwner ? { id: item.ownerId._id.toString(), fullName: item.ownerId.fullName, email: item.ownerId.email, phone: item.ownerId.phone } : undefined;
     const base = { ...this.toPublic(item), owner, reviewReason: item.reviewReason, reviewedAt: item.reviewedAt };
-    return detailed ? { ...base, street: item.street, additionalAddressDetails: item.additionalAddressDetails, latitude: item.latitude, longitude: item.longitude, bedrooms: item.bedrooms, livingRooms: item.livingRooms, kitchens: item.kitchens, bathrooms: item.bathrooms, floor: item.floor, totalFloors: item.totalFloors, buildingYear: item.buildingYear, finishingStatusCode: item.finishingStatusCode, deliveryStatusCode: item.deliveryStatusCode, amenityCodes: item.amenityCodes, isPriceNegotiable: item.isPriceNegotiable, paymentMethodCode: item.paymentMethodCode, titleDeed: item.titleDeed, advertiserType: item.advertiserType, hidePhone: item.hidePhone } : base;
+    return detailed ? { ...base, street: item.street, additionalAddressDetails: item.additionalAddressDetails, latitude: item.latitude, longitude: item.longitude, bedrooms: item.bedrooms, livingRooms: item.livingRooms, kitchens: item.kitchens, bathrooms: item.bathrooms, floor: item.floor, totalFloors: item.totalFloors, buildingYear: item.buildingYear, finishingStatusCode: item.finishingStatusCode, deliveryStatusCode: item.deliveryStatusCode, amenityCodes: item.amenityCodes, isPriceNegotiable: item.isPriceNegotiable, paymentMethodCode: item.paymentMethodCode, hasTitleDeed: Boolean(item.titleDeed?.publicId), advertiserType: item.advertiserType, hidePhone: item.hidePhone } : base;
   }
 }

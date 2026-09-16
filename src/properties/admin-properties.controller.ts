@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query, Req, Res, StreamableFile, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { SystemRole } from '../auth/roles.enum';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
@@ -19,6 +20,22 @@ export class AdminPropertiesController {
 
   @Get(':propertyId')
   get(@Param('propertyId') id: string) { return this.service.getForAdmin(id); }
+
+  @Get(':propertyId/evidence/title-deed')
+  async getTitleDeed(
+    @Param('propertyId') id: string,
+    @Req() req: any,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const evidence = await this.service.downloadTitleDeedForAdmin(id, req.user.userId, req.ip);
+    response.set({
+      'Content-Type': evidence.contentType,
+      'Content-Disposition': 'inline; filename="property-evidence"',
+      'Cache-Control': 'private, no-store, max-age=0',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    return new StreamableFile(evidence.buffer);
+  }
 
   @Patch(':propertyId/status')
   review(@Param('propertyId') id: string, @Body() dto: ReviewPropertyDto, @Req() req: any) {

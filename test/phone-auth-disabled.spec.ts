@@ -127,6 +127,7 @@ describe('V1 email-only authentication', () => {
       success: false,
       message: 'Phone authentication is unavailable',
       code: AuthErrorCode.PHONE_AUTH_UNAVAILABLE,
+      requestId: expect.any(String),
     });
   });
 

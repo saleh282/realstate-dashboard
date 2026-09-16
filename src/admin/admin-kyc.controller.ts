@@ -50,6 +50,7 @@ export class AdminKycController {
     @Param('userId') targetUserId: string,
     @Param('document') document: string,
     @Res({ passthrough: true }) response: Response,
+    @Req() req: any,
   ) {
     if (!['id-front', 'id-back', 'selfie'].includes(document)) {
       throw new NotFoundException('مستند التحقق غير موجود');
@@ -60,6 +61,12 @@ export class AdminKycController {
     );
     const downloaded =
       await this.cloudinaryAssetService.downloadAuthenticatedAsset(asset);
+    await this.usersService.logKycEvidenceAccess?.(
+      req.user.userId,
+      targetUserId,
+      document,
+      req.ip,
+    );
 
     response.set({
       'Content-Type': downloaded.contentType,

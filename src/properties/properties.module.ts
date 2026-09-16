@@ -11,9 +11,10 @@ import { PropertiesService } from './properties.service';
 import { Property, PropertySchema } from './schemas/property.schema';
 import { AuditModule } from '../audit/audit.module';
 import { RolesGuard } from '../auth/roles.guard';
+import { CloudinaryModule } from '../config/cloudinary.module';
 
 @Module({
-  imports: [PassportModule, AuditModule, MongooseModule.forFeature([
+  imports: [PassportModule, AuditModule, CloudinaryModule, MongooseModule.forFeature([
     { name: Property.name, schema: PropertySchema }, { name: PropertyType.name, schema: PropertyTypeSchema },
     { name: Amenity.name, schema: AmenitySchema }, { name: PropertyOption.name, schema: PropertyOptionSchema },
     { name: Governorate.name, schema: GovernorateSchema },

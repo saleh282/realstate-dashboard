@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
+import { StoredAssetMetadata } from '../../config/evidence-asset.types';
 import { SystemRole } from '../../auth/roles.enum';
 import {
   AccountStatus,
@@ -131,12 +132,6 @@ export class User {
   kycVersion: number;
 }
 
-export interface KycAssetMetadata {
-  publicId: string;
-  secureUrl: string;
-  resourceType: 'image';
-  deliveryType: 'authenticated';
-  format?: 'jpg' | 'jpeg' | 'png' | 'webp';
-}
+export type KycAssetMetadata = StoredAssetMetadata;
 
 export const UserSchema = SchemaFactory.createForClass(User);

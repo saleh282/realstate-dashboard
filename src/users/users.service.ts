@@ -21,6 +21,7 @@ import {
 } from '../common/validators/identifier.validator';
 import { hashPassword } from '../common/security/password-hashing';
 import { AuthErrorCode } from '../common/errors/auth-error-codes';
+import { AssetClassification } from '../config/evidence-asset.types';
 import {
   AccountStatus,
   VerificationTrustState,
@@ -80,9 +81,11 @@ export class UsersService {
       kycStatus: user.kycStatus,
       suspendReason: user.suspendReason,
       suspendedAt: user.suspendedAt,
-      idFrontUrl: user.idFrontUrl,
-      idBackUrl: user.idBackUrl,
-      selfieUrl: user.selfieUrl,
+      hasKycEvidence: Boolean(
+        user.idFrontAsset?.publicId &&
+        user.idBackAsset?.publicId &&
+        user.selfieAsset?.publicId,
+      ),
       kycSubmittedAt: user.kycSubmittedAt,
       kycReviewedAt: user.kycReviewedAt,
       kycRejectionReason: user.kycRejectionReason,
@@ -500,7 +503,22 @@ export class UsersService {
         'مستند التحقق غير متاح أو يفتقد بيانات التخزين الآمنة',
       );
     }
-    return asset;
+    return {
+      ...asset,
+      resourceType: asset.resourceType ?? 'image',
+      deliveryType: asset.deliveryType ?? 'authenticated',
+      classification: asset.classification ?? AssetClassification.PRIVATE_KYC_EVIDENCE,
+    };
+  }
+
+  async logKycEvidenceAccess(actorUserId: string, targetUserId: string, document: string, ip?: string) {
+    await this.auditLogService.logAdminAction(
+      AuditAction.PRIVATE_EVIDENCE_ACCESSED,
+      actorUserId,
+      targetUserId,
+      `kyc-document:${document}`,
+      ip,
+    );
   }
 
   async reviewKycForAdmin(options: {
