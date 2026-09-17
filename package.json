@@ -17,6 +17,11 @@
     "mail:test": "ts-node src/scripts/send-test-email.ts",
     "migrate:006-money": "ts-node src/migrations/006-property-money-minor-units.ts",
     "migrate:007-identity": "ts-node src/migrations/007-user-identity-contract.ts",
+    "migration:list": "ts-node src/migrations/cli.ts --list",
+    "migration:check": "ts-node src/migrations/cli.ts --dry-run",
+    "migration:apply": "ts-node src/migrations/cli.ts --apply",
+    "migration:integrity": "ts-node src/migrations/integrity-cli.ts",
+    "migration:integrity:strict": "ts-node src/migrations/integrity-cli.ts --fail-on-warning",
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "typecheck": "tsc --noEmit"
