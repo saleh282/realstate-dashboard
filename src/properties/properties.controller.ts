@@ -16,15 +16,15 @@ export class PropertiesController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'titleDeed', maxCount: 1 }], {
-    limits: { fileSize: 10 * 1024 * 1024, files: 21 },
+  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'entranceImage', maxCount: 1 }, { name: 'titleDeed', maxCount: 1 }], {
+    limits: { fileSize: 10 * 1024 * 1024, files: 22 },
     fileFilter: (_req, file, cb) => {
-      const allowed = file.fieldname === 'images' ? allowedImages : allowedDeeds;
+      const allowed = file.fieldname === 'titleDeed' ? allowedDeeds : allowedImages;
       return allowed.has(file.mimetype) ? cb(null, true) : cb(new BadRequestException({ message: 'صيغة أحد ملفات العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
     },
   }))
-  create(@Req() req: any, @Body() dto: CreatePropertyDto, @UploadedFiles() files: { images?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] }) {
-    return this.service.create(req.user.userId, dto, files);
+  create(@Req() req: any, @Body() dto: CreatePropertyDto, @UploadedFiles() files: { images?: Express.Multer.File[]; entranceImage?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] }) {
+    return this.service.createSelf(req.user.userId, dto, files, req.ip);
   }
 
   @Get()

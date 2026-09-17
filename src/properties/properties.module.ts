@@ -12,10 +12,14 @@ import { Property, PropertySchema } from './schemas/property.schema';
 import { AuditModule } from '../audit/audit.module';
 import { RolesGuard } from '../auth/roles.guard';
 import { CloudinaryModule } from '../config/cloudinary.module';
+import { PropertyRevision, PropertyRevisionSchema } from './schemas/property-revision.schema';
+import { PropertyPurposeCategoriesModule } from '../property-purpose-categories/property-purpose-categories.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
-  imports: [PassportModule, AuditModule, CloudinaryModule, MongooseModule.forFeature([
+  imports: [PassportModule, AuditModule, CloudinaryModule, PropertyPurposeCategoriesModule, UsersModule, MongooseModule.forFeature([
     { name: Property.name, schema: PropertySchema }, { name: PropertyType.name, schema: PropertyTypeSchema },
+    { name: PropertyRevision.name, schema: PropertyRevisionSchema },
     { name: Amenity.name, schema: AmenitySchema }, { name: PropertyOption.name, schema: PropertyOptionSchema },
     { name: Governorate.name, schema: GovernorateSchema },
   ])],

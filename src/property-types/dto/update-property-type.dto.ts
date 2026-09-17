@@ -1,7 +1,10 @@
-import { IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import { PROPERTY_TYPE_ICON_KEYS } from '../property-type-options';
 
 export class UpdatePropertyTypeDto {
+  @IsOptional()
+  @IsMongoId()
+  purposeCategoryId?: string;
   @IsOptional()
   @IsString()
   @IsNotEmpty()

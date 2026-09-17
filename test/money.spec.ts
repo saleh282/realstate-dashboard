@@ -57,18 +57,18 @@ describe('V1 EGP minor-unit contract', () => {
 
   it('accepts canonical multipart integers and rejects fraction/coercion/overflow DTO values', async () => {
     const base = {
-      operationType: 'sale', propertyTypeCode: 'apartment', title: 'valid property title', description: 'a sufficiently detailed property description',
+      operationType: 'sale', purposeCategoryId: '64b000000000000000000010', purposeSubcategoryId: '64b000000000000000000011', title: 'valid property title', description: 'a sufficiently detailed property description',
       governorateCode: 'cairo', city: 'Cairo', district: 'District', latitude: 30, longitude: 31, area: 100,
       bedrooms: 2, livingRooms: 1, kitchens: 1, bathrooms: 1, floor: 1, totalFloors: 5, buildingYear: 2020,
       finishingStatusCode: 'finished', deliveryStatusCode: 'ready', amenityCodes: [], isPriceNegotiable: false,
-      paymentMethodCode: 'cash', imageLabels: ['front'], coverImageIndex: 0, advertiserType: 'owner', hidePhone: false,
+      paymentMethodCodes: ['cash'], marketingMode: 'SELF_SERVICE', imageLabels: ['front'], coverImageIndex: 0, hidePhone: false,
       currency: EGP_CURRENCY,
     };
-    const valid = plainToInstance(CreatePropertyDto, { ...base, totalPriceMinor: String(MONEY_MINOR_MAX), downPaymentMinor: '0' });
+    const valid = plainToInstance(CreatePropertyDto, { ...base, totalPriceMinor: String(MONEY_MINOR_MAX) });
     expect(await validate(valid)).toHaveLength(0);
 
     for (const invalid of ['1.5', '1e3', ' 1', true, MONEY_MINOR_MAX + 1]) {
-      const dto = plainToInstance(CreatePropertyDto, { ...base, totalPriceMinor: invalid, downPaymentMinor: 0 });
+      const dto = plainToInstance(CreatePropertyDto, { ...base, totalPriceMinor: invalid });
       expect((await validate(dto)).some(error => error.property === 'totalPriceMinor')).toBe(true);
     }
   });

@@ -3,7 +3,7 @@ import { DEFAULT_PROPERTY_OPTIONS, PROPERTY_OPTION_GROUPS } from '../src/propert
 import { DEFAULT_GOVERNORATES } from '../src/governorates/governorate.constants';
 
 describe('Property form options catalog', () => {
-  it('returns the four Flutter catalogs grouped by stable codes', async () => {
+  it('returns active form catalogs including the purpose hierarchy', async () => {
     const items = [
       { group: 'finishing_status', code: 'finished' },
       { group: 'delivery_status', code: 'ready' },
@@ -12,10 +12,14 @@ describe('Property form options catalog', () => {
     const controller = new PropertyFormOptionsController(
       { listPublic: jest.fn().mockResolvedValue({ items }) } as any,
       { listPublic: jest.fn().mockResolvedValue({ items: [{ code: 'cairo' }] }) } as any,
+      { listPublic: jest.fn().mockResolvedValue({ items: [{ id: 'purpose-1', code: 'residential' }] }) } as any,
+      { listPublicMapped: jest.fn().mockResolvedValue({ items: [{ id: 'type-1', code: 'apartment', purposeCategoryId: 'purpose-1' }] }) } as any,
     );
     await expect(controller.list()).resolves.toEqual({
       finishingStatuses: [items[0]], deliveryStatuses: [items[1]],
       paymentMethods: [items[2]], governorates: [{ code: 'cairo' }],
+      purposeCategories: [{ id: 'purpose-1', code: 'residential' }],
+      purposeSubcategories: [{ id: 'type-1', code: 'apartment', purposeCategoryId: 'purpose-1' }],
     });
   });
 

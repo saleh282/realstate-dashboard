@@ -20,6 +20,9 @@ export class PropertyType {
   @Prop({ trim: true, maxlength: 50 })
   iconKey?: string;
 
+  @Prop({ type: Types.ObjectId, ref: 'PropertyPurposeCategory', index: true })
+  purposeCategoryId?: Types.ObjectId;
+
   @Prop({ default: true, index: true })
   isActive: boolean;
 
@@ -38,3 +41,4 @@ export class PropertyType {
 
 export const PropertyTypeSchema = SchemaFactory.createForClass(PropertyType);
 PropertyTypeSchema.index({ isActive: 1, sortOrder: 1, nameAr: 1 });
+PropertyTypeSchema.index({ purposeCategoryId: 1, isActive: 1, sortOrder: 1 }, { name: 'property_subcategory_parent_active_order' });
