@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { ClientSession, Model, Types } from 'mongoose';
 import { AuditLog, AuditLogDocument, AuditAction } from './schemas/audit-log.schema';
 
 @Injectable()
@@ -43,6 +43,41 @@ export class AuditLogService {
     } catch (err) {
       this.logger.warn(`Failed to write admin audit log (${action})`);
     }
+  }
+
+  /**
+   * Writes an audit record in the caller's transaction. Unlike best-effort
+   * telemetry helpers, a failure here aborts the protected state transition.
+   */
+  async logRequired(
+    options: {
+      action: AuditAction;
+      actorUserId: string;
+      targetUserId?: string;
+      targetResourceId?: string;
+      reason: string;
+      ip?: string;
+      metadata?: Record<string, unknown>;
+    },
+    session: ClientSession,
+  ): Promise<void> {
+    await this.auditModel.create(
+      [{
+        action: options.action,
+        userId: new Types.ObjectId(options.actorUserId),
+        actorUserId: new Types.ObjectId(options.actorUserId),
+        ...(options.targetUserId
+          ? { targetUserId: new Types.ObjectId(options.targetUserId) }
+          : {}),
+        ...(options.targetResourceId
+          ? { targetResourceId: options.targetResourceId }
+          : {}),
+        reason: options.reason,
+        ip: options.ip ?? 'unknown',
+        metadata: options.metadata,
+      }],
+      { session },
+    );
   }
 
   async logAdminResourceAction(

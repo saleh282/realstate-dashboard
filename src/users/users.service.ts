@@ -184,7 +184,7 @@ export class UsersService {
     const [users, total] = await Promise.all([
       this.userModel
         .find(filter)
-        .select('fullName email phone systemRole accountType accountStatus brokerStatus verificationTrustState primaryIdentifierType emailVerifiedAt phoneVerifiedAt legacyVerifiedIdentifierType role emailVerified isActive kycStatus createdAt updatedAt')
+        .select('fullName email phone systemRole accountType accountStatus brokerStatus brokerVersion verificationTrustState primaryIdentifierType emailVerifiedAt phoneVerifiedAt legacyVerifiedIdentifierType role emailVerified isActive kycStatus createdAt updatedAt')
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -680,7 +680,7 @@ export class UsersService {
         .find()
         .sort({ createdAt: -1 })
         .limit(5)
-        .select('fullName email phone systemRole accountType accountStatus brokerStatus verificationTrustState primaryIdentifierType emailVerifiedAt phoneVerifiedAt legacyVerifiedIdentifierType role emailVerified isActive kycStatus createdAt')
+        .select('fullName email phone systemRole accountType accountStatus brokerStatus brokerVersion verificationTrustState primaryIdentifierType emailVerifiedAt phoneVerifiedAt legacyVerifiedIdentifierType role emailVerified isActive kycStatus createdAt')
         .lean()
         .exec(),
       this.auditLogService.getRecentForAdmin(5),

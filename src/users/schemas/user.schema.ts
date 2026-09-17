@@ -50,6 +50,9 @@ export class User {
   @Prop({ enum: BrokerStatus, index: true })
   brokerStatus?: BrokerStatus;
 
+  @Prop({ default: 0, min: 0 })
+  brokerVersion?: number;
+
   @Prop({ enum: VerificationTrustState, index: true })
   verificationTrustState?: VerificationTrustState;
 

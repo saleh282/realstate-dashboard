@@ -20,6 +20,9 @@ import { UsersService } from '../src/users/users.service';
 import { AdminPropertiesController } from '../src/properties/admin-properties.controller';
 import { PropertiesController } from '../src/properties/properties.controller';
 import { PropertiesService } from '../src/properties/properties.service';
+import { AdminBrokerApplicationsController } from '../src/broker-applications/admin-broker-applications.controller';
+import { BrokerApplicationsController } from '../src/broker-applications/broker-applications.controller';
+import { BrokerApplicationsService } from '../src/broker-applications/broker-applications.service';
 
 class TestJwtAuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
@@ -65,6 +68,14 @@ describe('admin controller authorization', () => {
     downloadTitleDeedForOwner: jest.fn().mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
     downloadTitleDeedForAdmin: jest.fn().mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
   };
+  const brokerApplicationsService = {
+    listRequirementsForAdmin: jest.fn().mockResolvedValue({ items: [] }),
+    listOwnApplications: jest.fn().mockResolvedValue({ items: [] }),
+    reviewApplication: jest.fn().mockResolvedValue({
+      application: { status: 'APPROVED', version: 1 },
+      account: { accountType: 'BROKER', brokerStatus: 'APPROVED' },
+    }),
+  };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -75,6 +86,8 @@ describe('admin controller authorization', () => {
         AdminAuditController,
         AdminPropertiesController,
         PropertiesController,
+        AdminBrokerApplicationsController,
+        BrokerApplicationsController,
       ],
       providers: [
         RolesGuard,
@@ -85,6 +98,7 @@ describe('admin controller authorization', () => {
           useValue: cloudinaryAssetService,
         },
         { provide: PropertiesService, useValue: propertiesService },
+        { provide: BrokerApplicationsService, useValue: brokerApplicationsService },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -122,6 +136,7 @@ describe('admin controller authorization', () => {
     '/admin/kyc',
     '/admin/dashboard/metrics',
     '/admin/audit-logs',
+    '/admin/broker-requirements',
   ])('enforces admin role on %s', async (path) => {
     await request(app.getHttpServer())
       .get(path)
@@ -131,6 +146,37 @@ describe('admin controller authorization', () => {
       .get(path)
       .set('Authorization', 'Bearer admin')
       .expect(200);
+  });
+
+  it('requires authentication for a broker applicant history', async () => {
+    await request(app.getHttpServer()).get('/broker/applications/me').expect(401);
+    await request(app.getHttpServer())
+      .get('/broker/applications/me')
+      .set('Authorization', 'Bearer user')
+      .expect(200);
+  });
+
+  it('allows only ADMIN/SUPER_ADMIN to decide a broker application', async () => {
+    const path = '/admin/broker/applications/64b000000000000000000003/review';
+    const payload = { decision: 'APPROVED', expectedVersion: 0 };
+    await request(app.getHttpServer()).post(path).send(payload).expect(401);
+    await request(app.getHttpServer())
+      .post(path)
+      .set('Authorization', 'Bearer user')
+      .send(payload)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(path)
+      .set('Authorization', 'Bearer admin')
+      .send(payload)
+      .expect(201);
+    expect(brokerApplicationsService.reviewApplication).toHaveBeenCalledWith(
+      expect.objectContaining({
+        applicationId: '64b000000000000000000003',
+        decision: 'APPROVED',
+        expectedVersion: 0,
+      }),
+    );
   });
 
   it('protects and streams KYC documents only to an administrator', async () => {

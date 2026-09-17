@@ -33,6 +33,14 @@ export enum AuditAction {
   ADMIN_PROPERTY_STATUS_UPDATED = 'admin_property_status_updated',
   PRIVATE_EVIDENCE_UPLOADED = 'private_evidence_uploaded',
   PRIVATE_EVIDENCE_ACCESSED = 'private_evidence_accessed',
+  BROKER_APPLICATION_SUBMITTED = 'broker_application_submitted',
+  ADMIN_BROKER_APPLICATION_REVIEWED = 'admin_broker_application_reviewed',
+  ADMIN_BROKER_SUSPENDED = 'admin_broker_suspended',
+  ADMIN_BROKER_RESTORED = 'admin_broker_restored',
+  ADMIN_BROKER_REVOKED = 'admin_broker_revoked',
+  ADMIN_BROKER_REQUIREMENT_CREATED = 'admin_broker_requirement_created',
+  ADMIN_BROKER_REQUIREMENT_UPDATED = 'admin_broker_requirement_updated',
+  ADMIN_BROKER_REQUIREMENT_ARCHIVED = 'admin_broker_requirement_archived',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false }, collection: 'audit_logs' })
