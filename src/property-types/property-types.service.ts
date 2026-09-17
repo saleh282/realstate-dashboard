@@ -7,16 +7,23 @@ import { CreatePropertyTypeDto } from './dto/create-property-type.dto';
 import { UpdatePropertyTypeDto } from './dto/update-property-type.dto';
 import { PropertyType, PropertyTypeDocument } from './schemas/property-type.schema';
 import { PROPERTY_TYPE_ICON_OPTIONS } from './property-type-options';
+import { PropertyPurposeCategory, PropertyPurposeCategoryDocument } from '../property-purpose-categories/schemas/property-purpose-category.schema';
 
 @Injectable()
 export class PropertyTypesService {
   constructor(
     @InjectModel(PropertyType.name) private readonly model: Model<PropertyTypeDocument>,
+    @InjectModel(PropertyPurposeCategory.name) private readonly purposes: Model<PropertyPurposeCategoryDocument>,
     private readonly audit: AuditLogService,
   ) {}
 
   async listPublic() {
     const items = await this.model.find({ isActive: true }).sort({ sortOrder: 1, nameAr: 1 }).lean().exec();
+    return { items: items.map((item) => this.toPublic(item)) };
+  }
+
+  async listPublicMapped() {
+    const items = await this.model.find({ isActive: true, purposeCategoryId: { $exists: true, $ne: null } }).sort({ sortOrder: 1, nameAr: 1 }).lean().exec();
     return { items: items.map((item) => this.toPublic(item)) };
   }
 
@@ -33,6 +40,9 @@ export class PropertyTypesService {
   }
 
   async create(dto: CreatePropertyTypeDto, actorUserId: string, ip?: string) {
+    if (!Types.ObjectId.isValid(dto.purposeCategoryId) || !(await this.purposes.exists({ _id: dto.purposeCategoryId, isActive: true }))) {
+      throw new BadRequestException('غرض العقار غير موجود أو غير متاح');
+    }
     try {
       const item = await this.model.create({
         ...dto,
@@ -41,6 +51,7 @@ export class PropertyTypesService {
         nameEn: dto.nameEn?.trim() || undefined,
         descriptionAr: dto.descriptionAr?.trim() || undefined,
         iconKey: dto.iconKey?.trim() || undefined,
+        purposeCategoryId: new Types.ObjectId(dto.purposeCategoryId),
         createdBy: new Types.ObjectId(actorUserId),
       });
       await this.audit.logAdminResourceAction(
@@ -59,6 +70,9 @@ export class PropertyTypesService {
 
   async update(id: string, dto: UpdatePropertyTypeDto, actorUserId: string, ip?: string) {
     this.assertId(id);
+    if (dto.purposeCategoryId && !(await this.purposes.exists({ _id: dto.purposeCategoryId, isActive: true }))) {
+      throw new BadRequestException('غرض العقار غير موجود أو غير متاح');
+    }
     const update = Object.fromEntries(
       Object.entries(dto).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]),
     );
@@ -119,7 +133,7 @@ export class PropertyTypesService {
     return {
       id: item._id.toString(), code: item.code, nameAr: item.nameAr,
       nameEn: item.nameEn, descriptionAr: item.descriptionAr,
-      iconKey: item.iconKey, sortOrder: item.sortOrder,
+      iconKey: item.iconKey, purposeCategoryId: item.purposeCategoryId?.toString(), sortOrder: item.sortOrder,
     };
   }
 

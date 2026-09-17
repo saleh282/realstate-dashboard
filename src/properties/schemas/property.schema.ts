@@ -2,6 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { EGP_CURRENCY, isMoneyMinorAmount } from '../../common/money/money';
 import { AssetClassification, EvidenceDeliveryType } from '../../config/evidence-asset.types';
+import { AccountType } from '../../users/identity.types';
 
 export type PropertyDocument = HydratedDocument<Property>;
 
@@ -21,7 +22,17 @@ const PropertyAssetSchema = SchemaFactory.createForClass(PropertyAsset);
 
 @Schema({ timestamps: true, collection: 'properties' })
 export class Property {
+  /** @deprecated Compatibility alias for advertiserAccountId during migration. */
   @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true }) ownerId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'User', index: true }) advertiserAccountId?: Types.ObjectId;
+  @Prop({ enum: AccountType, index: true }) advertiserAccountTypeSnapshot?: AccountType;
+  @Prop({ type: Types.ObjectId, ref: 'User', index: true }) createdByActorId?: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'PropertyRevision' }) currentPublicRevisionId?: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'PropertyRevision' }) pendingRevisionId?: Types.ObjectId;
+  @Prop({ default: 0, min: 0 }) revisionSequence: number;
+  @Prop({ min: 1 }) propertyContractVersion?: number;
+  @Prop() propertyContractMigratedAt?: Date;
+  @Prop({ trim: true }) propertyContractMigrationRunId?: string;
   @Prop({ required: true, enum: ['sale', 'rent'], index: true }) operationType: string;
   @Prop({ required: true, trim: true, maxlength: 50, index: true }) propertyTypeCode: string;
   @Prop({ required: true, trim: true, maxlength: 150 }) title: string;
@@ -54,20 +65,19 @@ export class Property {
   })
   totalPriceMinor: number;
   @Prop({
-    required: true,
     validate: { validator: (value: unknown) => isMoneyMinorAmount(value), message: 'downPaymentMinor is outside the safe integer range' },
   })
-  downPaymentMinor: number;
+  downPaymentMinor?: number;
   @Prop({ type: String, required: true, enum: [EGP_CURRENCY], default: EGP_CURRENCY, immutable: true }) currency: typeof EGP_CURRENCY;
   @Prop() moneyMigratedAt?: Date;
   @Prop({ trim: true }) moneyMigrationRunId?: string;
   @Prop({ min: 1 }) moneyMigrationVersion?: number;
   @Prop({ default: false }) isPriceNegotiable: boolean;
-  @Prop({ required: true, trim: true, maxlength: 50 }) paymentMethodCode: string;
+  @Prop({ trim: true, maxlength: 50 }) paymentMethodCode?: string;
   @Prop({ type: [PropertyAssetSchema], required: true }) images: PropertyAsset[];
   @Prop({ required: true, min: 0 }) coverImageIndex: number;
   @Prop({ type: PropertyAssetSchema }) titleDeed?: PropertyAsset;
-  @Prop({ required: true, enum: ['owner', 'office', 'broker'] }) advertiserType: string;
+  @Prop({ enum: ['owner', 'office', 'broker'] }) advertiserType?: string;
   @Prop({ default: false }) hidePhone: boolean;
   @Prop({ default: true, index: true }) isOwnerVisible: boolean;
   @Prop({ required: true, enum: ['pending_review', 'approved', 'rejected', 'hidden'], default: 'pending_review', index: true }) status: string;
@@ -78,3 +88,4 @@ export class Property {
 
 export const PropertySchema = SchemaFactory.createForClass(Property);
 PropertySchema.index({ createdAt: -1 });
+PropertySchema.index({ advertiserAccountId: 1, createdAt: -1 }, { name: 'property_advertiser_created' });

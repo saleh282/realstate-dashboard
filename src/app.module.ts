@@ -17,6 +17,8 @@ import { GovernoratesModule } from './governorates/governorates.module';
 import { PropertyFormOptionsModule } from './property-form-options/property-form-options.module';
 import { PropertiesModule } from './properties/properties.module';
 import { BrokerApplicationsModule } from './broker-applications/broker-applications.module';
+import { PropertyPurposeCategoriesModule } from './property-purpose-categories/property-purpose-categories.module';
+import { ManagedMarketingModule } from './managed-marketing/managed-marketing.module';
 
 @Module({
   imports: [
@@ -43,6 +45,8 @@ import { BrokerApplicationsModule } from './broker-applications/broker-applicati
     PropertyFormOptionsModule,
     PropertiesModule,
     BrokerApplicationsModule,
+    PropertyPurposeCategoriesModule,
+    ManagedMarketingModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
