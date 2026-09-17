@@ -23,6 +23,8 @@ import { PropertiesService } from '../src/properties/properties.service';
 import { AdminBrokerApplicationsController } from '../src/broker-applications/admin-broker-applications.controller';
 import { BrokerApplicationsController } from '../src/broker-applications/broker-applications.controller';
 import { BrokerApplicationsService } from '../src/broker-applications/broker-applications.service';
+import { AdminCompaniesController } from '../src/admin/admin-companies.controller';
+import { CompanyAccountsService } from '../src/admin/company-accounts.service';
 
 class TestJwtAuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
@@ -76,6 +78,15 @@ describe('admin controller authorization', () => {
       account: { accountType: 'BROKER', brokerStatus: 'APPROVED' },
     }),
   };
+  const companyAccountsService = {
+    create: jest.fn().mockResolvedValue({
+      account: {
+        userId: '64b000000000000000000004',
+        systemRole: 'USER',
+        accountType: 'COMPANY',
+      },
+    }),
+  };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -88,6 +99,7 @@ describe('admin controller authorization', () => {
         PropertiesController,
         AdminBrokerApplicationsController,
         BrokerApplicationsController,
+        AdminCompaniesController,
       ],
       providers: [
         RolesGuard,
@@ -99,6 +111,7 @@ describe('admin controller authorization', () => {
         },
         { provide: PropertiesService, useValue: propertiesService },
         { provide: BrokerApplicationsService, useValue: brokerApplicationsService },
+        { provide: CompanyAccountsService, useValue: companyAccountsService },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -131,6 +144,37 @@ describe('admin controller authorization', () => {
       .get('/admin/users')
       .set('Authorization', 'Bearer super-admin')
       .expect(200));
+
+  it('allows only ADMIN/SUPER_ADMIN to create a COMPANY account', async () => {
+    const payload = {
+      fullName: 'Company Account',
+      email: 'company@example.com',
+      initialPassword: 'CompanyPass123!',
+    };
+    await request(app.getHttpServer()).post('/admin/companies').send(payload).expect(401);
+    await request(app.getHttpServer())
+      .post('/admin/companies')
+      .set('Authorization', 'Bearer user')
+      .send(payload)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/admin/companies')
+      .set('Authorization', 'Bearer admin')
+      .send(payload)
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/admin/companies')
+      .set('Authorization', 'Bearer super-admin')
+      .send({ ...payload, email: 'second-company@example.com' })
+      .expect(201);
+    expect(companyAccountsService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'company@example.com' }),
+      expect.objectContaining({
+        actorUserId: '64b000000000000000000001',
+        requestId: expect.any(String),
+      }),
+    );
+  });
 
   it.each([
     '/admin/kyc',
