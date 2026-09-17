@@ -20,9 +20,13 @@ import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { RevokeSessionsDto } from './dto/revoke-sessions.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
+import { CapabilityGuard } from '../authorization/capability.guard';
+import { RequireCapabilities } from '../authorization/capabilities.decorator';
+import { Capability } from '../authorization/capability';
 
 @Roles(SystemRole.ADMIN)
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, CapabilityGuard)
+@RequireCapabilities(Capability.ADMIN_ACCOUNT_READ)
 @Controller('admin/users')
 export class AdminUsersController {
   constructor(private readonly usersService: UsersService) {}
@@ -47,6 +51,7 @@ export class AdminUsersController {
   }
 
   @Patch(':userId/status')
+  @RequireCapabilities(Capability.ADMIN_ACCOUNT_MANAGE)
   updateStatus(
     @Param('userId') targetUserId: string,
     @Body() dto: UpdateUserStatusDto,
@@ -63,6 +68,7 @@ export class AdminUsersController {
   }
 
   @Post(':userId/revoke-sessions')
+  @RequireCapabilities(Capability.ADMIN_ACCOUNT_MANAGE)
   revokeSessions(
     @Param('userId') targetUserId: string,
     @Body() dto: RevokeSessionsDto,
@@ -78,6 +84,7 @@ export class AdminUsersController {
   }
 
   @Patch(':userId/role')
+  @RequireCapabilities(Capability.SUPER_ADMIN_ROLE_MANAGE)
   updateRole(
     @Param('userId') targetUserId: string,
     @Body() dto: UpdateUserRoleDto,
@@ -94,6 +101,7 @@ export class AdminUsersController {
   }
 
   @Delete(':userId')
+  @RequireCapabilities(Capability.ADMIN_ACCOUNT_MANAGE)
   delete(
     @Param('userId') targetUserId: string,
     @Body() dto: DeleteAdminUserDto,

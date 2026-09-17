@@ -646,13 +646,7 @@ export class BrokerApplicationsService {
     documentId: string,
     ip?: string,
   ) {
-    const document = await this.findEvidence(applicationId, documentId);
-    if (document.applicantAccountId.toString() !== applicantUserId) {
-      throw new ForbiddenException({
-        message: 'لا يمكنك الوصول إلى هذا المستند',
-        code: EvidenceErrorCode.ACCESS_FORBIDDEN,
-      });
-    }
+    const document = await this.findEvidence(applicationId, documentId, applicantUserId);
     await this.audit.logResourceAction(
       AuditAction.PRIVATE_EVIDENCE_ACCESSED,
       applicantUserId,
@@ -764,12 +758,15 @@ export class BrokerApplicationsService {
     });
   }
 
-  private async findEvidence(applicationId: string, documentId: string) {
+  private async findEvidence(applicationId: string, documentId: string, applicantUserId?: string) {
     const applicationObjectId = this.objectId(applicationId, 'معرف طلب الوسيط غير صالح');
     const documentObjectId = this.objectId(documentId, 'معرف مستند الوسيط غير صالح');
     const document = await this.documentModel.findOne({
       _id: documentObjectId,
       applicationId: applicationObjectId,
+      ...(applicantUserId
+        ? { applicantAccountId: this.objectId(applicantUserId, 'معرف المستخدم غير صالح') }
+        : {}),
     }).lean().exec();
     if (!document) {
       throw new NotFoundException({

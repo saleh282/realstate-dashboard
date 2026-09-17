@@ -9,12 +9,16 @@ import { ReviewPropertyDto } from './dto/review-property.dto';
 import { PropertiesService } from './properties.service';
 import { AdminCreatePropertyDto } from './dto/create-property.dto';
 import { EvidenceErrorCode } from '../common/errors/evidence-error-codes';
+import { CapabilityGuard } from '../authorization/capability.guard';
+import { RequireCapabilities } from '../authorization/capabilities.decorator';
+import { Capability } from '../authorization/capability';
 
 const allowedImages = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const allowedEvidence = new Set([...allowedImages, 'application/pdf']);
 
 @Roles(SystemRole.ADMIN)
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, CapabilityGuard)
+@RequireCapabilities(Capability.ADMIN_PROPERTY_REVIEW)
 @Controller('admin/properties')
 export class AdminPropertiesController {
   constructor(private readonly service: PropertiesService) {}
@@ -25,6 +29,7 @@ export class AdminPropertiesController {
   }
 
   @Post('proxy')
+  @RequireCapabilities(Capability.ADMIN_PROPERTY_PROXY_CREATE)
   @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'entranceImage', maxCount: 1 }, { name: 'titleDeed', maxCount: 1 }], {
     limits: { fileSize: 10 * 1024 * 1024, files: 22 },
     fileFilter: (_req, file, cb) => {

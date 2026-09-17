@@ -1,7 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { AdminBrokerApplicationsController } from '../src/broker-applications/admin-broker-applications.controller';
@@ -458,14 +458,16 @@ describe('MAZAD-012 broker application lifecycle', () => {
         bytes: 100,
       },
     };
-    harness.documentModel.findOne.mockReturnValue(query(storedDocument));
+    harness.documentModel.findOne.mockImplementation((filter: any) =>
+      query(filter.applicantAccountId?.toString() === applicantId.toString() ? storedDocument : null),
+    );
     await expect(
       harness.service.getEvidenceForApplicant(
         new Types.ObjectId().toString(),
         applicationId.toString(),
         documentId.toString(),
       ),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    ).rejects.toBeInstanceOf(NotFoundException);
 
     harness.applicationModel.findById.mockReturnValue(query(pendingApplication()));
     harness.documentModel.find.mockReturnValue(query([storedDocument]));

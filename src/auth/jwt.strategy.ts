@@ -4,7 +4,14 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { SystemRole } from './roles.enum';
 import { UsersService } from '../users/users.service';
-import { AccountStatus, resolveAccountStatus, resolveSystemRole } from '../users/identity.types';
+import {
+  AccountStatus,
+  resolveAccountStatus,
+  resolveAccountType,
+  resolveBrokerStatus,
+  resolveSystemRole,
+  resolveVerificationTrustState,
+} from '../users/identity.types';
 import { AuthErrorCode } from '../common/errors/auth-error-codes';
 import { RefreshTokenService } from '../refresh-token/refresh-token.service';
 
@@ -54,7 +61,10 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       userId: payload.sub,
       sessionId: payload.sid,
       systemRole: resolveSystemRole(user),
+      accountType: resolveAccountType(user),
       accountStatus,
+      brokerStatus: resolveBrokerStatus(user),
+      verificationTrustState: resolveVerificationTrustState(user),
     };
   }
 }

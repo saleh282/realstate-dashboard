@@ -145,6 +145,13 @@ describe('admin controller authorization', () => {
       .set('Authorization', 'Bearer super-admin')
       .expect(200));
 
+  it('denies an ADMIN access to the SUPER_ADMIN-only role command', () =>
+    request(app.getHttpServer())
+      .patch('/admin/users/64b000000000000000000002/role')
+      .set('Authorization', 'Bearer admin')
+      .send({ systemRole: 'ADMIN', reason: 'privileged role update test' })
+      .expect(403));
+
   it('allows only ADMIN/SUPER_ADMIN to create a COMPANY account', async () => {
     const payload = {
       fullName: 'Company Account',

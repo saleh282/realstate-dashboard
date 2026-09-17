@@ -18,6 +18,9 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { EvidenceErrorCode } from '../common/errors/evidence-error-codes';
 import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
 import { BrokerApplicationsService } from './broker-applications.service';
+import { CapabilityGuard } from '../authorization/capability.guard';
+import { RequireCapabilities } from '../authorization/capabilities.decorator';
+import { Capability } from '../authorization/capability';
 
 const allowedBrokerEvidenceTypes = new Set([
   'image/jpeg',
@@ -26,7 +29,8 @@ const allowedBrokerEvidenceTypes = new Set([
   'application/pdf',
 ]);
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, CapabilityGuard)
+@RequireCapabilities(Capability.BROKER_APPLICATION_READ_OWN)
 @Controller('broker')
 export class BrokerApplicationsController {
   constructor(
@@ -40,6 +44,7 @@ export class BrokerApplicationsController {
   }
 
   @Post('applications')
+  @RequireCapabilities(Capability.BROKER_APPLICATION_SUBMIT)
   @UseInterceptors(
     AnyFilesInterceptor({
       limits: { fileSize: 10 * 1024 * 1024, files: 20 },

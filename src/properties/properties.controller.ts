@@ -6,6 +6,9 @@ import { CreatePropertyDto } from './dto/create-property.dto';
 import { PropertiesService } from './properties.service';
 import { UpdatePropertyVisibilityDto } from './dto/update-property-visibility.dto';
 import { EvidenceErrorCode } from '../common/errors/evidence-error-codes';
+import { CapabilityGuard } from '../authorization/capability.guard';
+import { RequireCapabilities } from '../authorization/capabilities.decorator';
+import { Capability } from '../authorization/capability';
 
 const allowedImages = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const allowedDeeds = new Set([...allowedImages, 'application/pdf']);
@@ -15,7 +18,8 @@ export class PropertiesController {
   constructor(private readonly service: PropertiesService) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, CapabilityGuard)
+  @RequireCapabilities(Capability.PROPERTY_CREATE)
   @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'entranceImage', maxCount: 1 }, { name: 'titleDeed', maxCount: 1 }], {
     limits: { fileSize: 10 * 1024 * 1024, files: 22 },
     fileFilter: (_req, file, cb) => {
@@ -33,17 +37,20 @@ export class PropertiesController {
   }
 
   @Get('mine')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, CapabilityGuard)
+  @RequireCapabilities(Capability.PROPERTY_READ_OWN)
   mine(@Req() req: any) { return this.service.listMine(req.user.userId); }
 
   @Patch('mine/:propertyId/visibility')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, CapabilityGuard)
+  @RequireCapabilities(Capability.PROPERTY_MANAGE_OWN)
   updateVisibility(@Req() req: any, @Param('propertyId') id: string, @Body() dto: UpdatePropertyVisibilityDto) {
     return this.service.updateOwnerVisibility(req.user.userId, id, dto.isVisible);
   }
 
   @Get('mine/:propertyId/evidence/title-deed')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, CapabilityGuard)
+  @RequireCapabilities(Capability.PROPERTY_READ_OWN)
   async getOwnTitleDeed(
     @Req() req: any,
     @Param('propertyId') id: string,
@@ -60,6 +67,7 @@ export class PropertiesController {
   }
 
   @Get(':propertyId')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, CapabilityGuard)
+  @RequireCapabilities(Capability.PROPERTY_READ_OWN)
   get(@Req() req: any, @Param('propertyId') id: string) { return this.service.getMine(req.user.userId, id); }
 }

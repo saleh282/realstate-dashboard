@@ -4,15 +4,19 @@ import { UploadedFiles } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { KycService } from './kyc.service';
 import { EvidenceErrorCode } from '../common/errors/evidence-error-codes';
+import { CapabilityGuard } from '../authorization/capability.guard';
+import { RequireCapabilities } from '../authorization/capabilities.decorator';
+import { Capability } from '../authorization/capability';
 
 const allowedKycMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, CapabilityGuard)
 @Controller('kyc')
 export class KycController {
   constructor(private kycService: KycService) {}
 
   @Post('submit')
+  @RequireCapabilities(Capability.KYC_SELF_SUBMIT)
   @UseInterceptors(
     FileFieldsInterceptor(
       [
@@ -44,6 +48,7 @@ export class KycController {
   }
 
   @Get('status')
+  @RequireCapabilities(Capability.KYC_SELF_READ)
   getStatus(@Req() req: any) {
     return this.kycService.getStatus(req.user.userId);
   }

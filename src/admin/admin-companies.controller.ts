@@ -14,9 +14,13 @@ import { Roles } from '../auth/roles.decorator';
 import { SystemRole } from '../auth/roles.enum';
 import { RolesGuard } from '../auth/roles.guard';
 import { CompanyAccountsService } from './company-accounts.service';
+import { CapabilityGuard } from '../authorization/capability.guard';
+import { RequireCapabilities } from '../authorization/capabilities.decorator';
+import { Capability } from '../authorization/capability';
 
 @Roles(SystemRole.ADMIN)
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, CapabilityGuard)
+@RequireCapabilities(Capability.COMPANY_CREATE)
 @Controller('admin/companies')
 export class AdminCompaniesController {
   constructor(private readonly companies: CompanyAccountsService) {}
