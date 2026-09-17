@@ -32,7 +32,7 @@ export function planPropertyMoneyMigration(document: StoredProperty): PropertyMo
   return propertyMoneyFromStoredRecord(document);
 }
 
-async function scan(collection: Collection): Promise<{
+export async function scanPropertyMoneyMigration(collection: Collection): Promise<{
   eligible: number;
   alreadyMigrated: number;
   invalidCount: number;
@@ -90,7 +90,7 @@ async function main() {
   if (!database) throw new Error('MongoDB connection has no database');
   const properties = database.collection('properties');
   const runs = database.collection('migration_runs');
-  const preflight = await scan(properties);
+  const preflight = await scanPropertyMoneyMigration(properties);
   const report = {
     migration: 'MAZAD-006-property-money-minor-units',
     version: PROPERTY_MONEY_MIGRATION_VERSION,
@@ -113,7 +113,7 @@ async function main() {
   await runs.insertOne({ ...report, status: 'running', startedAt: new Date() });
   try {
     const migrated = await apply(properties, runId);
-    const postflight = await scan(properties);
+    const postflight = await scanPropertyMoneyMigration(properties);
     if (postflight.invalidCount || postflight.eligible !== 0) throw new Error('Postflight reconciliation failed');
     if (postflight.totalPriceMinor !== preflight.totalPriceMinor || postflight.downPaymentMinor !== preflight.downPaymentMinor) {
       throw new Error('Postflight monetary totals do not match preflight totals');
