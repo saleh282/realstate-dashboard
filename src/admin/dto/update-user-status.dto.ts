@@ -1,8 +1,13 @@
-import { IsEnum, IsNotEmpty, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsIn, IsNotEmpty, IsString, MaxLength, MinLength } from 'class-validator';
 import { AccountStatus } from '../../users/identity.types';
 
 export class UpdateUserStatusDto {
-  @IsEnum(AccountStatus)
+  @IsIn([
+    AccountStatus.ACTIVE,
+    AccountStatus.SUSPENDED,
+    AccountStatus.BLOCKED,
+    AccountStatus.PERMANENTLY_BANNED,
+  ])
   accountStatus: AccountStatus;
 
   @IsString()

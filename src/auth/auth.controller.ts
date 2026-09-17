@@ -19,6 +19,7 @@ import {
 } from './dto/password-reset.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ConfirmAccountRecoveryDto, RequestAccountRecoveryDto } from '../account-deletion/dto/account-recovery.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -64,6 +65,20 @@ export class AuthController {
   @Post('reset-password')
   resetPassword(@Body() dto: ResetPasswordDto, @Req() req: any) {
     return this.authService.resetPassword(dto, req.ip);
+  }
+
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('account-recovery/request')
+  requestAccountRecovery(@Body() dto: RequestAccountRecoveryDto) {
+    return this.authService.requestAccountRecovery(dto);
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('account-recovery/confirm')
+  confirmAccountRecovery(@Body() dto: ConfirmAccountRecoveryDto, @Req() req: any) {
+    return this.authService.confirmAccountRecovery(dto, req.ip);
   }
 
   @HttpCode(HttpStatus.OK)

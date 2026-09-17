@@ -25,6 +25,7 @@ import { BrokerApplicationsController } from '../src/broker-applications/broker-
 import { BrokerApplicationsService } from '../src/broker-applications/broker-applications.service';
 import { AdminCompaniesController } from '../src/admin/admin-companies.controller';
 import { CompanyAccountsService } from '../src/admin/company-accounts.service';
+import { AccountDeletionService } from '../src/account-deletion/account-deletion.service';
 
 class TestJwtAuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
@@ -87,6 +88,12 @@ describe('admin controller authorization', () => {
       },
     }),
   };
+  const accountDeletionService = {
+    requestDeletionForAdmin: jest.fn(),
+    getAdminImpact: jest.fn().mockResolvedValue({ workflow: null, history: [], impact: { blockers: [], finalPurgeEnabled: false } }),
+    setLegalHold: jest.fn(),
+    anonymize: jest.fn(),
+  };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -112,6 +119,7 @@ describe('admin controller authorization', () => {
         { provide: PropertiesService, useValue: propertiesService },
         { provide: BrokerApplicationsService, useValue: brokerApplicationsService },
         { provide: CompanyAccountsService, useValue: companyAccountsService },
+        { provide: AccountDeletionService, useValue: accountDeletionService },
       ],
     })
       .overrideGuard(JwtAuthGuard)

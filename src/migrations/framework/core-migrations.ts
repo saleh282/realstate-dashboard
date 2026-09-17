@@ -390,12 +390,74 @@ export const propertyDomainIndexesMigration: MigrationDefinition = {
   },
 };
 
+const accountDeletionIndexes = [
+  { collection: 'account_deletion_requests', key: { userId: 1, workflowVersion: 1 }, options: { unique: true, name: 'account_deletion_user_version_unique' } },
+  { collection: 'account_deletion_requests', key: { userId: 1, state: 1 }, options: { unique: true, partialFilterExpression: { state: { $in: ['PENDING', 'ANONYMIZING'] } }, name: 'account_deletion_active_unique' } },
+  { collection: 'account_deletion_requests', key: { state: 1, recoverableUntil: 1, legalHold: 1 }, options: { name: 'account_deletion_processing_queue' } },
+] as const;
+
+export const accountDeletionIndexesMigration: MigrationDefinition = {
+  id: '017-account-deletion-indexes',
+  version: 1,
+  description: 'Create additive workflow and processing indexes for retention-safe account deletion',
+  dependencies: ['007-user-identity-contract', '015-property-domain-indexes'],
+  rollback: {
+    kind: 'none',
+    remediation: 'Disable deletion-request and anonymization commands; retain workflow, audit, user, and historical marketplace records for reviewed remediation.',
+    restoreProcedure: 'Restore a verified pre-deployment snapshot to a separate database and reconcile workflow records; never reverse anonymization automatically.',
+  },
+  async preflight({ db }) {
+    const duplicateVersions = await db.collection('account_deletion_requests').aggregate([
+      { $group: { _id: { userId: '$userId', workflowVersion: '$workflowVersion' }, count: { $sum: 1 } } },
+      { $match: { count: { $gt: 1 } } },
+      { $limit: 20 },
+    ]).toArray();
+    const duplicateActive = await db.collection('account_deletion_requests').aggregate([
+      { $match: { state: { $in: ['PENDING', 'ANONYMIZING'] } } },
+      { $group: { _id: '$userId', count: { $sum: 1 } } },
+      { $match: { count: { $gt: 1 } } },
+      { $limit: 20 },
+    ]).toArray();
+    let alreadyApplied = 0;
+    for (const expected of accountDeletionIndexes) {
+      if ((await existingIndexNames(db, expected.collection)).has(expected.options.name)) alreadyApplied += 1;
+    }
+    return {
+      eligible: accountDeletionIndexes.length - alreadyApplied,
+      alreadyApplied,
+      blockers: [
+        ...(duplicateVersions.length ? [{ code: 'ACCOUNT_DELETION_VERSION_DUPLICATES', message: `${duplicateVersions.length} duplicate workflow versions require review` }] : []),
+        ...(duplicateActive.length ? [{ code: 'ACCOUNT_DELETION_ACTIVE_DUPLICATES', message: `${duplicateActive.length} accounts have multiple active workflows` }] : []),
+      ],
+      summary: { existingUsersModified: 0, identifiersReleased: 0, recordsDeleted: 0 },
+    };
+  },
+  async migrateBatch({ db }) {
+    for (const index of accountDeletionIndexes) {
+      await db.collection(index.collection).createIndex(index.key, index.options as any);
+    }
+    return { scanned: accountDeletionIndexes.length, modified: accountDeletionIndexes.length, done: true };
+  },
+  async validate({ db }) {
+    const missing: string[] = [];
+    for (const expected of accountDeletionIndexes) {
+      if (!(await existingIndexNames(db, expected.collection)).has(expected.options.name)) missing.push(expected.options.name);
+    }
+    return {
+      valid: missing.length === 0,
+      errors: missing.map((name) => ({ code: 'ACCOUNT_DELETION_INDEX_MISSING', message: `Required account-deletion index ${name} is missing` })),
+      summary: { missingIndexes: missing },
+    };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
   brokerLifecycleIndexesMigration,
   propertyAttributionRevisionMigration,
   propertyDomainIndexesMigration,
+  accountDeletionIndexesMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {

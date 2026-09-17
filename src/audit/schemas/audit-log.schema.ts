@@ -14,6 +14,13 @@ export enum AuditAction {
   LOGOUT = 'logout',
   ACCOUNT_DELETED = 'account_deleted',
   ADMIN_USER_DELETED = 'admin_user_deleted',
+  ACCOUNT_DELETION_REQUESTED = 'account_deletion_requested',
+  ACCOUNT_DELETION_RESTORED = 'account_deletion_restored',
+  ACCOUNT_LEGAL_HOLD_PLACED = 'account_legal_hold_placed',
+  ACCOUNT_LEGAL_HOLD_REMOVED = 'account_legal_hold_removed',
+  ACCOUNT_ANONYMIZATION_STARTED = 'account_anonymization_started',
+  ACCOUNT_ANONYMIZATION_COMPLETED = 'account_anonymization_completed',
+  ACCOUNT_PURGE_ELIGIBILITY_REVIEWED = 'account_purge_eligibility_reviewed',
   ADMIN_USER_STATUS_UPDATED = 'admin_user_status_updated',
   ADMIN_USER_SESSIONS_REVOKED = 'admin_user_sessions_revoked',
   ADMIN_USER_ROLE_UPDATED = 'admin_user_role_updated',
@@ -72,6 +79,9 @@ export class AuditLog {
 
   @Prop({ type: Object })
   metadata?: Record<string, unknown>;
+
+  @Prop({ required: true, maxlength: 100, index: true })
+  requestId: string;
 }
 
 export const AuditLogSchema = SchemaFactory.createForClass(AuditLog);

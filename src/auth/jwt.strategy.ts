@@ -45,6 +45,18 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
         code: AuthErrorCode.ACCOUNT_PERMANENTLY_BANNED,
       });
     }
+    if (accountStatus === AccountStatus.DELETION_PENDING) {
+      throw new ForbiddenException({
+        message: 'الحساب قيد الحذف',
+        code: AuthErrorCode.ACCOUNT_DELETION_PENDING,
+      });
+    }
+    if (accountStatus === AccountStatus.ANONYMIZED) {
+      throw new ForbiddenException({
+        message: 'لا يمكن استخدام هذا الحساب',
+        code: AuthErrorCode.ACCOUNT_ALREADY_ANONYMIZED,
+      });
+    }
     if (
       payload.sid &&
       !(await this.refreshTokenService.isSessionActive(payload.sub, payload.sid))

@@ -1,7 +1,4 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { UserRole } from '../src/auth/roles.enum';
 import { SystemRole } from '../src/auth/roles.enum';
 import { AccountStatus } from '../src/users/identity.types';
@@ -13,9 +10,6 @@ const targetUserId = '64b000000000000000000002';
 
 function createService() {
   const userModel: Record<string, any> = {
-    findByIdAndDelete: jest.fn().mockReturnValue({
-      exec: jest.fn().mockResolvedValue(undefined),
-    }),
   };
   const refreshTokenService = {
     revokeAllForUser: jest.fn().mockResolvedValue(undefined),
@@ -24,14 +18,10 @@ function createService() {
     log: jest.fn(),
     logAdminAction: jest.fn().mockResolvedValue(undefined),
   };
-  const cloudinaryAssetService = {
-    deleteAssets: jest.fn().mockResolvedValue(undefined),
-  };
   const service = new UsersService(
     userModel as any,
     refreshTokenService as any,
     auditLogService as any,
-    cloudinaryAssetService as any,
   );
 
   return {
@@ -39,102 +29,8 @@ function createService() {
     userModel,
     refreshTokenService,
     auditLogService,
-    cloudinaryAssetService,
   };
 }
-
-describe('admin user deletion', () => {
-  it('prevents an administrator from deleting their own account', async () => {
-    const { service } = createService();
-
-    await expect(
-      service.deleteForAdmin({
-        actorUserId,
-        targetUserId: actorUserId,
-        confirmIdentifier: 'admin@example.com',
-        reason: 'Requested by administrator',
-      }),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-  });
-
-  it('prevents deleting another administrator', async () => {
-    const { service } = createService();
-    jest.spyOn(service, 'findById').mockResolvedValue({
-      role: UserRole.ADMIN,
-      email: 'other-admin@example.com',
-    } as any);
-
-    await expect(
-      service.deleteForAdmin({
-        actorUserId,
-        targetUserId,
-        confirmIdentifier: 'other-admin@example.com',
-        reason: 'Requested by administrator',
-      }),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-  });
-
-  it('requires the exact user email or phone as deletion confirmation', async () => {
-    const { service } = createService();
-    jest.spyOn(service, 'findById').mockResolvedValue({
-      role: UserRole.USER,
-      email: 'person@example.com',
-    } as any);
-
-    await expect(
-      service.deleteForAdmin({
-        actorUserId,
-        targetUserId,
-        confirmIdentifier: 'wrong@example.com',
-        reason: 'Duplicate test account',
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('cleans assets, revokes sessions, deletes the user, and records the actor', async () => {
-    const {
-      service,
-      userModel,
-      refreshTokenService,
-      auditLogService,
-      cloudinaryAssetService,
-    } = createService();
-    const user = {
-      role: UserRole.USER,
-      email: 'person@example.com',
-      idFrontAsset: { publicId: 'front' },
-      idBackAsset: { publicId: 'back' },
-      selfieAsset: { publicId: 'selfie' },
-    };
-    jest.spyOn(service, 'findById').mockResolvedValue(user as any);
-
-    await expect(
-      service.deleteForAdmin({
-        actorUserId,
-        targetUserId,
-        confirmIdentifier: 'person@example.com',
-        reason: 'Duplicate test account',
-        ip: '127.0.0.1',
-      }),
-    ).resolves.toMatchObject({ userId: targetUserId });
-
-    expect(cloudinaryAssetService.deleteAssets).toHaveBeenCalledWith([
-      user.idFrontAsset,
-      user.idBackAsset,
-      user.selfieAsset,
-    ]);
-    expect(refreshTokenService.revokeAllForUser).toHaveBeenCalledWith(targetUserId);
-    expect(userModel.findByIdAndDelete).toHaveBeenCalledWith(targetUserId);
-    expect(auditLogService.logAdminAction).toHaveBeenCalledWith(
-      AuditAction.ADMIN_USER_DELETED,
-      actorUserId,
-      targetUserId,
-      'Duplicate test account',
-      '127.0.0.1',
-    );
-  });
-});
-
 
 describe('admin user status management', () => {
   it('prevents self-suspension', async () => {

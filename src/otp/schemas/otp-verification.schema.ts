@@ -6,6 +6,7 @@ export type OtpVerificationDocument = OtpVerification & Document;
 export enum OtpPurpose {
   REGISTER = 'register',
   PASSWORD_RESET = 'password_reset',
+  ACCOUNT_RESTORE = 'account_restore',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false }, collection: 'otp_verifications' })

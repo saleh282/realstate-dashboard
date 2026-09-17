@@ -11,6 +11,7 @@ import { MailService } from './mail.service';
 import { SmsService } from './sms.service';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtRefreshStrategy } from './jwt-refresh.strategy';
+import { AccountDeletionModule } from '../account-deletion/account-deletion.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { JwtRefreshStrategy } from './jwt-refresh.strategy';
     OtpModule,
     RefreshTokenModule,
     AuditModule,
+    AccountDeletionModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, MailService, SmsService, JwtStrategy, JwtRefreshStrategy],
