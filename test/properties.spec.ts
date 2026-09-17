@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PropertiesService } from '../src/properties/properties.service';
 import { AssetClassification } from '../src/config/evidence-asset.types';
 import { AccountType, BrokerStatus } from '../src/users/identity.types';
@@ -291,13 +291,18 @@ describe('property publishing validation', () => {
       ownerId: { toString: () => '64b000000000000000000001' },
       titleDeed: { publicId: 'private-deed', resourceType: 'raw', deliveryType: 'authenticated', classification: AssetClassification.PRIVATE_PROPERTY_EVIDENCE },
     };
-    const properties = { findById: jest.fn().mockReturnValue(query(stored)) };
+    const properties = {
+      findOne: jest.fn().mockImplementation((filter: any) => {
+        const requestedAccount = filter.$or[0].advertiserAccountId.toString();
+        return query(requestedAccount === stored.ownerId.toString() ? stored : null);
+      }),
+    };
     const evidenceAssets = { downloadAuthenticatedAsset: jest.fn().mockResolvedValue({ buffer: Buffer.from('pdf'), contentType: 'application/pdf' }) };
     const audit = { logResourceAction: jest.fn().mockResolvedValue(undefined) };
     const instance = service({ properties, evidenceAssets, audit }) as any;
 
     await expect(instance.downloadTitleDeedForOwner('64b000000000000000000002', stored._id.toString()))
-      .rejects.toBeInstanceOf(ForbiddenException);
+      .rejects.toBeInstanceOf(NotFoundException);
     await expect(instance.downloadTitleDeedForOwner('64b000000000000000000001', stored._id.toString()))
       .resolves.toMatchObject({ contentType: 'application/pdf' });
     expect(evidenceAssets.downloadAuthenticatedAsset).toHaveBeenCalledWith(expect.objectContaining({ publicId: 'private-deed' }));

@@ -6,9 +6,13 @@ import { RolesGuard } from '../auth/roles.guard';
 import { CreatePropertyPurposeCategoryDto } from './dto/create-property-purpose-category.dto';
 import { UpdatePropertyPurposeCategoryDto } from './dto/update-property-purpose-category.dto';
 import { PropertyPurposeCategoriesService } from './property-purpose-categories.service';
+import { CapabilityGuard } from '../authorization/capability.guard';
+import { RequireCapabilities } from '../authorization/capabilities.decorator';
+import { Capability } from '../authorization/capability';
 
 @Roles(SystemRole.ADMIN)
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, CapabilityGuard)
+@RequireCapabilities(Capability.ADMIN_CATALOG_MANAGE)
 @Controller('admin/property-purpose-categories')
 export class AdminPropertyPurposeCategoriesController {
   constructor(private readonly service: PropertyPurposeCategoriesService) {}

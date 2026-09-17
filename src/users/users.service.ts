@@ -29,6 +29,7 @@ import {
   resolveAccountStatus,
   resolveSystemRole,
 } from './identity.types';
+import { AuthorizationErrorCode } from '../authorization/authorization-error-codes';
 
 @Injectable()
 export class UsersService {
@@ -254,7 +255,7 @@ export class UsersService {
       throw new BadRequestException('معرف المستخدم غير صالح');
     }
     if (actorUserId === targetUserId) {
-      throw new ForbiddenException('لا يمكنك تعديل حالة حسابك الإداري الحالي');
+      throw this.authorizationDenied('لا يمكنك تعديل حالة حسابك الإداري الحالي');
     }
 
     const user = await this.findById(targetUserId);
@@ -262,10 +263,10 @@ export class UsersService {
 
     const targetRole = resolveSystemRole(user);
     if (targetRole === SystemRole.SUPER_ADMIN) {
-      throw new ForbiddenException('لا يمكن إدارة حساب SUPER_ADMIN من المنتج');
+      throw this.authorizationDenied('لا يمكن إدارة حساب SUPER_ADMIN من المنتج');
     }
     if (actorSystemRole !== SystemRole.SUPER_ADMIN && targetRole !== SystemRole.USER) {
-      throw new ForbiddenException('إدارة حسابات ADMIN متاحة لـ SUPER_ADMIN فقط');
+      throw this.authorizationDenied('إدارة حسابات ADMIN متاحة لـ SUPER_ADMIN فقط');
     }
     const previousStatus = resolveAccountStatus(user);
     if (
@@ -273,7 +274,7 @@ export class UsersService {
       accountStatus !== AccountStatus.PERMANENTLY_BANNED &&
       actorSystemRole !== SystemRole.SUPER_ADMIN
     ) {
-      throw new ForbiddenException('استعادة الحظر الدائم متاحة لـ SUPER_ADMIN فقط');
+      throw this.authorizationDenied('استعادة الحظر الدائم متاحة لـ SUPER_ADMIN فقط');
     }
 
     user.accountStatus = accountStatus;
@@ -324,13 +325,13 @@ export class UsersService {
     if (!user) throw new NotFoundException('المستخدم غير موجود');
     const targetSystemRole = resolveSystemRole(user);
     if (targetSystemRole === SystemRole.SUPER_ADMIN) {
-      throw new ForbiddenException('لا يمكن للمنتج التحكم في حساب المدير الأعلى');
+      throw this.authorizationDenied('لا يمكن للمنتج التحكم في حساب المدير الأعلى');
     }
     if (
       actorSystemRole !== SystemRole.SUPER_ADMIN &&
       targetSystemRole !== SystemRole.USER
     ) {
-      throw new ForbiddenException('يمكن للمدير الأعلى فقط التحكم في جلسات المديرين');
+      throw this.authorizationDenied('يمكن للمدير الأعلى فقط التحكم في جلسات المديرين');
     }
 
     await this.refreshTokenService.revokeAllForUser(targetUserId);
@@ -362,10 +363,10 @@ export class UsersService {
       throw new BadRequestException('معرف المستخدم غير صالح');
     }
     if (actorUserId === targetUserId) {
-      throw new ForbiddenException('لا يمكنك تغيير دورك الخاص');
+      throw this.authorizationDenied('لا يمكنك تغيير دورك الخاص');
     }
     if (actorSystemRole !== SystemRole.SUPER_ADMIN) {
-      throw new ForbiddenException('إدارة أدوار النظام متاحة لـ SUPER_ADMIN فقط');
+      throw this.authorizationDenied('إدارة أدوار النظام متاحة لـ SUPER_ADMIN فقط');
     }
 
     const user = await this.findById(targetUserId);
@@ -373,7 +374,7 @@ export class UsersService {
 
     const previousSystemRole = resolveSystemRole(user);
     if (previousSystemRole === SystemRole.SUPER_ADMIN) {
-      throw new ForbiddenException('لا يمكن التحكم في SUPER_ADMIN من المنتج');
+      throw this.authorizationDenied('لا يمكن التحكم في SUPER_ADMIN من المنتج');
     }
     user.systemRole = systemRole;
     await this.save(user);
@@ -724,13 +725,13 @@ export class UsersService {
       throw new BadRequestException('معرف المستخدم غير صالح');
     }
     if (actorUserId === targetUserId) {
-      throw new ForbiddenException('لا يمكنك حذف حسابك الإداري الحالي');
+      throw this.authorizationDenied('لا يمكنك حذف حسابك الإداري الحالي');
     }
 
     const user = await this.findById(targetUserId);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
     if (resolveSystemRole(user) !== SystemRole.USER) {
-      throw new ForbiddenException('لا يمكن حذف حساب إداري من هذه الشاشة');
+      throw this.authorizationDenied('لا يمكن حذف حساب إداري من هذه الشاشة');
     }
 
     const identifier = user.email ?? user.phone ?? '';
@@ -802,5 +803,9 @@ export class UsersService {
 
   async save(user: UserDocument) {
     return user.save();
+  }
+
+  private authorizationDenied(message: string) {
+    return new ForbiddenException({ message, code: AuthorizationErrorCode.FORBIDDEN });
   }
 }

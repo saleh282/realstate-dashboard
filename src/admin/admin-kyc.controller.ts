@@ -20,9 +20,13 @@ import { UsersService } from '../users/users.service';
 import { ListKycQueryDto } from './dto/list-kyc-query.dto';
 import { AdminReviewKycDto } from './dto/admin-review-kyc.dto';
 import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
+import { CapabilityGuard } from '../authorization/capability.guard';
+import { RequireCapabilities } from '../authorization/capabilities.decorator';
+import { Capability } from '../authorization/capability';
 
 @Roles(SystemRole.ADMIN)
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, CapabilityGuard)
+@RequireCapabilities(Capability.ADMIN_KYC_REVIEW)
 @Controller('admin/kyc')
 export class AdminKycController {
   constructor(

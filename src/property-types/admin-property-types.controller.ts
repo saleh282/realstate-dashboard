@@ -6,9 +6,13 @@ import { RolesGuard } from '../auth/roles.guard';
 import { CreatePropertyTypeDto } from './dto/create-property-type.dto';
 import { UpdatePropertyTypeDto } from './dto/update-property-type.dto';
 import { PropertyTypesService } from './property-types.service';
+import { CapabilityGuard } from '../authorization/capability.guard';
+import { RequireCapabilities } from '../authorization/capabilities.decorator';
+import { Capability } from '../authorization/capability';
 
 @Roles(SystemRole.ADMIN)
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, CapabilityGuard)
+@RequireCapabilities(Capability.ADMIN_CATALOG_MANAGE)
 @Controller('admin/property-types')
 export class AdminPropertyTypesController {
   constructor(private readonly service: PropertyTypesService) {}

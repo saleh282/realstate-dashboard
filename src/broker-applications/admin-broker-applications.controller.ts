@@ -26,9 +26,13 @@ import { ChangeBrokerStatusDto } from './dto/change-broker-status.dto';
 import { CreateBrokerRequirementDto } from './dto/create-broker-requirement.dto';
 import { ReviewBrokerApplicationDto } from './dto/review-broker-application.dto';
 import { UpdateBrokerRequirementDto } from './dto/update-broker-requirement.dto';
+import { CapabilityGuard } from '../authorization/capability.guard';
+import { RequireCapabilities } from '../authorization/capabilities.decorator';
+import { Capability } from '../authorization/capability';
 
 @Roles(SystemRole.ADMIN)
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, CapabilityGuard)
+@RequireCapabilities(Capability.ADMIN_BROKER_REVIEW)
 @Controller('admin')
 export class AdminBrokerApplicationsController {
   constructor(

@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import { v2 as Cloudinary } from 'cloudinary';
@@ -20,10 +20,10 @@ import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
 import { PropertyRevision, PropertyRevisionDocument } from './schemas/property-revision.schema';
 import { PropertyPurposeCategory, PropertyPurposeCategoryDocument } from '../property-purpose-categories/schemas/property-purpose-category.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
-import { AccountStatus, AccountType, BrokerStatus, resolveAccountStatus, resolveAccountType, resolveBrokerStatus, resolveSystemRole } from '../users/identity.types';
-import { SystemRole } from '../auth/roles.enum';
+import { AccountType } from '../users/identity.types';
 import { PropertyMarketingMode, PropertyRevisionModerationStatus } from './property.types';
 import { PropertyErrorCode } from '../common/errors/property-error-codes';
+import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
 
 const PROPERTY_IMAGE_POLICY = { kind: 'image' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000 };
 const PROPERTY_EVIDENCE_POLICY = { kind: 'document' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000, allowPdf: true };
@@ -288,19 +288,7 @@ export class PropertiesService {
     const actor = accounts.find((item) => item._id.toString() === actorId);
     const advertiser = accounts.find((item) => item._id.toString() === advertiserId);
     if (!actor || !advertiser) throw new NotFoundException({ message: 'حساب المعلن غير موجود', code: PropertyErrorCode.ADVERTISER_INVALID });
-    const actorRole = resolveSystemRole(actor);
-    if (proxy) {
-      if (![SystemRole.ADMIN, SystemRole.SUPER_ADMIN].includes(actorRole)) throw new ForbiddenException({ message: 'إنشاء العقار نيابة عن حساب آخر غير مسموح', code: PropertyErrorCode.ADVERTISER_FORBIDDEN });
-    } else if (actorRole !== SystemRole.USER || actorId !== advertiserId) {
-      throw new ForbiddenException({ message: 'حسابات الإدارة لا تعمل كمعلنين شخصيين', code: PropertyErrorCode.ADVERTISER_FORBIDDEN });
-    }
-    if (resolveSystemRole(advertiser) !== SystemRole.USER || resolveAccountStatus(advertiser) !== AccountStatus.ACTIVE) {
-      throw new ForbiddenException({ message: 'الحساب المحدد غير مؤهل للإعلان', code: PropertyErrorCode.ADVERTISER_FORBIDDEN });
-    }
-    const accountType = resolveAccountType(advertiser);
-    if (accountType === AccountType.BROKER && resolveBrokerStatus(advertiser) !== BrokerStatus.APPROVED) {
-      throw new ForbiddenException({ message: 'حساب الوسيط غير معتمد', code: PropertyErrorCode.ADVERTISER_FORBIDDEN });
-    }
+    const accountType = AuthorizationPolicyService.assertPropertyAttribution(actor, advertiser, proxy);
     return { actorId: new Types.ObjectId(actorId), advertiserId: new Types.ObjectId(advertiserId), accountType };
   }
 
@@ -396,12 +384,15 @@ export class PropertiesService {
 
   async downloadTitleDeedForOwner(ownerId: string, id: string, ip?: string) {
     this.assertId(id);
-    const item = await this.properties.findById(id).lean().exec();
+    const accountId = new Types.ObjectId(ownerId);
+    const item = await this.properties.findOne({
+      _id: id,
+      $or: [
+        { advertiserAccountId: accountId },
+        { advertiserAccountId: { $exists: false }, ownerId: accountId },
+      ],
+    }).lean().exec();
     if (!item) throw new NotFoundException({ message: 'العقار غير موجود', code: EvidenceErrorCode.NOT_FOUND });
-    const advertiserId = item.advertiserAccountId?.toString() ?? item.ownerId.toString();
-    if (advertiserId !== ownerId) {
-      throw new ForbiddenException({ message: 'لا يمكنك الوصول إلى مستندات هذا العقار', code: EvidenceErrorCode.ACCESS_FORBIDDEN });
-    }
     const asset = this.privateTitleDeed(item.titleDeed);
     const result = await this.evidenceAssets.downloadAuthenticatedAsset(asset);
     await this.audit.logResourceAction(AuditAction.PRIVATE_EVIDENCE_ACCESSED, ownerId, id, 'property-title-deed-owner-access', ip);
