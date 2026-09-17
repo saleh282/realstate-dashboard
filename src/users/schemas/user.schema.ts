@@ -93,6 +93,23 @@ export class User {
   @Prop()
   suspendedAt?: Date;
 
+  // Privacy lifecycle fields are additive. The workflow collection remains the
+  // durable source of deletion history and optimistic state transitions.
+  @Prop({ index: true })
+  deletionRequestedAt?: Date;
+
+  @Prop()
+  deletionRecoverableUntil?: Date;
+
+  @Prop()
+  anonymizationStartedAt?: Date;
+
+  @Prop()
+  anonymizedAt?: Date;
+
+  @Prop({ trim: true, maxlength: 100, select: false })
+  pseudonymousActorId?: string;
+
   // ---- Brute-force login protection ----
   @Prop({ default: 0, select: false })
   failedLoginAttempts: number;

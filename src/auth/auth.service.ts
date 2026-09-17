@@ -41,6 +41,8 @@ import {
   resolveAccountStatus,
   resolveSystemRole,
 } from '../users/identity.types';
+import { AccountDeletionService } from '../account-deletion/account-deletion.service';
+import { ConfirmAccountRecoveryDto, RequestAccountRecoveryDto } from '../account-deletion/dto/account-recovery.dto';
 
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
@@ -56,10 +58,23 @@ export class AuthService {
     private smsService: SmsService,
     private refreshTokenService: RefreshTokenService,
     private auditLogService: AuditLogService,
+    private accountDeletionService?: AccountDeletionService,
   ) {}
 
   private assertCanAuthenticate(user: any): AccountStatus {
     const status = resolveAccountStatus(user);
+    if (status === AccountStatus.DELETION_PENDING) {
+      throw new ForbiddenException({
+        message: 'الحساب قيد الحذف ويتطلب استعادة صريحة',
+        code: AuthErrorCode.ACCOUNT_DELETION_PENDING,
+      });
+    }
+    if (status === AccountStatus.ANONYMIZED) {
+      throw new ForbiddenException({
+        message: 'لا يمكن استخدام هذا الحساب',
+        code: AuthErrorCode.ACCOUNT_ALREADY_ANONYMIZED,
+      });
+    }
     if (status === AccountStatus.BLOCKED) {
       throw new ForbiddenException({
         message: 'هذا الحساب محظور مؤقتاً',
@@ -226,6 +241,14 @@ export class AuthService {
       });
     }
 
+    if (resolveAccountStatus(user) === AccountStatus.DELETION_PENDING) {
+      await this.auditLogService.log(AuditAction.LOGIN_FAILED, user._id.toString(), ip);
+      if (this.accountDeletionService) {
+        return this.accountDeletionService.pendingLoginState(user._id.toString());
+      }
+      this.assertCanAuthenticate(user);
+    }
+
     try {
       this.assertCanAuthenticate(user);
     } catch (error) {
@@ -342,7 +365,7 @@ export class AuthService {
     if (!user) {
       throw new BadRequestException('المستخدم غير موجود');
     }
-    this.assertCanAuthenticate(user);
+    if (dto.purpose === OtpPurpose.REGISTER) this.assertCanAuthenticate(user);
 
     if (dto.purpose === OtpPurpose.REGISTER) {
       user.emailVerifiedAt = new Date();
@@ -392,7 +415,8 @@ export class AuthService {
     if (!user) {
       throw new BadRequestException('المستخدم غير موجود');
     }
-    this.assertCanAuthenticate(user);
+    const resetStatus = resolveAccountStatus(user);
+    if (resetStatus !== AccountStatus.DELETION_PENDING) this.assertCanAuthenticate(user);
 
     user.password = await hashPassword(dto.newPassword);
     user.failedLoginAttempts = 0;
@@ -519,5 +543,43 @@ export class AuthService {
     await this.refreshTokenService.revokeAllForUser(userId, 'LOGOUT_ALL');
     await this.auditLogService.log(AuditAction.LOGOUT, userId, ip);
     return { message: 'تم تسجيل الخروج من جميع الأجهزة' };
+  }
+
+  async requestAccountRecovery(dto: RequestAccountRecoveryDto) {
+    if (!this.accountDeletionService) throw new ServiceUnavailableException();
+    const recovery = await this.accountDeletionService.validateRecoveryCredentials(
+      dto.identifier,
+      dto.password,
+    );
+    await this.otpVerificationService.assertCanResend(
+      recovery.identifier,
+      OtpCollectionPurpose.ACCOUNT_RESTORE,
+    );
+    const code = await this.otpVerificationService.generateAndStore(
+      recovery.identifier,
+      OtpCollectionPurpose.ACCOUNT_RESTORE,
+    );
+    await this.sendOtp(recovery.identifier, code);
+    return {
+      message: 'تم إرسال رمز التحقق لاستعادة الحساب',
+      workflowVersion: recovery.workflowVersion,
+      recoverableUntil: recovery.recoverableUntil,
+      expiresInMinutes: 5,
+    };
+  }
+
+  async confirmAccountRecovery(dto: ConfirmAccountRecoveryDto, ip?: string) {
+    if (!this.accountDeletionService) throw new ServiceUnavailableException();
+    const identifier = this.normalizeEmailAuthIdentifier(dto.identifier);
+    await this.otpVerificationService.verify(
+      identifier,
+      dto.otp,
+      OtpCollectionPurpose.ACCOUNT_RESTORE,
+    );
+    return this.accountDeletionService.restoreAfterVerification(
+      identifier,
+      dto.workflowVersion,
+      ip,
+    );
   }
 }

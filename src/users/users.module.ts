@@ -6,6 +6,7 @@ import { UsersController } from './users.controller';
 import { RefreshTokenModule } from '../refresh-token/refresh-token.module';
 import { AuditModule } from '../audit/audit.module';
 import { CloudinaryModule } from '../config/cloudinary.module';
+import { AccountDeletionModule } from '../account-deletion/account-deletion.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { CloudinaryModule } from '../config/cloudinary.module';
     RefreshTokenModule,
     AuditModule,
     CloudinaryModule,
+    AccountDeletionModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

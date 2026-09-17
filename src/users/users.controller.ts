@@ -17,12 +17,16 @@ import { CapabilityGuard } from '../authorization/capability.guard';
 import { RequireCapabilities } from '../authorization/capabilities.decorator';
 import { Capability } from '../authorization/capability';
 import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
+import { AccountDeletionService } from '../account-deletion/account-deletion.service';
 
 @UseGuards(JwtAuthGuard, CapabilityGuard)
 @RequireCapabilities(Capability.ACCOUNT_SELF_READ)
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly accountDeletionService: AccountDeletionService,
+  ) {}
 
   @Get('me')
   getProfile(@Req() req: any) {
@@ -63,6 +67,10 @@ export class UsersController {
   @Delete('me')
   @RequireCapabilities(Capability.ACCOUNT_SELF_MANAGE)
   deleteAccount(@Req() req: any, @Body() dto: DeleteAccountDto) {
-    return this.usersService.deleteAccount(req.user.userId, dto.password, req.ip);
+    return this.accountDeletionService.requestSelfDeletion(
+      req.user.userId,
+      dto.password,
+      req.ip,
+    );
   }
 }

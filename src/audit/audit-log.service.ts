@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model, Types } from 'mongoose';
 import { AuditLog, AuditLogDocument, AuditAction } from './schemas/audit-log.schema';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class AuditLogService {
@@ -16,6 +17,7 @@ export class AuditLogService {
         action,
         userId: userId ? new Types.ObjectId(userId) : null,
         ip: ip ?? 'unknown',
+        requestId: randomUUID(),
       });
     } catch (err) {
       this.logger.warn(`Failed to write audit log (${action}): ${err.message}`);
@@ -39,6 +41,7 @@ export class AuditLogService {
         reason,
         ip: ip ?? 'unknown',
         metadata,
+        requestId: randomUUID(),
       });
     } catch (err) {
       this.logger.warn(`Failed to write admin audit log (${action})`);
@@ -58,6 +61,7 @@ export class AuditLogService {
       reason: string;
       ip?: string;
       metadata?: Record<string, unknown>;
+      requestId?: string;
     },
     session: ClientSession,
   ): Promise<void> {
@@ -75,6 +79,7 @@ export class AuditLogService {
         reason: options.reason,
         ip: options.ip ?? 'unknown',
         metadata: options.metadata,
+        requestId: options.requestId ?? randomUUID(),
       }],
       { session },
     );
@@ -95,6 +100,7 @@ export class AuditLogService {
         targetResourceId,
         reason,
         ip: ip ?? 'unknown',
+        requestId: randomUUID(),
       });
     } catch {
       this.logger.warn(`Failed to write admin resource audit log (${action})`);
@@ -116,6 +122,7 @@ export class AuditLogService {
         targetResourceId,
         reason,
         ip: ip ?? 'unknown',
+        requestId: randomUUID(),
       });
     } catch {
       this.logger.warn(`Failed to write resource audit log (${action})`);

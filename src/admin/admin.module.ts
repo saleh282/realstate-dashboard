@@ -9,9 +9,10 @@ import { AdminAuditController } from './admin-audit.controller';
 import { AdminDashboardController } from './admin-dashboard.controller';
 import { AdminCompaniesController } from './admin-companies.controller';
 import { CompanyAccountsService } from './company-accounts.service';
+import { AccountDeletionModule } from '../account-deletion/account-deletion.module';
 
 @Module({
-  imports: [UsersModule, AuditModule, PassportModule],
+  imports: [UsersModule, AuditModule, PassportModule, AccountDeletionModule],
   controllers: [
     AdminUsersController,
     AdminKycController,

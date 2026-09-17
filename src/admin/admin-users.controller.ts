@@ -23,13 +23,18 @@ import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { CapabilityGuard } from '../authorization/capability.guard';
 import { RequireCapabilities } from '../authorization/capabilities.decorator';
 import { Capability } from '../authorization/capability';
+import { AccountDeletionService } from '../account-deletion/account-deletion.service';
+import { AnonymizeAccountDto, LegalHoldDto } from '../account-deletion/dto/legal-hold.dto';
 
 @Roles(SystemRole.ADMIN)
 @UseGuards(JwtAuthGuard, RolesGuard, CapabilityGuard)
 @RequireCapabilities(Capability.ADMIN_ACCOUNT_READ)
 @Controller('admin/users')
 export class AdminUsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly accountDeletionService: AccountDeletionService,
+  ) {}
 
   @Get()
   list(@Query() query: ListUsersQueryDto) {
@@ -107,11 +112,66 @@ export class AdminUsersController {
     @Body() dto: DeleteAdminUserDto,
     @Req() req: any,
   ) {
-    return this.usersService.deleteForAdmin({
+    return this.accountDeletionService.requestDeletionForAdmin({
       actorUserId: req.user.userId,
       targetUserId,
       confirmIdentifier: dto.confirmIdentifier,
       reason: dto.reason.trim(),
+      ip: req.ip,
+    });
+  }
+
+  @Get(':userId/deletion')
+  getDeletionImpact(@Param('userId') targetUserId: string) {
+    return this.accountDeletionService.getAdminImpact(targetUserId);
+  }
+
+  @Post(':userId/deletion/legal-hold')
+  @RequireCapabilities(Capability.ADMIN_ACCOUNT_MANAGE)
+  placeLegalHold(
+    @Param('userId') targetUserId: string,
+    @Body() dto: LegalHoldDto,
+    @Req() req: any,
+  ) {
+    return this.accountDeletionService.setLegalHold({
+      actorUserId: req.user.userId,
+      targetUserId,
+      reason: dto.reason.trim(),
+      version: dto.version,
+      place: true,
+      ip: req.ip,
+    });
+  }
+
+  @Delete(':userId/deletion/legal-hold')
+  @RequireCapabilities(Capability.ADMIN_ACCOUNT_MANAGE)
+  removeLegalHold(
+    @Param('userId') targetUserId: string,
+    @Body() dto: LegalHoldDto,
+    @Req() req: any,
+  ) {
+    return this.accountDeletionService.setLegalHold({
+      actorUserId: req.user.userId,
+      targetUserId,
+      reason: dto.reason.trim(),
+      version: dto.version,
+      place: false,
+      ip: req.ip,
+    });
+  }
+
+  @Post(':userId/deletion/anonymize')
+  @RequireCapabilities(Capability.ADMIN_ACCOUNT_MANAGE)
+  anonymize(
+    @Param('userId') targetUserId: string,
+    @Body() dto: AnonymizeAccountDto,
+    @Req() req: any,
+  ) {
+    return this.accountDeletionService.anonymize({
+      actorUserId: req.user.userId,
+      targetUserId,
+      reason: dto.reason.trim(),
+      version: dto.version,
       ip: req.ip,
     });
   }

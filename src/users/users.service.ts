@@ -13,7 +13,6 @@ import { User, UserDocument, KycStatus } from './schemas/user.schema';
 import { RefreshTokenService } from '../refresh-token/refresh-token.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
-import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
 import { SystemRole } from '../auth/roles.enum';
 import {
   identifierLookupValues,
@@ -37,7 +36,6 @@ export class UsersService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private refreshTokenService: RefreshTokenService,
     private auditLogService: AuditLogService,
-    private cloudinaryAssetService: CloudinaryAssetService,
   ) {}
 
   static isEmail(identifier: string): boolean {
@@ -185,7 +183,7 @@ export class UsersService {
     const [users, total] = await Promise.all([
       this.userModel
         .find(filter)
-        .select('fullName email phone systemRole accountType accountStatus brokerStatus brokerVersion verificationTrustState primaryIdentifierType emailVerifiedAt phoneVerifiedAt legacyVerifiedIdentifierType role emailVerified isActive kycStatus createdAt updatedAt')
+        .select('fullName email phone systemRole accountType accountStatus brokerStatus brokerVersion verificationTrustState primaryIdentifierType emailVerifiedAt phoneVerifiedAt legacyVerifiedIdentifierType role emailVerified isActive kycStatus deletionRequestedAt deletionRecoverableUntil anonymizationStartedAt anonymizedAt createdAt updatedAt')
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -204,6 +202,10 @@ export class UsersService {
         ...identityProjection(user),
         kycStatus: user.kycStatus,
         kycVersion: user.kycVersion ?? 0,
+        deletionRequestedAt: user.deletionRequestedAt,
+        deletionRecoverableUntil: user.deletionRecoverableUntil,
+        anonymizationStartedAt: user.anonymizationStartedAt,
+        anonymizedAt: user.anonymizedAt,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       })),
@@ -237,6 +239,10 @@ export class UsersService {
       kycSubmittedAt: user.kycSubmittedAt,
       kycReviewedAt: user.kycReviewedAt,
       kycRejectionReason: user.kycRejectionReason,
+      deletionRequestedAt: user.deletionRequestedAt,
+      deletionRecoverableUntil: user.deletionRecoverableUntil,
+      anonymizationStartedAt: user.anonymizationStartedAt,
+      anonymizedAt: user.anonymizedAt,
       createdAt: (user as any).createdAt,
       updatedAt: (user as any).updatedAt,
     };
@@ -269,6 +275,17 @@ export class UsersService {
       throw this.authorizationDenied('إدارة حسابات ADMIN متاحة لـ SUPER_ADMIN فقط');
     }
     const previousStatus = resolveAccountStatus(user);
+    if (
+      previousStatus === AccountStatus.DELETION_PENDING ||
+      previousStatus === AccountStatus.ANONYMIZED ||
+      accountStatus === AccountStatus.DELETION_PENDING ||
+      accountStatus === AccountStatus.ANONYMIZED
+    ) {
+      throw new ConflictException({
+        message: 'تدار حالة الحذف من مسار الخصوصية المخصص فقط',
+        code: AuthErrorCode.DELETION_REQUEST_CONFLICT,
+      });
+    }
     if (
       previousStatus === AccountStatus.PERMANENTLY_BANNED &&
       accountStatus !== AccountStatus.PERMANENTLY_BANNED &&
@@ -710,90 +727,6 @@ export class UsersService {
         createdAt: u.createdAt,
       })),
       recentAuditLogs,
-    };
-  }
-
-  async deleteForAdmin(options: {
-    actorUserId: string;
-    targetUserId: string;
-    confirmIdentifier: string;
-    reason: string;
-    ip?: string;
-  }) {
-    const { actorUserId, targetUserId, confirmIdentifier, reason, ip } = options;
-    if (!Types.ObjectId.isValid(targetUserId)) {
-      throw new BadRequestException('معرف المستخدم غير صالح');
-    }
-    if (actorUserId === targetUserId) {
-      throw this.authorizationDenied('لا يمكنك حذف حسابك الإداري الحالي');
-    }
-
-    const user = await this.findById(targetUserId);
-    if (!user) throw new NotFoundException('المستخدم غير موجود');
-    if (resolveSystemRole(user) !== SystemRole.USER) {
-      throw this.authorizationDenied('لا يمكن حذف حساب إداري من هذه الشاشة');
-    }
-
-    const identifier = user.email ?? user.phone ?? '';
-    if (
-      !identifier ||
-      identifier.trim().toLowerCase() !== confirmIdentifier.trim().toLowerCase()
-    ) {
-      throw new BadRequestException('بيانات تأكيد المستخدم غير مطابقة');
-    }
-
-    await this.cloudinaryAssetService.deleteAssets([
-      user.idFrontAsset,
-      user.idBackAsset,
-      user.selfieAsset,
-    ]);
-    await this.refreshTokenService.revokeAllForUser(targetUserId);
-    await this.userModel.findByIdAndDelete(targetUserId).exec();
-    await this.auditLogService.logAdminAction(
-      AuditAction.ADMIN_USER_DELETED,
-      actorUserId,
-      targetUserId,
-      reason,
-      ip,
-    );
-
-    return {
-      message: 'تم حذف المستخدم نهائياً',
-      userId: targetUserId,
-    };
-  }
-
-  async deleteAccount(userId: string, password: string, ip?: string) {
-    const user = await this.findById(userId, true);
-    if (!user) {
-      throw new NotFoundException('المستخدم غير موجود');
-    }
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      throw new UnauthorizedException('كلمة المرور غير صحيحة لتأكيد حذف الحساب');
-    }
-
-    // Delete KYC assets whose Cloudinary identifiers are available before removing
-    // their only database references. Legacy URL-only assets are documented separately.
-    await this.cloudinaryAssetService.deleteAssets([
-      user.idFrontAsset,
-      user.idBackAsset,
-      user.selfieAsset,
-    ]);
-
-    // 1. Revoke all refresh tokens
-    await this.refreshTokenService.revokeAllForUser(userId);
-
-    // 2. Audit log the account deletion
-    await this.auditLogService.log(AuditAction.ACCOUNT_DELETED, userId, ip);
-
-    // 3. Permanently remove the user document
-    await this.userModel.findByIdAndDelete(userId).exec();
-
-    return {
-      message: 'تم حذف الحساب نهائياً بنجاح',
-      userId,
     };
   }
 

@@ -20,6 +20,7 @@ import { BrokerApplicationsModule } from './broker-applications/broker-applicati
 import { PropertyPurposeCategoriesModule } from './property-purpose-categories/property-purpose-categories.module';
 import { ManagedMarketingModule } from './managed-marketing/managed-marketing.module';
 import { AuthorizationModule } from './authorization/authorization.module';
+import { AccountDeletionModule } from './account-deletion/account-deletion.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { AuthorizationModule } from './authorization/authorization.module';
     PropertyPurposeCategoriesModule,
     ManagedMarketingModule,
     AuthorizationModule,
+    AccountDeletionModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

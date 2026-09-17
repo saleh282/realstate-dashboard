@@ -68,7 +68,12 @@ describe('active-account session enforcement', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it.each([AccountStatus.BLOCKED, AccountStatus.PERMANENTLY_BANNED])(
+  it.each([
+    AccountStatus.BLOCKED,
+    AccountStatus.PERMANENTLY_BANNED,
+    AccountStatus.DELETION_PENDING,
+    AccountStatus.ANONYMIZED,
+  ])(
     'rejects refresh when the account is %s',
     async (accountStatus) => {
     const service = Object.create(AuthService.prototype) as any;
