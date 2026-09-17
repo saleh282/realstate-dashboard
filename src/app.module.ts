@@ -16,6 +16,7 @@ import { PropertyOptionsModule } from './property-options/property-options.modul
 import { GovernoratesModule } from './governorates/governorates.module';
 import { PropertyFormOptionsModule } from './property-form-options/property-form-options.module';
 import { PropertiesModule } from './properties/properties.module';
+import { BrokerApplicationsModule } from './broker-applications/broker-applications.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { PropertiesModule } from './properties/properties.module';
     GovernoratesModule,
     PropertyFormOptionsModule,
     PropertiesModule,
+    BrokerApplicationsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

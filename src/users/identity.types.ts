@@ -38,6 +38,7 @@ type IdentitySource = {
   accountType?: AccountType;
   accountStatus?: AccountStatus;
   brokerStatus?: BrokerStatus;
+  brokerVersion?: number;
   verificationTrustState?: VerificationTrustState;
   primaryIdentifierType?: PrimaryIdentifierType | string;
   email?: string;
@@ -131,6 +132,7 @@ export function identityProjection(user: IdentitySource) {
     accountType: resolveAccountType(user),
     accountStatus,
     brokerStatus: resolveBrokerStatus(user),
+    brokerVersion: user.brokerVersion ?? 0,
     verificationTrustState: resolveVerificationTrustState(user),
     primaryIdentifierType,
     emailVerification: { isVerified: emailVerified, verifiedAt: user.emailVerifiedAt },

@@ -1,0 +1,104 @@
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Req,
+  Res,
+  StreamableFile,
+  UploadedFiles,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { EvidenceErrorCode } from '../common/errors/evidence-error-codes';
+import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
+import { BrokerApplicationsService } from './broker-applications.service';
+
+const allowedBrokerEvidenceTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+]);
+
+@UseGuards(JwtAuthGuard)
+@Controller('broker')
+export class BrokerApplicationsController {
+  constructor(
+    private readonly brokerApplications: BrokerApplicationsService,
+    private readonly assets: CloudinaryAssetService,
+  ) {}
+
+  @Get('requirements')
+  listRequirements() {
+    return this.brokerApplications.listActiveRequirements();
+  }
+
+  @Post('applications')
+  @UseInterceptors(
+    AnyFilesInterceptor({
+      limits: { fileSize: 10 * 1024 * 1024, files: 20 },
+      fileFilter: (_request, file, callback) => {
+        if (!allowedBrokerEvidenceTypes.has(file.mimetype)) {
+          return callback(
+            new BadRequestException({
+              message: 'صيغة مستند الوسيط غير مدعومة',
+              code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED,
+            }),
+            false,
+          );
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  submit(
+    @Req() request: any,
+    @UploadedFiles() files: Express.Multer.File[],
+    @Headers('idempotency-key') idempotencyKey: string,
+  ) {
+    return this.brokerApplications.submitApplication(
+      request.user.userId,
+      files ?? [],
+      idempotencyKey,
+      request.ip,
+    );
+  }
+
+  @Get('applications/me')
+  ownHistory(@Req() request: any) {
+    return this.brokerApplications.listOwnApplications(request.user.userId);
+  }
+
+  @Get('applications/:applicationId/documents/:documentId')
+  async getOwnDocument(
+    @Param('applicationId') applicationId: string,
+    @Param('documentId') documentId: string,
+    @Req() request: any,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const asset = await this.brokerApplications.getEvidenceForApplicant(
+      request.user.userId,
+      applicationId,
+      documentId,
+      request.ip,
+    );
+    return this.download(asset, response);
+  }
+
+  private async download(asset: any, response: Response) {
+    const downloaded = await this.assets.downloadAuthenticatedAsset(asset);
+    response.set({
+      'Content-Type': downloaded.contentType,
+      'Content-Disposition': 'inline',
+      'Cache-Control': 'private, no-store, max-age=0',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    return new StreamableFile(downloaded.buffer);
+  }
+}

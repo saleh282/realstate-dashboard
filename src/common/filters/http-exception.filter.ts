@@ -62,6 +62,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
           'identifier',
           'expiresInMinutes',
           'retryAfterSeconds',
+          'details',
         ];
         responseMetadata = Object.fromEntries(
           exposedKeys

@@ -96,7 +96,163 @@ export const userIdentityMigration: MigrationDefinition = {
   },
 };
 
-export const CORE_MIGRATIONS: MigrationDefinition[] = [propertyMoneyMigration, userIdentityMigration];
+const brokerIndexes = [
+  {
+    collection: 'broker_applications',
+    key: { applicantAccountId: 1, applicationVersion: 1 },
+    options: { unique: true, name: 'broker_application_version_unique' },
+  },
+  {
+    collection: 'broker_applications',
+    key: { applicantAccountId: 1, idempotencyKeyHash: 1 },
+    options: { unique: true, name: 'broker_application_idempotency_unique' },
+  },
+  {
+    collection: 'broker_applications',
+    key: { applicantAccountId: 1, status: 1 },
+    options: {
+      unique: true,
+      partialFilterExpression: { status: 'PENDING' },
+      name: 'broker_application_pending_unique',
+    },
+  },
+  {
+    collection: 'broker_applications',
+    key: { status: 1, submittedAt: 1, _id: 1 },
+    options: { name: 'broker_application_review_queue' },
+  },
+  {
+    collection: 'broker_verification_documents',
+    key: { applicationId: 1, requirementCode: 1 },
+    options: { unique: true, name: 'broker_document_application_requirement_unique' },
+  },
+  {
+    collection: 'broker_verification_documents',
+    key: { applicantAccountId: 1, submittedAt: -1 },
+    options: { name: 'broker_document_applicant_history' },
+  },
+  {
+    collection: 'broker_verification_requirements',
+    key: { code: 1 },
+    options: { unique: true, name: 'broker_requirement_code_unique' },
+  },
+  {
+    collection: 'broker_verification_requirements',
+    key: { isActive: 1, sortOrder: 1, code: 1 },
+    options: { name: 'broker_requirement_active_order' },
+  },
+] as const;
+
+async function brokerDuplicateBlockers(db: MigrationContext['db']) {
+  const applications = db.collection('broker_applications');
+  const duplicates = await applications.aggregate([
+    {
+      $facet: {
+        versions: [
+          { $group: { _id: { applicantAccountId: '$applicantAccountId', applicationVersion: '$applicationVersion' }, count: { $sum: 1 } } },
+          { $match: { count: { $gt: 1 } } },
+          { $limit: 20 },
+        ],
+        pending: [
+          { $match: { status: 'PENDING' } },
+          { $group: { _id: '$applicantAccountId', count: { $sum: 1 } } },
+          { $match: { count: { $gt: 1 } } },
+          { $limit: 20 },
+        ],
+        idempotency: [
+          { $match: { idempotencyKeyHash: { $type: 'string' } } },
+          { $group: { _id: { applicantAccountId: '$applicantAccountId', idempotencyKeyHash: '$idempotencyKeyHash' }, count: { $sum: 1 } } },
+          { $match: { count: { $gt: 1 } } },
+          { $limit: 20 },
+        ],
+      },
+    },
+  ]).toArray();
+  const result = duplicates[0] ?? { versions: [], pending: [], idempotency: [] };
+  return [
+    ...(result.versions.length ? [{ code: 'BROKER_APPLICATION_VERSION_DUPLICATES', message: `${result.versions.length} duplicate application versions require review` }] : []),
+    ...(result.pending.length ? [{ code: 'BROKER_APPLICATION_PENDING_DUPLICATES', message: `${result.pending.length} applicants have multiple pending applications` }] : []),
+    ...(result.idempotency.length ? [{ code: 'BROKER_APPLICATION_IDEMPOTENCY_DUPLICATES', message: `${result.idempotency.length} duplicate idempotency keys require review` }] : []),
+  ];
+}
+
+async function existingIndexNames(
+  db: MigrationContext['db'],
+  collectionName: string,
+): Promise<Set<string>> {
+  try {
+    const indexes = await db.collection(collectionName).indexes();
+    return new Set(indexes.map((index) => index.name).filter(Boolean) as string[]);
+  } catch (error) {
+    if ((error as { code?: number })?.code === 26) return new Set();
+    throw error;
+  }
+}
+
+export const brokerLifecycleIndexesMigration: MigrationDefinition = {
+  id: '012-broker-lifecycle-indexes',
+  version: 1,
+  description: 'Create additive unique and queue indexes for versioned broker applications',
+  dependencies: ['007-user-identity-contract'],
+  rollback: {
+    kind: 'none',
+    remediation: 'Disable broker application routes and inspect the migration ledger; retain broker collections, evidence, audit history, and indexes.',
+    restoreProcedure: 'Restore the verified pre-deployment snapshot to a separate database and reconcile broker records before any reviewed remediation.',
+  },
+  async preflight({ db }) {
+    const blockers = await brokerDuplicateBlockers(db);
+    const namesByCollection = new Map<string, Set<string>>();
+    for (const index of brokerIndexes) {
+      if (!namesByCollection.has(index.collection)) {
+        namesByCollection.set(
+          index.collection,
+          await existingIndexNames(db, index.collection),
+        );
+      }
+    }
+    const alreadyApplied = brokerIndexes.filter((index) =>
+      namesByCollection.get(index.collection)?.has(index.options.name),
+    ).length;
+    return {
+      eligible: brokerIndexes.length - alreadyApplied,
+      alreadyApplied,
+      blockers,
+      summary: {
+        indexNames: brokerIndexes.map((index) => index.options.name),
+        existingUsersModified: 0,
+      },
+    };
+  },
+  async migrateBatch({ db }) {
+    for (const index of brokerIndexes) {
+      await db.collection(index.collection).createIndex(index.key, index.options as any);
+    }
+    return { scanned: brokerIndexes.length, modified: brokerIndexes.length, done: true };
+  },
+  async validate({ db }) {
+    const missing: string[] = [];
+    for (const expected of brokerIndexes) {
+      const indexes = await existingIndexNames(db, expected.collection);
+      if (!indexes.has(expected.options.name)) {
+        missing.push(expected.options.name);
+      }
+    }
+    return {
+      valid: missing.length === 0,
+      errors: missing.map((name) => ({
+        code: 'BROKER_INDEX_MISSING',
+        message: `Required broker index ${name} is missing`,
+      })),
+      summary: { expectedIndexes: brokerIndexes.length, missingIndexes: missing },
+    };
+  },
+};
+
+export const CORE_MIGRATIONS: MigrationDefinition[] = [
+  propertyMoneyMigration,
+  userIdentityMigration,
+  brokerLifecycleIndexesMigration,
+];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {
   const ids = new Set<string>();
