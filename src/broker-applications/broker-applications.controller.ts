@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   Headers,
@@ -12,7 +13,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { AnyFilesInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { EvidenceErrorCode } from '../common/errors/evidence-error-codes';
@@ -21,13 +22,6 @@ import { BrokerApplicationsService } from './broker-applications.service';
 import { CapabilityGuard } from '../authorization/capability.guard';
 import { RequireCapabilities } from '../authorization/capabilities.decorator';
 import { Capability } from '../authorization/capability';
-
-const allowedBrokerEvidenceTypes = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'application/pdf',
-]);
 
 @UseGuards(JwtAuthGuard, CapabilityGuard)
 @RequireCapabilities(Capability.BROKER_APPLICATION_READ_OWN)
@@ -38,18 +32,13 @@ export class BrokerApplicationsController {
     private readonly assets: CloudinaryAssetService,
   ) {}
 
-  @Get('requirements')
-  listRequirements() {
-    return this.brokerApplications.listActiveRequirements();
-  }
-
   @Post('applications')
   @RequireCapabilities(Capability.BROKER_APPLICATION_SUBMIT)
   @UseInterceptors(
-    AnyFilesInterceptor({
-      limits: { fileSize: 10 * 1024 * 1024, files: 20 },
+    FileFieldsInterceptor([{ name: 'verificationDocument', maxCount: 2 }], {
+      limits: { fileSize: 10 * 1024 * 1024, files: 2 },
       fileFilter: (_request, file, callback) => {
-        if (!allowedBrokerEvidenceTypes.has(file.mimetype)) {
+        if (file.mimetype !== 'application/pdf') {
           return callback(
             new BadRequestException({
               message: 'صيغة مستند الوسيط غير مدعومة',
@@ -64,12 +53,12 @@ export class BrokerApplicationsController {
   )
   submit(
     @Req() request: any,
-    @UploadedFiles() files: Express.Multer.File[],
+    @UploadedFiles() files: { verificationDocument?: Express.Multer.File[] },
     @Headers('idempotency-key') idempotencyKey: string,
   ) {
     return this.brokerApplications.submitApplication(
       request.user.userId,
-      files ?? [],
+      files?.verificationDocument ?? [],
       idempotencyKey,
       request.ip,
     );

@@ -1,11 +1,9 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   Param,
   ParseIntPipe,
-  Patch,
   Post,
   Query,
   Req,
@@ -21,11 +19,8 @@ import { RolesGuard } from '../auth/roles.guard';
 import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
 import { BrokerApplicationsService } from './broker-applications.service';
 import { BrokerApplicationStatus } from './broker.types';
-import { ArchiveBrokerRequirementDto } from './dto/archive-broker-requirement.dto';
 import { ChangeBrokerStatusDto } from './dto/change-broker-status.dto';
-import { CreateBrokerRequirementDto } from './dto/create-broker-requirement.dto';
 import { ReviewBrokerApplicationDto } from './dto/review-broker-application.dto';
-import { UpdateBrokerRequirementDto } from './dto/update-broker-requirement.dto';
 import { CapabilityGuard } from '../authorization/capability.guard';
 import { RequireCapabilities } from '../authorization/capabilities.decorator';
 import { Capability } from '../authorization/capability';
@@ -39,39 +34,6 @@ export class AdminBrokerApplicationsController {
     private readonly brokerApplications: BrokerApplicationsService,
     private readonly assets: CloudinaryAssetService,
   ) {}
-
-  @Get('broker-requirements')
-  listRequirements() {
-    return this.brokerApplications.listRequirementsForAdmin();
-  }
-
-  @Post('broker-requirements')
-  createRequirement(@Body() dto: CreateBrokerRequirementDto, @Req() request: any) {
-    return this.brokerApplications.createRequirement(dto, this.actor(request));
-  }
-
-  @Patch('broker-requirements/:requirementId')
-  updateRequirement(
-    @Param('requirementId') requirementId: string,
-    @Body() dto: UpdateBrokerRequirementDto,
-    @Req() request: any,
-  ) {
-    return this.brokerApplications.updateRequirement(requirementId, dto, this.actor(request));
-  }
-
-  @Delete('broker-requirements/:requirementId')
-  archiveRequirement(
-    @Param('requirementId') requirementId: string,
-    @Body() dto: ArchiveBrokerRequirementDto,
-    @Req() request: any,
-  ) {
-    return this.brokerApplications.archiveRequirement(
-      requirementId,
-      dto.expectedVersion,
-      dto.reason.trim(),
-      this.actor(request),
-    );
-  }
 
   @Get('broker/applications')
   listApplications(

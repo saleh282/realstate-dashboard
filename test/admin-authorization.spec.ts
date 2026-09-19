@@ -74,7 +74,6 @@ describe('admin controller authorization', () => {
     downloadPrivateEvidenceForAdmin: jest.fn().mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
   };
   const brokerApplicationsService = {
-    listRequirementsForAdmin: jest.fn().mockResolvedValue({ items: [] }),
     listOwnApplications: jest.fn().mockResolvedValue({ items: [] }),
     reviewApplication: jest.fn().mockResolvedValue({
       application: { status: 'APPROVED', version: 1 },
@@ -197,7 +196,6 @@ describe('admin controller authorization', () => {
     '/admin/kyc',
     '/admin/dashboard/metrics',
     '/admin/audit-logs',
-    '/admin/broker-requirements',
   ])('enforces admin role on %s', async (path) => {
     await request(app.getHttpServer())
       .get(path)

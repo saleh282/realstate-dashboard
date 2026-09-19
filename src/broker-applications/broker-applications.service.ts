@@ -27,8 +27,6 @@ import {
 } from '../users/identity.types';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { BrokerApplicationStatus, BrokerReviewDecision } from './broker.types';
-import { CreateBrokerRequirementDto } from './dto/create-broker-requirement.dto';
-import { UpdateBrokerRequirementDto } from './dto/update-broker-requirement.dto';
 import {
   BrokerApplication,
   BrokerApplicationDocument,
@@ -37,10 +35,6 @@ import {
   BrokerVerificationDocument,
   BrokerVerificationDocumentDocument,
 } from './schemas/broker-verification-document.schema';
-import {
-  BrokerVerificationRequirement,
-  BrokerVerificationRequirementDocument,
-} from './schemas/broker-verification-requirement.schema';
 
 const BROKER_EVIDENCE_POLICY = {
   kind: 'document' as const,
@@ -58,166 +52,11 @@ export class BrokerApplicationsService {
     private readonly applicationModel: Model<BrokerApplicationDocument>,
     @InjectModel(BrokerVerificationDocument.name)
     private readonly documentModel: Model<BrokerVerificationDocumentDocument>,
-    @InjectModel(BrokerVerificationRequirement.name)
-    private readonly requirementModel: Model<BrokerVerificationRequirementDocument>,
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectConnection() private readonly connection: Connection,
     private readonly assets: CloudinaryAssetService,
     private readonly audit: AuditLogService,
   ) {}
-
-  async listActiveRequirements() {
-    const requirements = await this.requirementModel
-      .find({ isActive: true })
-      .sort({ sortOrder: 1, code: 1 })
-      .lean()
-      .exec();
-    return {
-      message: 'تم تحميل متطلبات التحقق من الوسيط بنجاح',
-      items: requirements.map((requirement) => this.requirementProjection(requirement)),
-    };
-  }
-
-  async listRequirementsForAdmin() {
-    const requirements = await this.requirementModel
-      .find({})
-      .sort({ sortOrder: 1, code: 1 })
-      .lean()
-      .exec();
-    return {
-      message: 'تم تحميل متطلبات التحقق من الوسيط بنجاح',
-      items: requirements.map((requirement) => this.requirementProjection(requirement)),
-    };
-  }
-
-  async createRequirement(dto: CreateBrokerRequirementDto, actor: RequestActor) {
-    const code = dto.code.trim().toUpperCase();
-    try {
-      return await this.connection.transaction(async (session) => {
-        const [requirement] = await this.requirementModel.create(
-          [{
-            code,
-            labelAr: dto.labelAr.trim(),
-            labelEn: dto.labelEn?.trim() || undefined,
-            required: dto.required,
-            isActive: dto.isActive ?? true,
-            sortOrder: dto.sortOrder,
-            version: 0,
-          }],
-          { session },
-        );
-        await this.audit.logRequired(
-          {
-            action: AuditAction.ADMIN_BROKER_REQUIREMENT_CREATED,
-            actorUserId: actor.actorUserId,
-            targetResourceId: requirement._id.toString(),
-            reason: 'إنشاء متطلب مستند وسيط',
-            ip: actor.ip,
-            metadata: { after: this.requirementProjection(requirement) },
-          },
-          session,
-        );
-        return {
-          message: 'تم إنشاء متطلب مستند الوسيط بنجاح',
-          requirement: this.requirementProjection(requirement),
-        };
-      });
-    } catch (error) {
-      if (this.isDuplicateKey(error)) {
-        throw new ConflictException({
-          message: 'رمز متطلب مستند الوسيط مستخدم بالفعل',
-          code: BrokerErrorCode.REQUIREMENT_INVALID,
-        });
-      }
-      throw error;
-    }
-  }
-
-  async updateRequirement(
-    requirementId: string,
-    dto: UpdateBrokerRequirementDto,
-    actor: RequestActor,
-  ) {
-    const id = this.objectId(requirementId, 'معرف متطلب المستند غير صالح');
-    return this.connection.transaction(async (session) => {
-      const before = await this.requirementModel.findById(id).session(session).lean().exec();
-      if (!before) throw new NotFoundException('متطلب مستند الوسيط غير موجود');
-      if ((before.version ?? 0) !== dto.expectedVersion) {
-        this.requirementVersionConflict(before);
-      }
-      const updates: Record<string, unknown> = {};
-      if (dto.labelAr !== undefined) updates.labelAr = dto.labelAr.trim();
-      if (dto.labelEn !== undefined) updates.labelEn = dto.labelEn.trim() || undefined;
-      if (dto.required !== undefined) updates.required = dto.required;
-      if (dto.isActive !== undefined) {
-        updates.isActive = dto.isActive;
-        updates.archivedAt = dto.isActive ? undefined : new Date();
-      }
-      if (dto.sortOrder !== undefined) updates.sortOrder = dto.sortOrder;
-      const requirement = await this.requirementModel.findOneAndUpdate(
-        { _id: id, version: dto.expectedVersion },
-        { $set: updates, $inc: { version: 1 } },
-        { new: true, runValidators: true, session },
-      ).exec();
-      if (!requirement) this.requirementVersionConflict(before);
-      await this.audit.logRequired(
-        {
-          action: AuditAction.ADMIN_BROKER_REQUIREMENT_UPDATED,
-          actorUserId: actor.actorUserId,
-          targetResourceId: requirement!._id.toString(),
-          reason: 'تحديث متطلب مستند وسيط',
-          ip: actor.ip,
-          metadata: {
-            before: this.requirementProjection(before),
-            after: this.requirementProjection(requirement!),
-          },
-        },
-        session,
-      );
-      return {
-        message: 'تم تحديث متطلب مستند الوسيط بنجاح',
-        requirement: this.requirementProjection(requirement!),
-      };
-    });
-  }
-
-  async archiveRequirement(
-    requirementId: string,
-    expectedVersion: number,
-    reason: string,
-    actor: RequestActor,
-  ) {
-    const id = this.objectId(requirementId, 'معرف متطلب المستند غير صالح');
-    return this.connection.transaction(async (session) => {
-      const before = await this.requirementModel.findById(id).session(session).lean().exec();
-      if (!before) throw new NotFoundException('متطلب مستند الوسيط غير موجود');
-      if ((before.version ?? 0) !== expectedVersion) this.requirementVersionConflict(before);
-      const requirement = await this.requirementModel.findOneAndUpdate(
-        { _id: id, version: expectedVersion },
-        { $set: { isActive: false, archivedAt: new Date() }, $inc: { version: 1 } },
-        { new: true, runValidators: true, session },
-      ).exec();
-      if (!requirement) this.requirementVersionConflict(before);
-      await this.audit.logRequired(
-        {
-          action: AuditAction.ADMIN_BROKER_REQUIREMENT_ARCHIVED,
-          actorUserId: actor.actorUserId,
-          targetResourceId: requirement!._id.toString(),
-          reason,
-          ip: actor.ip,
-          metadata: {
-            before: this.requirementProjection(before),
-            after: this.requirementProjection(requirement!),
-          },
-        },
-        session,
-      );
-      return {
-        message: 'تم تعطيل متطلب مستند الوسيط بنجاح',
-        requirement: this.requirementProjection(requirement!),
-      };
-    });
-  }
 
   async submitApplication(
     applicantUserId: string,
@@ -238,48 +77,16 @@ export class BrokerApplicationsService {
       };
     }
 
-    const [user, requirements] = await Promise.all([
-      this.userModel.findById(applicantId).lean().exec(),
-      this.requirementModel.find({ isActive: true }).sort({ sortOrder: 1, code: 1 }).lean().exec(),
-    ]);
+    const user = await this.userModel.findById(applicantId).lean().exec();
     if (!user) throw new NotFoundException('المستخدم غير موجود');
     this.assertApplicationEligibility(user);
-    const selected = this.validateSubmissionFiles(files, requirements);
-    const uploaded: Array<{
-      requirement: any;
-      assetRef: StoredAssetMetadata;
-    }> = [];
-    try {
-      const results = await Promise.allSettled(
-        selected.map(async ({ file, requirement }) => ({
-          requirement,
-          assetRef: await this.assets.uploadPrivateEvidence(
-            file,
-            `brokers/${applicantUserId}/${requirement.code.toLowerCase()}`,
-            AssetClassification.PRIVATE_BROKER_EVIDENCE,
-            validateEvidenceFile(file, BROKER_EVIDENCE_POLICY),
-          ),
-        })),
-      );
-      uploaded.push(
-        ...results
-          .filter((result): result is PromiseFulfilledResult<{
-            requirement: any;
-            assetRef: StoredAssetMetadata;
-          }> => result.status === 'fulfilled')
-          .map((result) => result.value),
-      );
-      const failed = results.find(
-        (result): result is PromiseRejectedResult => result.status === 'rejected',
-      );
-      if (failed) throw failed.reason;
-    } catch (error) {
-      await this.assets.deleteOrEnqueue(
-        uploaded.map((item) => item.assetRef),
-        'partial-broker-application-upload',
-      );
-      throw error;
-    }
+    const file = this.validateVerificationDocument(files);
+    const assetRef = await this.assets.uploadPrivateEvidence(
+      file,
+      `brokers/${applicantUserId}/verification-document`,
+      AssetClassification.PRIVATE_BROKER_EVIDENCE,
+      validateEvidenceFile(file, BROKER_EVIDENCE_POLICY),
+    );
 
     try {
       return await this.connection.transaction(async (session) => {
@@ -292,35 +99,13 @@ export class BrokerApplicationsService {
           return {
             message: 'تم استرجاع طلب الوسيط السابق بأمان',
             application: this.applicationProjection(existing),
-            duplicateUploadAssets: uploaded.map((item) => item.assetRef),
+            duplicateUploadAssets: [assetRef],
           };
         }
 
         const currentUser = await this.userModel.findById(applicantId).session(session).lean().exec();
         if (!currentUser) throw new NotFoundException('المستخدم غير موجود');
         this.assertApplicationEligibility(currentUser);
-        const currentRequirements = await this.requirementModel
-          .find({ isActive: true })
-          .sort({ sortOrder: 1, code: 1 })
-          .session(session)
-          .lean()
-          .exec();
-        const initialContract = requirements.map((requirement) => ({
-          code: requirement.code,
-          required: requirement.required,
-          version: requirement.version ?? 0,
-        }));
-        const currentContract = currentRequirements.map((requirement) => ({
-          code: requirement.code,
-          required: requirement.required,
-          version: requirement.version ?? 0,
-        }));
-        if (JSON.stringify(initialContract) !== JSON.stringify(currentContract)) {
-          throw new ConflictException({
-            message: 'تم تحديث متطلبات مستندات الوسيط، يرجى إعادة تحميلها وإعادة المحاولة',
-            code: BrokerErrorCode.REQUIREMENT_VERSION_CONFLICT,
-          });
-        }
         const latest = await this.applicationModel
           .findOne({ applicantAccountId: applicantId })
           .sort({ applicationVersion: -1 })
@@ -330,25 +115,22 @@ export class BrokerApplicationsService {
         const applicationId = new Types.ObjectId();
         const applicationVersion = (latest?.applicationVersion ?? 0) + 1;
         const now = new Date();
-        const documentRows = uploaded.map(({ requirement, assetRef }) => ({
-          _id: new Types.ObjectId(),
+        const documentId = new Types.ObjectId();
+        const documentRow = {
+          _id: documentId,
           applicationId,
           applicantAccountId: applicantId,
-          requirementCode: requirement.code,
-          requirementVersion: requirement.version ?? 0,
-          requirementLabelAr: requirement.labelAr,
-          requirementLabelEn: requirement.labelEn,
           assetRef,
           submittedAt: now,
-        }));
-        await this.documentModel.create(documentRows, { session });
+        };
+        await this.documentModel.create([documentRow], { session });
         const [application] = await this.applicationModel.create(
           [{
             _id: applicationId,
             applicantAccountId: applicantId,
             applicationVersion,
             status: BrokerApplicationStatus.PENDING,
-            documentIds: documentRows.map((document) => document._id),
+            documentIds: [documentId],
             submittedAt: now,
             submittedByActorId: applicantId,
             idempotencyKeyHash,
@@ -392,8 +174,7 @@ export class BrokerApplicationsService {
             metadata: {
               applicationVersion,
               applicationRecordVersion: 0,
-              requirementCodes: documentRows.map((document) => document.requirementCode),
-              evidenceCount: documentRows.length,
+              evidenceCount: 1,
               after: { accountType: AccountType.USER, brokerStatus: BrokerStatus.PENDING },
             },
           },
@@ -405,12 +186,11 @@ export class BrokerApplicationsService {
             actorUserId: applicantUserId,
             targetUserId: applicantUserId,
             targetResourceId: applicationId.toString(),
-            reason: 'رفع مستندات تحقق وسيط خاصة',
+            reason: 'رفع مستند تحقق وسيط خاص',
             ip,
             metadata: {
               classification: AssetClassification.PRIVATE_BROKER_EVIDENCE,
-              evidenceCount: documentRows.length,
-              requirementCodes: documentRows.map((document) => document.requirementCode),
+              evidenceCount: 1,
             },
           },
           session,
@@ -428,7 +208,7 @@ export class BrokerApplicationsService {
       });
     } catch (error) {
       await this.assets.deleteOrEnqueue(
-        uploaded.map((item) => item.assetRef),
+        [assetRef],
         'broker-application-database-write-failed',
       );
       if (this.isDuplicateKey(error)) {
@@ -777,46 +557,25 @@ export class BrokerApplicationsService {
     return document;
   }
 
-  private validateSubmissionFiles(files: Express.Multer.File[], requirements: any[]) {
-    if (!requirements.length) {
-      throw new ConflictException({
-        message: 'لم يتم إعداد متطلبات مستندات الوسيط بعد',
-        code: BrokerErrorCode.REQUIREMENTS_NOT_CONFIGURED,
-      });
-    }
-    const byCode = new Map(requirements.map((requirement) => [requirement.code, requirement]));
-    const selected: Array<{ file: Express.Multer.File; requirement: any }> = [];
-    const seen = new Set<string>();
-    for (const file of files ?? []) {
-      const code = file.fieldname.trim().toUpperCase();
-      const requirement = byCode.get(code);
-      if (!requirement) {
-        throw new BadRequestException({
-          message: 'تم إرفاق مستند لمتطلب غير صالح أو غير نشط',
-          code: BrokerErrorCode.REQUIREMENT_INVALID,
-        });
-      }
-      if (seen.has(code)) {
-        throw new BadRequestException({
-          message: 'لا يمكن إرفاق أكثر من ملف للمتطلب نفسه',
-          code: BrokerErrorCode.DOCUMENT_DUPLICATE,
-        });
-      }
-      validateEvidenceFile(file, BROKER_EVIDENCE_POLICY);
-      seen.add(code);
-      selected.push({ file, requirement });
-    }
-    const missing = requirements
-      .filter((requirement) => requirement.required && !seen.has(requirement.code))
-      .map((requirement) => requirement.code);
-    if (missing.length || !selected.length) {
+  private validateVerificationDocument(files: Express.Multer.File[]) {
+    if (files.length !== 1) {
       throw new BadRequestException({
-        message: 'جميع مستندات الوسيط الإلزامية مطلوبة',
-        code: BrokerErrorCode.DOCUMENT_REQUIRED,
-        details: { missingRequirementCodes: missing },
+        message: files.length === 0
+          ? 'ملف التحقق بصيغة PDF مطلوب'
+          : 'يجب إرفاق ملف تحقق واحد فقط',
+        code: files.length === 0
+          ? BrokerErrorCode.DOCUMENT_REQUIRED
+          : BrokerErrorCode.DOCUMENT_DUPLICATE,
       });
     }
-    return selected;
+    const detected = validateEvidenceFile(files[0], BROKER_EVIDENCE_POLICY);
+    if (detected.mime !== 'application/pdf') {
+      throw new BadRequestException({
+        message: 'ملف التحقق يجب أن يكون بصيغة PDF صالحة',
+        code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED,
+      });
+    }
+    return files[0];
   }
 
   private assertApplicationEligibility(user: any) {
@@ -853,36 +612,12 @@ export class BrokerApplicationsService {
     return new Types.ObjectId(value);
   }
 
-  private requirementVersionConflict(requirement: any): never {
-    throw new ConflictException({
-      message: 'تم تحديث متطلب المستند، يرجى إعادة تحميل البيانات',
-      code: BrokerErrorCode.REQUIREMENT_VERSION_CONFLICT,
-      details: { state: requirement.isActive ? 'ACTIVE' : 'INACTIVE', version: requirement.version ?? 0 },
-    });
-  }
-
   private applicationVersionConflict(application: any): never {
     throw new ConflictException({
       message: 'تم تحديث طلب الوسيط، يرجى إعادة تحميل البيانات',
       code: BrokerErrorCode.APPLICATION_VERSION_CONFLICT,
       details: { state: application.status, version: application.version ?? 0 },
     });
-  }
-
-  private requirementProjection(requirement: any) {
-    return {
-      id: requirement._id.toString(),
-      code: requirement.code,
-      labelAr: requirement.labelAr,
-      labelEn: requirement.labelEn,
-      required: requirement.required,
-      isActive: requirement.isActive,
-      sortOrder: requirement.sortOrder,
-      version: requirement.version ?? 0,
-      archivedAt: requirement.archivedAt,
-      createdAt: requirement.createdAt,
-      updatedAt: requirement.updatedAt,
-    };
   }
 
   private applicationProjection(application: any) {
@@ -909,10 +644,6 @@ export class BrokerApplicationsService {
     return {
       id: document._id.toString(),
       applicationId: document.applicationId.toString(),
-      requirementCode: document.requirementCode,
-      requirementVersion: document.requirementVersion,
-      requirementLabelAr: document.requirementLabelAr,
-      requirementLabelEn: document.requirementLabelEn,
       submittedAt: document.submittedAt,
       format: document.assetRef?.format,
       bytes: document.assetRef?.bytes,

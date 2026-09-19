@@ -43,6 +43,7 @@ export class AdminUsersController {
       limit: query.limit,
       search: query.search?.trim(),
       systemRole: query.systemRole,
+      accountType: query.accountType,
       contactVerified:
         query.contactVerified === undefined
           ? undefined

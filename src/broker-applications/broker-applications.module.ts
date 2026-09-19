@@ -12,10 +12,6 @@ import {
   BrokerVerificationDocument,
   BrokerVerificationDocumentSchema,
 } from './schemas/broker-verification-document.schema';
-import {
-  BrokerVerificationRequirement,
-  BrokerVerificationRequirementSchema,
-} from './schemas/broker-verification-requirement.schema';
 
 @Module({
   imports: [
@@ -25,7 +21,6 @@ import {
     MongooseModule.forFeature([
       { name: BrokerApplication.name, schema: BrokerApplicationSchema },
       { name: BrokerVerificationDocument.name, schema: BrokerVerificationDocumentSchema },
-      { name: BrokerVerificationRequirement.name, schema: BrokerVerificationRequirementSchema },
     ]),
   ],
   controllers: [BrokerApplicationsController, AdminBrokerApplicationsController],
