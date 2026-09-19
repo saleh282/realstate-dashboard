@@ -26,10 +26,10 @@ export class CreatePropertyDto {
   @Type(() => Number) @IsNumber() @Min(-90) @Max(90) latitude: number;
   @Type(() => Number) @IsNumber() @Min(-180) @Max(180) longitude: number;
   @Type(() => Number) @IsNumber() @Min(1) area: number;
-  @Type(() => Number) @IsInt() @Min(0) @Max(100) bedrooms: number;
-  @Type(() => Number) @IsInt() @Min(0) @Max(100) livingRooms: number;
-  @Type(() => Number) @IsInt() @Min(0) @Max(100) kitchens: number;
-  @Type(() => Number) @IsInt() @Min(0) @Max(100) bathrooms: number;
+  @Type(() => Number) @IsInt() @Min(1) @Max(100) bedrooms: number;
+  @Type(() => Number) @IsInt() @Min(1) @Max(100) livingRooms: number;
+  @Type(() => Number) @IsInt() @Min(1) @Max(100) kitchens: number;
+  @Type(() => Number) @IsInt() @Min(1) @Max(100) bathrooms: number;
   @Type(() => Number) @IsInt() @Min(-10) @Max(300) floor: number;
   @Type(() => Number) @IsInt() @Min(1) @Max(300) totalFloors: number;
   @Type(() => Number) @IsInt() @Min(1800) @Max(2200) buildingYear: number;
@@ -50,6 +50,7 @@ export class CreatePropertyDto {
   @IsOptional() @Allow() paymentMethodCode?: unknown;
   @IsEnum(PropertyMarketingMode) marketingMode: PropertyMarketingMode;
   @Transform(jsonArray) @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) imageLabels: string[];
+  @Transform(jsonArray) @IsArray() @ArrayUnique() @ArrayMaxSize(20) @IsString({ each: true }) imageSlotIds: string[];
   @Type(() => Number) @IsInt() @Min(0) coverImageIndex: number;
   /** @deprecated Ignored as authority; the server derives the snapshot. */
   @IsOptional() @Allow() advertiserType?: unknown;

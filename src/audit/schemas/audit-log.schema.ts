@@ -44,6 +44,7 @@ export enum AuditAction {
   ADMIN_PROPERTY_PROXY_CREATED = 'admin_property_proxy_created',
   PRIVATE_EVIDENCE_UPLOADED = 'private_evidence_uploaded',
   PRIVATE_EVIDENCE_ACCESSED = 'private_evidence_accessed',
+  PROPERTY_MEDIA_UPLOADED = 'property_media_uploaded',
   BROKER_APPLICATION_SUBMITTED = 'broker_application_submitted',
   ADMIN_BROKER_APPLICATION_REVIEWED = 'admin_broker_application_reviewed',
   ADMIN_BROKER_SUSPENDED = 'admin_broker_suspended',

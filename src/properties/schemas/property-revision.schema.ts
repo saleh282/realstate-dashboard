@@ -17,6 +17,7 @@ export class RevisionAsset {
   @Prop({ enum: ['jpg', 'jpeg', 'png', 'webp', 'pdf'] }) format?: 'jpg' | 'jpeg' | 'png' | 'webp' | 'pdf';
   @Prop({ min: 1 }) bytes?: number;
   @Prop() label?: string;
+  @Prop({ trim: true, maxlength: 80 }) slotId?: string;
 }
 
 const RevisionAssetSchema = SchemaFactory.createForClass(RevisionAsset);
@@ -57,6 +58,7 @@ export class PropertyRevision {
   @Prop({ default: false, immutable: true }) isPriceNegotiable: boolean;
   @Prop({ type: [String], default: undefined, immutable: true }) paymentMethodCodes?: string[];
   @Prop({ enum: PropertyMarketingMode, immutable: true }) marketingMode?: PropertyMarketingMode;
+  /** @deprecated Historical compatibility only. New writes use categorized galleryMedia. */
   @Prop({ type: RevisionAssetSchema, immutable: true }) entranceImageAsset?: PropertyAsset;
   @Prop({ type: [RevisionAssetSchema], default: [], immutable: true }) galleryMedia: PropertyAsset[];
   @Prop({ type: [RevisionAssetSchema], default: [], immutable: true }) privateEvidenceAssets: PropertyAsset[];

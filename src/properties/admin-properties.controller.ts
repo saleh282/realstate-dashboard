@@ -30,7 +30,7 @@ export class AdminPropertiesController {
 
   @Post('proxy')
   @RequireCapabilities(Capability.ADMIN_PROPERTY_PROXY_CREATE)
-  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'entranceImage', maxCount: 1 }, { name: 'titleDeed', maxCount: 1 }], {
+  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'titleDeed', maxCount: 1 }], {
     limits: { fileSize: 10 * 1024 * 1024, files: 22 },
     fileFilter: (_req, file, cb) => {
       const allowed = file.fieldname === 'titleDeed' ? allowedEvidence : allowedImages;
@@ -40,7 +40,7 @@ export class AdminPropertiesController {
   createForAccount(
     @Req() req: any,
     @Body() dto: AdminCreatePropertyDto,
-    @UploadedFiles() files: { images?: Express.Multer.File[]; entranceImage?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] },
+    @UploadedFiles() files: { images?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] },
   ) {
     const { advertiserAccountId, ...propertyDto } = dto;
     return this.service.createForAdmin(req.user.userId, advertiserAccountId, propertyDto as AdminCreatePropertyDto, files, req.ip);
@@ -60,6 +60,26 @@ export class AdminPropertiesController {
       'Content-Type': evidence.contentType,
       'Content-Disposition': 'inline; filename="property-evidence"',
       'Cache-Control': 'private, no-store, max-age=0',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    return new StreamableFile(evidence.buffer);
+  }
+
+  @Get(':propertyId/revisions/:revisionId/evidence/:evidenceIndex')
+  async getPrivateEvidence(
+    @Param('propertyId') id: string,
+    @Param('revisionId') revisionId: string,
+    @Param('evidenceIndex') rawIndex: string,
+    @Req() req: any,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    if (!/^\d+$/.test(rawIndex)) throw new BadRequestException({ message: 'معرّف ملف الإثبات غير صالح', code: EvidenceErrorCode.NOT_FOUND });
+    const evidence = await this.service.downloadPrivateEvidenceForAdmin(id, revisionId, Number(rawIndex), req.user.userId, req.ip);
+    response.set({
+      'Content-Type': evidence.contentType,
+      'Content-Disposition': 'inline; filename="property-evidence"',
+      'Cache-Control': 'private, no-store, max-age=0',
+      Pragma: 'no-cache',
       'X-Content-Type-Options': 'nosniff',
     });
     return new StreamableFile(evidence.buffer);

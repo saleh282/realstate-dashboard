@@ -70,6 +70,8 @@ describe('admin controller authorization', () => {
   const propertiesService = {
     downloadTitleDeedForOwner: jest.fn().mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
     downloadTitleDeedForAdmin: jest.fn().mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
+    downloadPrivateEvidenceForOwner: jest.fn().mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
+    downloadPrivateEvidenceForAdmin: jest.fn().mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
   };
   const brokerApplicationsService = {
     listRequirementsForAdmin: jest.fn().mockResolvedValue({ items: [] }),
@@ -268,6 +270,18 @@ describe('admin controller authorization', () => {
       .set('Authorization', 'Bearer admin')
       .expect('Cache-Control', 'private, no-store, max-age=0')
       .expect(200);
+  });
+
+  it('protects revision-scoped private evidence and emits no-store headers', async () => {
+    const suffix = '64b000000000000000000099/revisions/64b000000000000000000088/evidence/0';
+    const ownerPath = `/properties/mine/${suffix}`;
+    const adminPath = `/admin/properties/${suffix}`;
+    await request(app.getHttpServer()).get(ownerPath).expect(401);
+    await request(app.getHttpServer()).get(ownerPath).set('Authorization', 'Bearer user')
+      .expect('Cache-Control', 'private, no-store, max-age=0').expect('X-Content-Type-Options', 'nosniff').expect(200);
+    await request(app.getHttpServer()).get(adminPath).set('Authorization', 'Bearer user').expect(403);
+    await request(app.getHttpServer()).get(adminPath).set('Authorization', 'Bearer admin')
+      .expect('Cache-Control', 'private, no-store, max-age=0').expect('X-Content-Type-Options', 'nosniff').expect(200);
   });
 
   it('protects the canonical KYC review route', async () => {

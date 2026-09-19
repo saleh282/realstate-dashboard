@@ -102,7 +102,9 @@ export function validateEvidenceFile(file: Express.Multer.File, policy: Evidence
   }
   if (detected.width && detected.height && policy.maxImagePixels) {
     const pixels = detected.width * detected.height;
-    if (!Number.isSafeInteger(pixels) || pixels > policy.maxImagePixels) invalid('أبعاد صورة الإثبات تتجاوز الحد الآمن');
+    if (!Number.isSafeInteger(pixels) || pixels > policy.maxImagePixels) {
+      invalid('أبعاد صورة الإثبات تتجاوز الحد الآمن', EvidenceErrorCode.IMAGE_DIMENSIONS_INVALID);
+    }
   }
   return detected;
 }
