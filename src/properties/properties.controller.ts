@@ -55,7 +55,14 @@ export class PropertiesController {
   @Get('mine')
   @UseGuards(JwtAuthGuard, CapabilityGuard)
   @RequireCapabilities(Capability.PROPERTY_READ_OWN)
-  mine(@Req() req: any) { return this.service.listMine(req.user.userId); }
+  mine(@Req() req: any, @Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.service.listMine(req.user.userId, { page: Number(page), limit: Number(limit) });
+  }
+
+  @Get('mine/:propertyId')
+  @UseGuards(JwtAuthGuard, CapabilityGuard)
+  @RequireCapabilities(Capability.PROPERTY_READ_OWN)
+  getMine(@Req() req: any, @Param('propertyId') id: string) { return this.service.getMine(req.user.userId, id); }
 
   @Patch('mine/:propertyId/visibility')
   @UseGuards(JwtAuthGuard, CapabilityGuard)
@@ -112,7 +119,5 @@ export class PropertiesController {
   }
 
   @Get(':propertyId')
-  @UseGuards(JwtAuthGuard, CapabilityGuard)
-  @RequireCapabilities(Capability.PROPERTY_READ_OWN)
-  get(@Req() req: any, @Param('propertyId') id: string) { return this.service.getMine(req.user.userId, id); }
+  getPublished(@Param('propertyId') id: string) { return this.service.getPublished(id); }
 }

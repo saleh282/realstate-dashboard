@@ -37,6 +37,9 @@ export class PropertyType {
 
   @Prop({ default: 0, min: 0 })
   usageCount: number;
+
+  @Prop({ default: 0, min: 0 })
+  version: number;
 }
 
 export const PropertyTypeSchema = SchemaFactory.createForClass(PropertyType);

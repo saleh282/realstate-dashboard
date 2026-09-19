@@ -73,15 +73,19 @@ export class PropertyTypesService {
     if (dto.purposeCategoryId && !(await this.purposes.exists({ _id: dto.purposeCategoryId, isActive: true }))) {
       throw new BadRequestException('غرض العقار غير موجود أو غير متاح');
     }
+    const { expectedVersion, ...values } = dto;
     const update = Object.fromEntries(
-      Object.entries(dto).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]),
+      Object.entries(values).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]),
     );
-    const item = await this.model.findByIdAndUpdate(
-      id,
-      { ...update, updatedBy: new Types.ObjectId(actorUserId) },
+    const item = await this.model.findOneAndUpdate(
+      { _id: id, $or: [{ version: expectedVersion }, ...(expectedVersion === 0 ? [{ version: { $exists: false } }] : [])] },
+      { $set: { ...update, updatedBy: new Types.ObjectId(actorUserId) }, $inc: { version: 1 } },
       { new: true, runValidators: true },
     ).lean().exec();
-    if (!item) throw new NotFoundException('نوع العقار غير موجود');
+    if (!item) {
+      if (!(await this.model.exists({ _id: id }))) throw new NotFoundException('نوع العقار غير موجود');
+      throw new ConflictException({ message: 'تم تعديل نوع العقار بواسطة طلب آخر', code: 'PROPERTY_TYPE_VERSION_CONFLICT' });
+    }
     await this.audit.logAdminResourceAction(
       AuditAction.ADMIN_PROPERTY_TYPE_UPDATED,
       actorUserId,
@@ -133,7 +137,7 @@ export class PropertyTypesService {
     return {
       id: item._id.toString(), code: item.code, nameAr: item.nameAr,
       nameEn: item.nameEn, descriptionAr: item.descriptionAr,
-      iconKey: item.iconKey, purposeCategoryId: item.purposeCategoryId?.toString(), sortOrder: item.sortOrder,
+      iconKey: item.iconKey, purposeCategoryId: item.purposeCategoryId?.toString(), sortOrder: item.sortOrder, version: item.version ?? 0,
     };
   }
 

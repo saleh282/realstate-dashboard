@@ -11,6 +11,7 @@ const jsonArray = ({ value }: { value: unknown }) => {
 const bool = ({ value }: { value: unknown }) => value === true || value === 'true';
 
 export class CreatePropertyDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) expectedRevisionVersion?: number;
   @IsIn(['sale', 'rent']) operationType: string;
   @IsMongoId() purposeCategoryId: string;
   @IsMongoId() purposeSubcategoryId: string;

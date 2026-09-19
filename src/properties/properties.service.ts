@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Amenity, AmenityDocument } from '../amenities/schemas/amenity.schema';
 import { Governorate, GovernorateDocument } from '../governorates/schemas/governorate.schema';
 import { PropertyOption, PropertyOptionDocument } from '../property-options/schemas/property-option.schema';
@@ -19,7 +19,7 @@ import { PropertyRevision, PropertyRevisionDocument } from './schemas/property-r
 import { PropertyPurposeCategory, PropertyPurposeCategoryDocument } from '../property-purpose-categories/schemas/property-purpose-category.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { AccountType } from '../users/identity.types';
-import { PropertyLifecycleStatus, PropertyMarketingMode, PropertyRevisionModerationStatus } from './property.types';
+import { PropertyLifecycleStatus, PropertyMarketingMode, PropertyMediaOrigin, PropertyMediaTagCode, PropertyRevisionModerationStatus } from './property.types';
 import { PropertyErrorCode } from '../common/errors/property-error-codes';
 import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
 import { PropertyAuctionLockService } from './property-auction-lock.service';
@@ -94,6 +94,9 @@ export class PropertiesService {
   }
 
   private async createWithAttribution(attribution: PropertyAttribution, dto: CreatePropertyDto, files: PropertyCreateFiles, ip?: string, existingProperty?: any, existingDraft?: any) {
+    if (existingDraft && dto.expectedRevisionVersion !== (existingDraft.decisionVersion ?? 0)) {
+      throw new ConflictException({ message: 'تغيرت المسودة؛ أعد تحميل العقار قبل الحفظ', code: PropertyErrorCode.REVISION_VERSION_CONFLICT });
+    }
     if (!isMoneyMinorAmount(dto.totalPriceMinor, { positive: true }) || (dto.currency && dto.currency !== EGP_CURRENCY)) {
       throw new BadRequestException('بيانات السعر يجب أن تكون أعدادًا صحيحة بوحدات العملة الصغرى ضمن النطاق الآمن');
     }
@@ -107,7 +110,10 @@ export class PropertiesService {
       throw new BadRequestException({ message: 'يجب اختيار طرق سداد صالحة وغير مكررة', code: PropertyErrorCode.PAYMENT_METHODS_INVALID });
     }
     const images = files?.images ?? [];
-    if (!images.length) throw new BadRequestException('يجب إرفاق صورة واحدة للعقار على الأقل');
+    const customerPhotosRequired = dto.marketingMode === PropertyMarketingMode.SELF_SERVICE;
+    if (customerPhotosRequired && !images.length) {
+      throw new BadRequestException({ message: 'صور العقار مطلوبة عند اختيار التسويق الذاتي', code: PropertyErrorCode.REQUIRED_PHOTO_SLOTS_MISSING });
+    }
     if (images.length > 20) throw new BadRequestException({ message: 'عدد صور العقار يتجاوز الحد المسموح', code: EvidenceErrorCode.FILE_COUNT_EXCEEDED });
     if (dto.imageLabels.length !== images.length) throw new BadRequestException('عدد مسميات الصور لا يطابق عدد الصور');
     if (!Array.isArray(dto.imageSlotIds) || dto.imageSlotIds.length !== images.length || new Set(dto.imageSlotIds).size !== dto.imageSlotIds.length) {
@@ -117,7 +123,7 @@ export class PropertiesService {
     const suppliedPhotoSlots = new Set(dto.imageSlotIds);
     const missingPhotoSlots = requiredPhotoSlots.filter((slotId) => !suppliedPhotoSlots.has(slotId));
     const invalidPhotoSlots = dto.imageSlotIds.filter((slotId) => !requiredPhotoSlots.includes(slotId) && !/^additional_[1-9]\d*$/.test(slotId));
-    if (missingPhotoSlots.length || invalidPhotoSlots.length) {
+    if ((customerPhotosRequired && missingPhotoSlots.length) || invalidPhotoSlots.length) {
       throw new BadRequestException({
         message: 'يجب استكمال جميع فئات صور العقار المطلوبة',
         code: EvidenceErrorCode.REQUIRED_PHOTO_SLOTS_MISSING,
@@ -127,7 +133,7 @@ export class PropertiesService {
     }
     const seenRequiredPhotoContent = new Map<string, string>();
     const duplicatePhotoSlots: string[] = [];
-    for (const slotId of requiredPhotoSlots) {
+    for (const slotId of requiredPhotoSlots.filter(slotId => suppliedPhotoSlots.has(slotId))) {
       const index = dto.imageSlotIds.indexOf(slotId);
       const digest = createHash('sha256').update(images[index].buffer).digest('hex');
       const firstSlot = seenRequiredPhotoContent.get(digest);
@@ -141,7 +147,9 @@ export class PropertiesService {
         duplicatePhotoSlots: [...new Set(duplicatePhotoSlots)],
       });
     }
-    if (dto.coverImageIndex >= images.length) throw new BadRequestException('صورة الغلاف المحددة غير صالحة');
+    if (images.length ? dto.coverImageIndex >= images.length : dto.coverImageIndex !== 0) {
+      throw new BadRequestException('صورة الغلاف المحددة غير صالحة');
+    }
     if (dto.floor > dto.totalFloors) throw new BadRequestException('رقم الطابق لا يمكن أن يتجاوز عدد الطوابق');
     const detectedImages = images.map((image) => validateEvidenceFile(image, PROPERTY_IMAGE_POLICY));
     const deedFile = files.titleDeed?.[0];
@@ -177,6 +185,9 @@ export class PropertiesService {
           ...(await this.uploadPublicImage(images[i], detectedImages[i])),
           label: dto.imageLabels[i],
           slotId: dto.imageSlotIds[i],
+          tagCode: this.mediaTagFromGuidedSlot(dto.imageSlotIds[i]),
+          origin: PropertyMediaOrigin.ADVERTISER,
+          sortOrder: i,
         });
       }
       if (deedFile && detectedDeed) {
@@ -397,13 +408,22 @@ export class PropertiesService {
     ];
   }
 
-  async listMine(ownerId: string) {
+  async listMine(ownerId: string, options: { page?: number; limit?: number } = {}) {
     const accountId = new Types.ObjectId(ownerId);
-    const items = await this.properties.find({ $or: [{ advertiserAccountId: accountId }, { advertiserAccountId: { $exists: false }, ownerId: accountId }] }).sort({ createdAt: -1 }).populate('pendingRevisionId').populate('currentPublicRevisionId').lean().exec();
+    const page = Number.isFinite(options.page) ? Math.max(options.page!, 1) : 1;
+    const limit = Number.isFinite(options.limit) ? Math.min(Math.max(options.limit!, 1), 50) : 20;
+    const filter = { $or: [{ advertiserAccountId: accountId }, { advertiserAccountId: { $exists: false }, ownerId: accountId }] };
+    const [items, total] = await Promise.all([
+      this.properties.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).populate('pendingRevisionId').populate('currentPublicRevisionId').lean().exec(),
+      this.properties.countDocuments(filter).exec(),
+    ]);
     const revisions = await this.revisions.find({ propertyId: { $in: items.map(item => item._id) }, moderationStatus: { $in: [PropertyRevisionModerationStatus.DRAFT, PropertyRevisionModerationStatus.REJECTED] } }).sort({ revisionNumber: -1 }).lean().exec();
     const latest = new Map<string, any>();
     for (const revision of revisions) if (!latest.has(revision.propertyId.toString())) latest.set(revision.propertyId.toString(), revision);
-    return { items: items.map(i => this.toOwner({ ...i, draftRevision: latest.get(i._id.toString()) })) };
+    return {
+      items: items.map(i => this.toOwner({ ...i, draftRevision: latest.get(i._id.toString()) })),
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   }
   async getMine(ownerId: string, id: string) {
     if (!Types.ObjectId.isValid(id)) throw new BadRequestException('معرّف العقار غير صالح');
@@ -422,20 +442,60 @@ export class PropertiesService {
       this.properties.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).populate('currentPublicRevisionId').lean().exec(),
       this.properties.countDocuments(filter).exec(),
     ]);
-    const [governorates, propertyTypes] = await Promise.all([
-      this.governorates.find({ code: { $in: [...new Set(items.map(item => item.governorateCode))] } }).lean().exec(),
-      this.propertyTypes.find({ code: { $in: [...new Set(items.map(item => item.propertyTypeCode))] } }).lean().exec(),
+    const currentRevisions = items.map(item => this.populatedRevision(item.currentPublicRevisionId));
+    const purposeIds = currentRevisions.map(revision => revision?.purposeCategoryId).filter(Boolean);
+    const subcategoryIds = currentRevisions.map(revision => revision?.purposeSubcategoryId).filter(Boolean);
+    const paymentCodes = currentRevisions.flatMap(revision => revision?.paymentMethodCodes ?? []);
+    const [governorates, propertyTypes, purposes, paymentMethods] = await Promise.all([
+      this.governorates.find({ code: { $in: [...new Set(currentRevisions.map((revision, index) => revision?.governorateCode ?? items[index].governorateCode))] } }).lean().exec(),
+      this.propertyTypes.find({ $or: [{ _id: { $in: subcategoryIds } }, { code: { $in: [...new Set(currentRevisions.map((revision, index) => revision?.legacyPropertyTypeCode ?? items[index].propertyTypeCode))] } }] }).lean().exec(),
+      this.purposeCategories.find({ _id: { $in: purposeIds } }).lean().exec(),
+      this.options.find({ group: 'payment_method', code: { $in: paymentCodes } }).lean().exec(),
     ]);
     const governorateNames = new Map(governorates.map(item => [item.code, item.nameAr]));
     const propertyTypeNames = new Map(propertyTypes.map(item => [item.code, item.nameAr]));
+    const propertyTypeNamesById = new Map(propertyTypes.map(item => [item._id.toString(), item.nameAr]));
+    const purposeNames = new Map(purposes.map(item => [item._id.toString(), item.nameAr]));
+    const paymentNames = new Map(paymentMethods.map(item => [item.code, item.nameAr]));
     return {
-      items: items.map(item => ({
-        ...this.toMarketplacePublic(item),
-        governorateNameAr: governorateNames.get(item.governorateCode) ?? item.governorateCode,
-        propertyTypeNameAr: propertyTypeNames.get(item.propertyTypeCode) ?? item.propertyTypeCode,
-      })),
+      items: items.map(item => {
+        const revision = this.populatedRevision(item.currentPublicRevisionId);
+        return {
+          ...this.toMarketplacePublic(item),
+          governorateNameAr: governorateNames.get(revision?.governorateCode ?? item.governorateCode) ?? (revision?.governorateCode ?? item.governorateCode),
+          purposeCategoryNameAr: revision?.purposeCategoryId ? purposeNames.get(revision.purposeCategoryId.toString()) : undefined,
+          propertyTypeNameAr: revision?.purposeSubcategoryId ? propertyTypeNamesById.get(revision.purposeSubcategoryId.toString()) : (propertyTypeNames.get(item.propertyTypeCode) ?? item.propertyTypeCode),
+          paymentMethodNamesAr: (revision?.paymentMethodCodes ?? []).map((code: string) => paymentNames.get(code)).filter(Boolean),
+        };
+      }),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
+  }
+
+  async getPublished(id: string) {
+    this.assertId(id);
+    const item = await this.properties.findOne({
+      _id: id,
+      status: 'approved',
+      isOwnerVisible: { $ne: false },
+      lifecycleStatus: { $nin: [PropertyLifecycleStatus.ARCHIVED, PropertyLifecycleStatus.ADMIN_HIDDEN] },
+      currentPublicRevisionId: { $exists: true },
+    }).populate('currentPublicRevisionId').lean().exec();
+    if (!item || !this.populatedRevision(item.currentPublicRevisionId)) throw new NotFoundException('العقار غير موجود');
+    const revision = this.populatedRevision(item.currentPublicRevisionId)!;
+    const [purpose, type, governorate, paymentMethods] = await Promise.all([
+      revision.purposeCategoryId ? this.purposeCategories.findById(revision.purposeCategoryId).lean().exec() : undefined,
+      revision.purposeSubcategoryId ? this.propertyTypes.findById(revision.purposeSubcategoryId).lean().exec() : undefined,
+      this.governorates.findOne({ code: revision.governorateCode }).lean().exec(),
+      this.options.find({ group: 'payment_method', code: { $in: revision.paymentMethodCodes ?? [] } }).lean().exec(),
+    ]);
+    return { property: {
+      ...this.toMarketplacePublic(item),
+      purposeCategoryNameAr: purpose?.nameAr,
+      propertyTypeNameAr: type?.nameAr ?? revision.legacyPropertyTypeCode,
+      governorateNameAr: governorate?.nameAr ?? revision.governorateCode,
+      paymentMethodNamesAr: paymentMethods.map(item => item.nameAr),
+    } };
   }
 
   async updateOwnerVisibility(ownerId: string, id: string, isVisible: boolean) {
@@ -543,10 +603,188 @@ export class PropertiesService {
       throw new BadRequestException({ message: 'تصنيف غرض العقار غير صالح', code: PropertyErrorCode.PURPOSE_HIERARCHY_MISMATCH });
     }
     if (paymentCount !== paymentMethodCodes.length) throw new BadRequestException({ message: 'إحدى طرق السداد غير متاحة', code: PropertyErrorCode.PAYMENT_METHODS_INVALID });
+    if (revision.marketingMode === PropertyMarketingMode.SELF_SERVICE) {
+      this.assertPresentationMediaComplete(revision);
+    }
+  }
+
+  private assertPresentationMediaComplete(revision: any) {
+    if (revision.marketingMode === PropertyMarketingMode.PLATFORM_MANAGED) {
+      if (!(revision.galleryMedia ?? []).length) {
+        throw new BadRequestException({
+          message: 'يجب إضافة صورة واحدة للعقار على الأقل قبل الاعتماد',
+          code: PropertyErrorCode.REQUIRED_PHOTO_SLOTS_MISSING,
+          minimumPhotoCount: 1,
+        });
+      }
+      return;
+    }
     const required = this.requiredPhotoSlots(revision);
     const supplied = new Set((revision.galleryMedia ?? []).map((asset: PropertyAsset) => asset.slotId));
     const missingPhotoSlots = required.filter(slot => !supplied.has(slot));
-    if (missingPhotoSlots.length) throw new BadRequestException({ message: 'يجب استكمال جميع فئات صور العقار المطلوبة', code: PropertyErrorCode.REQUIRED_PHOTO_SLOTS_MISSING, missingPhotoSlots });
+    if (missingPhotoSlots.length) {
+      throw new BadRequestException({
+        message: 'لا يمكن نشر العقار قبل استكمال صور العرض المطلوبة',
+        code: PropertyErrorCode.REQUIRED_PHOTO_SLOTS_MISSING,
+        missingPhotoSlots,
+      });
+    }
+  }
+
+  async addPlatformMediaForAdmin(id: string, revisionId: string, tagCode: PropertyMediaTagCode, version: number, file: Express.Multer.File | undefined, actor: string, ip?: string) {
+    this.assertId(id); this.assertId(revisionId);
+    if (!file) throw new BadRequestException({ message: 'صورة العقار مطلوبة', code: EvidenceErrorCode.NOT_FOUND });
+    const detected = validateEvidenceFile(file, PROPERTY_IMAGE_POLICY);
+    const candidate = await this.platformManagedPendingRevision(id, revisionId, version);
+    if ((candidate.galleryMedia ?? []).length >= 20) throw new BadRequestException({ message: 'عدد صور العقار يتجاوز الحد المسموح', code: EvidenceErrorCode.FILE_COUNT_EXCEEDED });
+    const contentDigest = createHash('sha256').update(file.buffer).digest('hex');
+    const mediaId = randomUUID();
+    const uploaded = { ...(await this.uploadPublicImage(file, detected)), mediaId, tagCode, origin: PropertyMediaOrigin.PLATFORM, sortOrder: (candidate.galleryMedia ?? []).length, contentDigest };
+    const galleryMedia = [...(candidate.galleryMedia ?? []), uploaded];
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const updated = await this.revisions.findOneAndUpdate(
+          { _id: revisionId, propertyId: new Types.ObjectId(id), moderationStatus: PropertyRevisionModerationStatus.PENDING_REVIEW, marketingMode: PropertyMarketingMode.PLATFORM_MANAGED, decisionVersion: version },
+          { $set: { galleryMedia }, $inc: { decisionVersion: 1 } },
+          { new: true, session, runValidators: true, overwriteImmutable: true },
+        ).exec();
+        if (!updated) throw new ConflictException({ message: 'تم تحديث هذه النسخة بواسطة مراجع آخر', code: PropertyErrorCode.REVISION_VERSION_CONFLICT });
+        await this.audit.logRequired({
+          action: AuditAction.PROPERTY_MEDIA_UPLOADED,
+          actorUserId: actor,
+          targetResourceId: id,
+          reason: 'uploaded platform-managed property media',
+          ip,
+          metadata: { propertyId: id, revisionId, mediaId, tagCode, versionBefore: version, versionAfter: version + 1 },
+        }, session);
+      });
+    } catch (error) {
+      await this.evidenceAssets.deleteOrEnqueue([uploaded as StoredAssetMetadata], `property-media-update-failed:${revisionId}:${mediaId}`);
+      throw error;
+    } finally { await session.endSession(); }
+    return this.getForAdmin(id);
+  }
+
+  async replacePlatformMediaForAdmin(id: string, revisionId: string, mediaId: string, tagCode: PropertyMediaTagCode, version: number, file: Express.Multer.File | undefined, actor: string, ip?: string) {
+    this.assertId(id); this.assertId(revisionId);
+    if (!file) throw new BadRequestException({ message: 'صورة العقار مطلوبة', code: EvidenceErrorCode.NOT_FOUND });
+    const detected = validateEvidenceFile(file, PROPERTY_IMAGE_POLICY);
+    const candidate = await this.platformManagedPendingRevision(id, revisionId, version);
+    const existingIndex = this.platformMediaIndex(candidate.galleryMedia ?? [], mediaId);
+    if (existingIndex < 0) throw new NotFoundException({ message: 'صورة العقار غير موجودة', code: EvidenceErrorCode.NOT_FOUND });
+    const existing = candidate.galleryMedia[existingIndex];
+    const uploaded = { ...(await this.uploadPublicImage(file, detected)), mediaId: existing.mediaId ?? randomUUID(), tagCode, origin: PropertyMediaOrigin.PLATFORM, sortOrder: existing.sortOrder ?? existingIndex, contentDigest: createHash('sha256').update(file.buffer).digest('hex') };
+    const galleryMedia = [...candidate.galleryMedia];
+    galleryMedia[existingIndex] = uploaded;
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const updated = await this.revisions.findOneAndUpdate(
+          { _id: revisionId, propertyId: new Types.ObjectId(id), moderationStatus: PropertyRevisionModerationStatus.PENDING_REVIEW, marketingMode: PropertyMarketingMode.PLATFORM_MANAGED, decisionVersion: version },
+          { $set: { galleryMedia }, $inc: { decisionVersion: 1 } },
+          { new: true, session, runValidators: true, overwriteImmutable: true },
+        ).exec();
+        if (!updated) throw new ConflictException({ message: 'تم تحديث هذه النسخة بواسطة مراجع آخر', code: PropertyErrorCode.REVISION_VERSION_CONFLICT });
+        await this.audit.logRequired({ action: AuditAction.PROPERTY_MEDIA_REPLACED, actorUserId: actor, targetResourceId: id, reason: 'replaced platform-managed property media', ip, metadata: { propertyId: id, revisionId, mediaId, tagCode, versionBefore: version, versionAfter: version + 1 } }, session);
+      });
+    } catch (error) {
+      await this.evidenceAssets.deleteOrEnqueue([uploaded as StoredAssetMetadata], `property-media-replace-failed:${revisionId}:${mediaId}`);
+      throw error;
+    } finally { await session.endSession(); }
+    await this.evidenceAssets.deleteOrEnqueue([existing as StoredAssetMetadata], `property-media-replaced:${revisionId}:${mediaId}`);
+    return this.getForAdmin(id);
+  }
+
+  async updatePlatformMediaForAdmin(id: string, revisionId: string, mediaId: string, update: { tagCode?: PropertyMediaTagCode; sortOrder?: number; version: number }, actor: string, ip?: string) {
+    this.assertId(id); this.assertId(revisionId);
+    if (update.tagCode === undefined && update.sortOrder === undefined) throw new BadRequestException({ message: 'لم يتم تحديد تعديل للصورة', code: PropertyErrorCode.STATE_CONFLICT });
+    const candidate = await this.platformManagedPendingRevision(id, revisionId, update.version);
+    const existingIndex = this.platformMediaIndex(candidate.galleryMedia ?? [], mediaId);
+    if (existingIndex < 0) throw new NotFoundException({ message: 'صورة العقار غير موجودة', code: EvidenceErrorCode.NOT_FOUND });
+    const ordered = [...candidate.galleryMedia].sort((a, b) => (a.sortOrder ?? candidate.galleryMedia.indexOf(a)) - (b.sortOrder ?? candidate.galleryMedia.indexOf(b)));
+    const currentIndex = ordered.findIndex((asset, index) => this.platformMediaIdentifier(asset, index) === mediaId || asset === candidate.galleryMedia[existingIndex]);
+    const [asset] = ordered.splice(currentIndex, 1);
+    if (update.tagCode !== undefined) asset.tagCode = update.tagCode;
+    ordered.splice(Math.min(update.sortOrder ?? currentIndex, ordered.length), 0, asset);
+    const galleryMedia = ordered.map((item, sortOrder) => ({ ...item, sortOrder }));
+    await this.persistPlatformMediaMutation(id, revisionId, update.version, galleryMedia, actor, ip, 'updated platform-managed property media', { mediaId, tagCode: update.tagCode, sortOrder: update.sortOrder });
+    return this.getForAdmin(id);
+  }
+
+  async removePlatformMediaForAdmin(id: string, revisionId: string, mediaId: string, version: number, actor: string, ip?: string) {
+    this.assertId(id); this.assertId(revisionId);
+    const candidate = await this.platformManagedPendingRevision(id, revisionId, version);
+    const existingIndex = this.platformMediaIndex(candidate.galleryMedia ?? [], mediaId);
+    if (existingIndex < 0) throw new NotFoundException({ message: 'صورة العقار غير موجودة', code: EvidenceErrorCode.NOT_FOUND });
+    const existing = candidate.galleryMedia[existingIndex];
+    const galleryMedia = candidate.galleryMedia.filter((_asset: PropertyAsset, index: number) => index !== existingIndex).map((asset: PropertyAsset, sortOrder: number) => ({ ...asset, sortOrder }));
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const updated = await this.revisions.findOneAndUpdate(
+          { _id: revisionId, propertyId: new Types.ObjectId(id), moderationStatus: PropertyRevisionModerationStatus.PENDING_REVIEW, marketingMode: PropertyMarketingMode.PLATFORM_MANAGED, decisionVersion: version },
+          { $set: { galleryMedia }, $inc: { decisionVersion: 1 } },
+          { new: true, session, runValidators: true, overwriteImmutable: true },
+        ).exec();
+        if (!updated) throw new ConflictException({ message: 'تم تحديث هذه النسخة بواسطة مراجع آخر', code: PropertyErrorCode.REVISION_VERSION_CONFLICT });
+        await this.audit.logRequired({ action: AuditAction.PROPERTY_MEDIA_REMOVED, actorUserId: actor, targetResourceId: id, reason: 'removed platform-managed property media', ip, metadata: { propertyId: id, revisionId, mediaId, versionBefore: version, versionAfter: version + 1 } }, session);
+      });
+    } finally { await session.endSession(); }
+    await this.evidenceAssets.deleteOrEnqueue([existing as StoredAssetMetadata], `property-media-removed:${revisionId}:${mediaId}`);
+    return this.getForAdmin(id);
+  }
+
+  async downloadPublicMediaForAdmin(id: string, revisionId: string, mediaId: string, actor: string, ip?: string) {
+    this.assertId(id); this.assertId(revisionId);
+    const revision = await this.revisions.findOne({ _id: revisionId, propertyId: new Types.ObjectId(id) }).lean().exec();
+    const assetIndex = revision ? this.platformMediaIndex(revision.galleryMedia ?? [], mediaId) : -1;
+    const asset = assetIndex >= 0 ? revision.galleryMedia[assetIndex] : undefined;
+    if (!asset?.publicId) throw new NotFoundException({ message: 'صورة العقار غير موجودة', code: EvidenceErrorCode.NOT_FOUND });
+    const result = await this.evidenceAssets.downloadAuthenticatedAsset({ ...asset, secureUrl: asset.url } as StoredAssetMetadata);
+    await this.audit.logResourceAction(AuditAction.PROPERTY_MEDIA_ACCESSED, actor, id, `property-media-admin-access:${revisionId}:${mediaId}`, ip);
+    return result;
+  }
+
+  private platformMediaIdentifier(asset: PropertyAsset, index: number) {
+    return asset.mediaId ?? asset.slotId ?? `legacy-${index}`;
+  }
+
+  private platformMediaIndex(media: PropertyAsset[], mediaId: string) {
+    return media.findIndex((asset, index) => this.platformMediaIdentifier(asset, index) === mediaId);
+  }
+
+  private mediaTagFromGuidedSlot(slotId?: string): PropertyMediaTagCode {
+    if (slotId === 'exterior') return PropertyMediaTagCode.EXTERIOR;
+    if (slotId === 'entrance') return PropertyMediaTagCode.ENTRANCE;
+    if (slotId?.startsWith('living_')) return PropertyMediaTagCode.LIVING_ROOM;
+    if (slotId?.startsWith('bedroom_')) return PropertyMediaTagCode.BEDROOM;
+    if (slotId?.startsWith('kitchen_')) return PropertyMediaTagCode.KITCHEN;
+    if (slotId?.startsWith('bathroom_')) return PropertyMediaTagCode.BATHROOM;
+    return PropertyMediaTagCode.OTHER;
+  }
+
+  private async persistPlatformMediaMutation(id: string, revisionId: string, version: number, galleryMedia: PropertyAsset[], actor: string, ip: string | undefined, reason: string, metadata: Record<string, unknown>) {
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const updated = await this.revisions.findOneAndUpdate(
+          { _id: revisionId, propertyId: new Types.ObjectId(id), moderationStatus: PropertyRevisionModerationStatus.PENDING_REVIEW, marketingMode: PropertyMarketingMode.PLATFORM_MANAGED, decisionVersion: version },
+          { $set: { galleryMedia }, $inc: { decisionVersion: 1 } },
+          { new: true, session, runValidators: true, overwriteImmutable: true },
+        ).exec();
+        if (!updated) throw new ConflictException({ message: 'تم تحديث هذه النسخة بواسطة مراجع آخر', code: PropertyErrorCode.REVISION_VERSION_CONFLICT });
+        await this.audit.logRequired({ action: AuditAction.PROPERTY_MEDIA_UPDATED, actorUserId: actor, targetResourceId: id, reason, ip, metadata: { propertyId: id, revisionId, ...metadata, versionBefore: version, versionAfter: version + 1 } }, session);
+      });
+    } finally { await session.endSession(); }
+  }
+
+  private async platformManagedPendingRevision(id: string, revisionId: string, version: number) {
+    const property = await this.properties.findOne({ _id: id, pendingRevisionId: new Types.ObjectId(revisionId) }).lean().exec();
+    if (!property) throw new ConflictException({ message: 'هذه النسخة ليست النسخة الحالية قيد المراجعة', code: PropertyErrorCode.REVISION_NOT_PENDING });
+    const revision = await this.revisions.findOne({ _id: revisionId, propertyId: property._id, moderationStatus: PropertyRevisionModerationStatus.PENDING_REVIEW, marketingMode: PropertyMarketingMode.PLATFORM_MANAGED, decisionVersion: version }).lean().exec();
+    if (!revision) throw new ConflictException({ message: 'النسخة غير قابلة لتعديل صور المنصة أو تغير إصدارها', code: PropertyErrorCode.REVISION_VERSION_CONFLICT });
+    return revision;
   }
   async listForAdmin(options: { page?: number; limit?: number; status?: string; search?: string }) {
     const page = Math.max(options.page || 1, 1);
@@ -574,7 +812,25 @@ export class PropertiesService {
     const item = await this.properties.findById(id).populate('ownerId', 'fullName email phone').populate('advertiserAccountId', 'fullName email phone accountType').populate('pendingRevisionId').populate('currentPublicRevisionId').lean().exec();
     if (!item) throw new NotFoundException('العقار غير موجود');
     const revisions = await this.revisions.find({ propertyId: item._id }).sort({ revisionNumber: -1 }).lean().exec();
-    return { property: { ...this.toAdmin(item, true), revisions: revisions.map(revision => this.revisionAdmin(revision)), currentPublicRevision: this.revisionAdmin(this.populatedRevision(item.currentPublicRevisionId)), pendingRevision: this.revisionAdmin(this.populatedRevision(item.pendingRevisionId)) } };
+    const [purposes, types, payments] = await Promise.all([
+      this.purposeCategories.find({ _id: { $in: revisions.map(revision => revision.purposeCategoryId).filter(Boolean) } }).lean().exec(),
+      this.propertyTypes.find({ _id: { $in: revisions.map(revision => revision.purposeSubcategoryId).filter(Boolean) } }).lean().exec(),
+      this.options.find({ group: 'payment_method', code: { $in: revisions.flatMap(revision => revision.paymentMethodCodes ?? []) } }).lean().exec(),
+    ]);
+    const purposeNames = new Map(purposes.map(value => [value._id.toString(), value.nameAr]));
+    const typeNames = new Map(types.map(value => [value._id.toString(), value.nameAr]));
+    const paymentNames = new Map(payments.map(value => [value.code, value.nameAr]));
+    const present = (revision: any) => {
+      const result = this.revisionAdmin(revision);
+      if (!result) return undefined;
+      return {
+        ...result,
+        purposeCategoryNameAr: revision.purposeCategoryId ? purposeNames.get(revision.purposeCategoryId.toString()) : undefined,
+        propertyTypeNameAr: revision.purposeSubcategoryId ? typeNames.get(revision.purposeSubcategoryId.toString()) : revision.legacyPropertyTypeCode,
+        paymentMethodNamesAr: (revision.paymentMethodCodes ?? []).map((code: string) => paymentNames.get(code)).filter(Boolean),
+      };
+    };
+    return { property: { ...this.toAdmin(item, true), revisions: revisions.map(present), currentPublicRevision: present(this.populatedRevision(item.currentPublicRevisionId)), pendingRevision: present(this.populatedRevision(item.pendingRevisionId)) } };
   }
 
   async reviewForAdmin(id: string, revisionId: string, version: number, status: 'approved' | 'rejected', reason: string | undefined, actor: string, ip?: string) {
@@ -586,6 +842,11 @@ export class PropertiesService {
       await session.withTransaction(async () => {
         const property = await this.properties.findOne({ _id: id, pendingRevisionId: new Types.ObjectId(revisionId) }).session(session).exec();
         if (!property) throw new ConflictException({ message: 'هذه النسخة ليست النسخة الحالية قيد المراجعة', code: PropertyErrorCode.REVISION_NOT_PENDING });
+        if (status === 'approved') {
+          const approvalCandidate = await this.revisions.findOne({ _id: revisionId, propertyId: property._id, moderationStatus: PropertyRevisionModerationStatus.PENDING_REVIEW, decisionVersion: version }).session(session).lean().exec();
+          if (!approvalCandidate) throw new ConflictException({ message: 'سبق اتخاذ قرار أو تغير إصدار النسخة', code: PropertyErrorCode.REVISION_VERSION_CONFLICT });
+          this.assertPresentationMediaComplete(approvalCandidate);
+        }
         const now = new Date();
         const revision = await this.revisions.findOneAndUpdate(
           { _id: revisionId, propertyId: property._id, moderationStatus: PropertyRevisionModerationStatus.PENDING_REVIEW, decisionVersion: version },
@@ -658,7 +919,7 @@ export class PropertiesService {
     detected: DetectedEvidenceFile,
   ): Promise<PropertyAsset> {
     const stored = await this.evidenceAssets.uploadPublicPropertyMedia(file, detected);
-    return { ...stored, url: stored.secureUrl };
+    return { ...stored, url: stored.secureUrl, contentDigest: createHash('sha256').update(file.buffer).digest('hex') };
   }
 
   private privateEvidenceAsset(item: any, revisionId?: string, index = 0): StoredAssetMetadata {
@@ -686,7 +947,17 @@ export class PropertiesService {
   }
 
   private publicImages(images: PropertyAsset[] = []) {
-    return images.map((image) => ({ url: image.url, label: image.label, slotId: image.slotId }));
+    return images
+      .map((image, index) => ({
+        url: image.url,
+        label: image.label,
+        slotId: image.slotId,
+        id: this.platformMediaIdentifier(image, index),
+        tagCode: image.tagCode ?? this.mediaTagFromGuidedSlot(image.slotId),
+        order: image.sortOrder ?? index,
+        origin: image.origin ?? (image.slotId ? PropertyMediaOrigin.ADVERTISER : undefined),
+      }))
+      .sort((a, b) => a.order - b.order);
   }
 
   private revisionPublicImages(revision: any, legacyImages: PropertyAsset[] = []) {
@@ -725,6 +996,10 @@ export class PropertiesService {
 
   private revisionAdmin(revision: any) {
     if (!revision) return undefined;
+    const guided = revision.marketingMode === PropertyMarketingMode.SELF_SERVICE;
+    const requiredPhotoSlots = guided ? this.requiredPhotoSlots(revision) : [];
+    const suppliedPhotoSlots = new Set((revision.galleryMedia ?? []).map((asset: PropertyAsset) => asset.slotId));
+    const photoCount = (revision.galleryMedia ?? []).length;
     return {
       ...this.revisionSummary(revision),
       title: revision.title,
@@ -745,12 +1020,33 @@ export class PropertiesService {
       paymentMethodCodes: revision.paymentMethodCodes,
       marketingMode: revision.marketingMode,
       images: this.publicImages(this.revisionPublicImages(revision)),
+      mediaCompleteness: {
+        requiredPhotoSlots,
+        missingPhotoSlots: requiredPhotoSlots.filter(slotId => !suppliedPhotoSlots.has(slotId)),
+        minimumPhotoCount: guided ? requiredPhotoSlots.length : 1,
+        photoCount,
+        complete: guided ? requiredPhotoSlots.every(slotId => suppliedPhotoSlots.has(slotId)) : photoCount >= 1,
+      },
       privateEvidence: this.privateEvidenceDescriptors(revision, {}),
     };
   }
 
   private toMarketplacePublic(item: any) {
-    return this.projectProperty(item, false);
+    const projected = this.projectProperty(item, false);
+    const {
+      advertiserAccountId: _advertiserAccountId,
+      advertiserAccountTypeSnapshot: _advertiserAccountTypeSnapshot,
+      createdByActorId: _createdByActorId,
+      revisionId: _revisionId,
+      revisionVersion: _revisionVersion,
+      lifecycleVersion: _lifecycleVersion,
+      pendingRevisionId: _pendingRevisionId,
+      currentPublicRevisionId: _currentPublicRevisionId,
+      reviewReason: _reviewReason,
+      reviewedAt: _reviewedAt,
+      ...safe
+    } = projected;
+    return safe;
   }
 
   private toOwner(item: any) {
@@ -758,6 +1054,19 @@ export class PropertiesService {
     const revision = this.effectiveRevision(item, true);
     return {
       ...result,
+      street: revision?.street ?? item.street,
+      additionalAddressDetails: revision?.additionalAddressDetails ?? item.additionalAddressDetails,
+      latitude: revision?.latitude ?? item.latitude,
+      longitude: revision?.longitude ?? item.longitude,
+      livingRooms: revision?.livingRooms ?? item.livingRooms,
+      kitchens: revision?.kitchens ?? item.kitchens,
+      totalFloors: revision?.totalFloors ?? item.totalFloors,
+      buildingYear: revision?.buildingYear ?? item.buildingYear,
+      finishingStatusCode: revision?.finishingStatusCode ?? item.finishingStatusCode,
+      deliveryStatusCode: revision?.deliveryStatusCode ?? item.deliveryStatusCode,
+      amenityCodes: revision?.amenityCodes ?? item.amenityCodes,
+      isPriceNegotiable: revision?.isPriceNegotiable ?? item.isPriceNegotiable,
+      hidePhone: revision?.hidePhone ?? item.hidePhone,
       privateEvidence: this.privateEvidenceDescriptors(revision, item),
       hasTitleDeed: Boolean(revision?.privateEvidenceAssets?.length || item.titleDeed?.publicId),
     };
@@ -817,7 +1126,7 @@ export class PropertiesService {
     const pending = this.populatedRevision(item.pendingRevisionId);
     const source = pending ?? revision ?? item;
     const pendingProjection = pending ? this.revisionAdmin(pending) : undefined;
-    const base = { ...this.toOwner(item), ...(pendingProjection ? { ...pendingProjection, revisionId: pendingProjection.id } : {}), owner, status: pending ? PropertyRevisionModerationStatus.PENDING_REVIEW : (revision?.moderationStatus ?? item.status), reviewReason: pending?.reviewReason ?? item.reviewReason, reviewedAt: pending?.reviewedAt ?? item.reviewedAt };
+    const base = { ...this.toOwner(item), ...(pendingProjection ? { ...pendingProjection, revisionId: pendingProjection.id } : {}), id: item._id.toString(), owner, status: pending ? PropertyRevisionModerationStatus.PENDING_REVIEW : (revision?.moderationStatus ?? item.status), reviewReason: pending?.reviewReason ?? item.reviewReason, reviewedAt: pending?.reviewedAt ?? item.reviewedAt };
     return detailed ? { ...base, street: source.street, additionalAddressDetails: source.additionalAddressDetails, latitude: source.latitude, longitude: source.longitude, bedrooms: source.bedrooms, livingRooms: source.livingRooms, kitchens: source.kitchens, bathrooms: source.bathrooms, floor: source.floor, totalFloors: source.totalFloors, buildingYear: source.buildingYear, finishingStatusCode: source.finishingStatusCode, deliveryStatusCode: source.deliveryStatusCode, amenityCodes: source.amenityCodes, isPriceNegotiable: source.isPriceNegotiable, paymentMethodCodes: revision?.paymentMethodCodes, paymentMethodCode: item.paymentMethodCode, advertiserType: item.advertiserType, hidePhone: source.hidePhone } : base;
   }
 

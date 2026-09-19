@@ -2,6 +2,10 @@ import { IsBoolean, IsIn, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, Ma
 import { PROPERTY_TYPE_ICON_KEYS } from '../property-type-options';
 
 export class UpdatePropertyTypeDto {
+  @IsInt()
+  @Min(0)
+  expectedVersion: number;
+
   @IsOptional()
   @IsMongoId()
   purposeCategoryId?: string;

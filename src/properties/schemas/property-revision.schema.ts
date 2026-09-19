@@ -3,7 +3,7 @@ import { HydratedDocument, Types } from 'mongoose';
 import { EGP_CURRENCY, isMoneyMinorAmount } from '../../common/money/money';
 import { PropertyAsset } from './property.schema';
 import { AssetClassification, EvidenceDeliveryType } from '../../config/evidence-asset.types';
-import { PropertyMarketingMode, PropertyRevisionModerationStatus } from '../property.types';
+import { PropertyMarketingMode, PropertyMediaOrigin, PropertyMediaTagCode, PropertyRevisionModerationStatus } from '../property.types';
 
 export type PropertyRevisionDocument = HydratedDocument<PropertyRevision>;
 
@@ -18,6 +18,11 @@ export class RevisionAsset {
   @Prop({ min: 1 }) bytes?: number;
   @Prop() label?: string;
   @Prop({ trim: true, maxlength: 80 }) slotId?: string;
+  @Prop({ trim: true, maxlength: 80 }) mediaId?: string;
+  @Prop({ enum: PropertyMediaTagCode }) tagCode?: PropertyMediaTagCode;
+  @Prop({ enum: PropertyMediaOrigin }) origin?: PropertyMediaOrigin;
+  @Prop({ min: 0 }) sortOrder?: number;
+  @Prop({ match: /^[a-f0-9]{64}$/ }) contentDigest?: string;
 }
 
 const RevisionAssetSchema = SchemaFactory.createForClass(RevisionAsset);
