@@ -13,18 +13,6 @@ export class BrokerVerificationDocument {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true, immutable: true })
   applicantAccountId: Types.ObjectId;
 
-  @Prop({ required: true, uppercase: true, maxlength: 80, immutable: true })
-  requirementCode: string;
-
-  @Prop({ required: true, min: 0, immutable: true })
-  requirementVersion: number;
-
-  @Prop({ required: true, maxlength: 200, immutable: true })
-  requirementLabelAr: string;
-
-  @Prop({ maxlength: 200, immutable: true })
-  requirementLabelEn?: string;
-
   @Prop({ type: Object, required: true, immutable: true })
   assetRef: StoredAssetMetadata;
 

@@ -9,6 +9,7 @@ import {
   Min,
 } from 'class-validator';
 import { SystemRole } from '../../auth/roles.enum';
+import { AccountType } from '../../users/identity.types';
 
 export class ListUsersQueryDto {
   @Type(() => Number)
@@ -30,6 +31,10 @@ export class ListUsersQueryDto {
   @IsOptional()
   @IsIn(Object.values(SystemRole))
   systemRole?: SystemRole;
+
+  @IsOptional()
+  @IsIn(Object.values(AccountType))
+  accountType?: AccountType;
 
   @IsOptional()
   @IsIn(['true', 'false'])

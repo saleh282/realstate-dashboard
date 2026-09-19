@@ -170,6 +170,11 @@ export class CloudinaryAssetService {
   async downloadAuthenticatedAsset(asset: StoredAssetMetadata): Promise<{ buffer: Buffer; contentType: string }> {
     const format = asset.format ?? this.legacyFormat(asset.secureUrl);
     const legacyPublic = !asset.deliveryType || asset.deliveryType === 'upload';
+    const shouldAppendFormat = Boolean(
+      asset.resourceType !== 'raw' &&
+      format &&
+      !asset.publicId.toLowerCase().endsWith(`.${format.toLowerCase()}`),
+    );
     const deliveryUrl = legacyPublic && asset.secureUrl
       ? asset.secureUrl
       : this.cloudinary.url(asset.publicId, {
@@ -177,20 +182,38 @@ export class CloudinaryAssetService {
           sign_url: true,
           resource_type: asset.resourceType,
           type: 'authenticated',
-          ...(format ? { format } : {}),
+          ...(shouldAppendFormat ? { format } : {}),
         });
+    let failure = 'request_failed';
     try {
       const response = await fetch(deliveryUrl, { cache: 'no-store', signal: AbortSignal.timeout(10_000) });
-      if (!response.ok) throw new Error('Provider download rejected');
-      const contentType = response.headers.get('content-type')?.split(';')[0] ?? '';
+      if (!response.ok) {
+        failure = `http_${response.status}`;
+        throw new Error('Provider download rejected');
+      }
+      let contentType = response.headers.get('content-type')?.split(';')[0] ?? '';
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (!buffer.length || buffer.length > 10 * 1024 * 1024) {
+        failure = `invalid_size_${buffer.length}`;
+        throw new Error('Unexpected private evidence size');
+      }
+      if (
+        asset.resourceType === 'raw' &&
+        format === 'pdf' &&
+        contentType === 'application/octet-stream' &&
+        buffer.subarray(0, 5).toString('ascii') === '%PDF-' &&
+        buffer.subarray(Math.max(0, buffer.length - 2048)).includes(Buffer.from('%%EOF'))
+      ) {
+        contentType = 'application/pdf';
+      }
       if (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(contentType)) {
+        failure = `content_type_${contentType || 'missing'}`;
         throw new Error('Unexpected private evidence content type');
       }
-      const buffer = Buffer.from(await response.arrayBuffer());
-      if (!buffer.length || buffer.length > 10 * 1024 * 1024) throw new Error('Unexpected private evidence size');
       return { buffer, contentType };
-    } catch {
-      this.logger.error(`Private evidence delivery failed (${asset.classification})`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'TimeoutError') failure = 'timeout';
+      this.logger.error(`Private evidence delivery failed (${asset.classification}; ${failure})`);
       throw new ServiceUnavailableException({
         message: 'تعذر تحميل ملف الإثبات بأمان، حاول مرة أخرى لاحقاً',
         code: EvidenceErrorCode.DELIVERY_FAILED,

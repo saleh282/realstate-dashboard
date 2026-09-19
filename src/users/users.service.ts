@@ -22,6 +22,7 @@ import { hashPassword } from '../common/security/password-hashing';
 import { AuthErrorCode } from '../common/errors/auth-error-codes';
 import { AssetClassification } from '../config/evidence-asset.types';
 import {
+  AccountType,
   AccountStatus,
   VerificationTrustState,
   identityProjection,
@@ -142,9 +143,10 @@ export class UsersService {
     limit: number;
     search?: string;
     systemRole?: SystemRole;
+    accountType?: AccountType;
     contactVerified?: boolean;
   }) {
-    const { page, limit, search, systemRole, contactVerified } = options;
+    const { page, limit, search, systemRole, accountType, contactVerified } = options;
     const filter: Record<string, any> = {};
 
     if (search) {
@@ -165,6 +167,13 @@ export class UsersService {
           ...(systemRole === SystemRole.ADMIN ? [{ role: 'admin' }] : []),
         ],
       });
+    }
+    if (accountType) {
+      compatibilityPredicates.push(
+        accountType === AccountType.USER
+          ? { $or: [{ accountType }, { accountType: { $exists: false } }] }
+          : { accountType },
+      );
     }
     if (contactVerified !== undefined) {
       const verifiedPredicate = {

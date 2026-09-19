@@ -2,6 +2,7 @@ import {
   CallHandler,
   ExecutionContext,
   Injectable,
+  StreamableFile,
   NestInterceptor,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
@@ -15,14 +16,18 @@ export interface StandardResponse<T> {
 
 @Injectable()
 export class ResponseInterceptor<T>
-  implements NestInterceptor<T, StandardResponse<T>>
+  implements NestInterceptor<T, StandardResponse<T> | StreamableFile>
 {
   intercept(
     context: ExecutionContext,
     next: CallHandler,
-  ): Observable<StandardResponse<T>> {
+  ): Observable<StandardResponse<T> | StreamableFile> {
     return next.handle().pipe(
       map((result) => {
+        // Binary controller responses must reach Nest's StreamableFile handler.
+        // Wrapping them in the JSON envelope corrupts the advertised file body.
+        if (result instanceof StreamableFile) return result;
+
         if (result === undefined || result === null) {
           return {
             success: true,

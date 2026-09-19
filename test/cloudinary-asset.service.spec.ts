@@ -59,6 +59,77 @@ describe('authenticated KYC asset delivery', () => {
     );
   });
 
+  it('downloads authenticated raw PDFs through a signed raw delivery URL', async () => {
+    const url = jest.fn().mockReturnValue('https://signed.example.test/raw');
+    const cloudinary = { url };
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(Buffer.from('%PDF-1.7\n%%EOF'), {
+        status: 200,
+        headers: { 'Content-Type': 'application/pdf' },
+      }),
+    );
+    const service = new CloudinaryAssetService(cloudinary);
+
+    const result = await service.downloadAuthenticatedAsset({
+      publicId: 'real-estate-auction/private/brokers/example/verification',
+      resourceType: 'raw',
+      deliveryType: 'authenticated',
+      classification: AssetClassification.PRIVATE_BROKER_EVIDENCE,
+      format: 'pdf',
+    });
+
+    expect(url).toHaveBeenCalledWith(
+      'real-estate-auction/private/brokers/example/verification',
+      {
+        secure: true,
+        sign_url: true,
+        resource_type: 'raw',
+        type: 'authenticated',
+      },
+    );
+    expect(result.contentType).toBe('application/pdf');
+  });
+
+  it('never appends metadata format to a raw public ID', async () => {
+    const url = jest.fn().mockReturnValue('https://signed.example.test/raw');
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(Buffer.from('%PDF-1.7\n%%EOF'), {
+        status: 200,
+        headers: { 'Content-Type': 'application/pdf' },
+      }),
+    );
+    const service = new CloudinaryAssetService({ url });
+    await service.downloadAuthenticatedAsset({
+      publicId: 'private/verification.pdf',
+      resourceType: 'raw',
+      deliveryType: 'authenticated',
+      classification: AssetClassification.PRIVATE_BROKER_EVIDENCE,
+      format: 'pdf',
+    });
+    expect(url).toHaveBeenCalledWith(
+      'private/verification.pdf',
+      expect.not.objectContaining({ format: 'pdf' }),
+    );
+  });
+
+  it('accepts provider octet-stream only when raw PDF content has a valid signature', async () => {
+    const cloudinary = { url: jest.fn().mockReturnValue('https://signed.example.test/raw') };
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(Buffer.from('%PDF-1.7\n%%EOF'), {
+        status: 200,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      }),
+    );
+    const service = new CloudinaryAssetService(cloudinary);
+    await expect(service.downloadAuthenticatedAsset({
+      publicId: 'private/pdf',
+      resourceType: 'raw',
+      deliveryType: 'authenticated',
+      classification: AssetClassification.PRIVATE_BROKER_EVIDENCE,
+      format: 'pdf',
+    })).resolves.toMatchObject({ contentType: 'application/pdf' });
+  });
+
   it('rejects unexpected response types', async () => {
     const cloudinary = { url: jest.fn().mockReturnValue('https://signed.example.test/file') };
     jest.spyOn(global, 'fetch').mockResolvedValue(
@@ -72,6 +143,20 @@ describe('authenticated KYC asset delivery', () => {
     await expect(service.downloadAuthenticatedAsset(asset)).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
+  });
+
+  it('logs only a safe provider status category when delivery is rejected', async () => {
+    const cloudinary = { url: jest.fn().mockReturnValue('https://signed.example.test/file') };
+    jest.spyOn(global, 'fetch').mockResolvedValue(new Response('denied', { status: 404 }));
+    const service = new CloudinaryAssetService(cloudinary);
+    const log = jest.spyOn((service as any).logger, 'error').mockImplementation();
+    await expect(service.downloadAuthenticatedAsset(asset)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+    expect(log).toHaveBeenCalledWith(
+      'Private evidence delivery failed (private_kyc_evidence; http_404)',
+    );
+    expect(log.mock.calls[0][0]).not.toContain(asset.publicId);
   });
 
   it('uploads private evidence with authenticated delivery and stores no URL', async () => {
