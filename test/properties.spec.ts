@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { PropertiesService } from '../src/properties/properties.service';
 import { AssetClassification } from '../src/config/evidence-asset.types';
 import { AccountType, BrokerStatus } from '../src/users/identity.types';
-import { PropertyMarketingMode } from '../src/properties/property.types';
+import { PropertyMarketingMode, PropertyMediaTagCode } from '../src/properties/property.types';
 import { PropertyErrorCode } from '../src/common/errors/property-error-codes';
 
 const query = (value: unknown) => {
@@ -53,6 +53,24 @@ describe('property publishing validation', () => {
 
   it('rejects a missing image before catalog lookup or upload', async () => {
     await expect(service().create(userId, dto, {})).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('does not require customer public photos for PLATFORM_MANAGED drafts', async () => {
+    const instance = service({ purposeCategories: { findOne: jest.fn().mockReturnValue(query(null)) } });
+    await expect(instance.create(userId, { ...dto, marketingMode: PropertyMarketingMode.PLATFORM_MANAGED, imageLabels: [], imageSlotIds: [], coverImageIndex: 0 }, {}))
+      .rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.PURPOSE_CATEGORY_INVALID }) });
+  });
+
+  it('rejects a stale draft update before replacing media', async () => {
+    const instance = service() as any;
+    await expect(instance.createWithAttribution(
+      { actorId: { toString: () => userId }, advertiserId: { toString: () => userId }, accountType: AccountType.USER },
+      { ...dto, expectedRevisionVersion: 1 },
+      validFiles(),
+      undefined,
+      { _id: { toString: () => '64b000000000000000000099' } },
+      { decisionVersion: 2 },
+    )).rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.REVISION_VERSION_CONFLICT }) });
   });
 
   it.each(requiredPhotoSlots)('rejects submission when required photo slot %s is missing', async (missingSlot) => {
@@ -178,7 +196,7 @@ describe('property publishing validation', () => {
       .rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.PAYMENT_METHODS_INVALID }) });
   });
 
-  it('creates revision 1 with one categorized public-media collection', async () => {
+  it('creates PLATFORM_MANAGED draft with zero advertiser photos and preserves classified SELF_SERVICE media', async () => {
     const propertyId = { toString: () => '64b000000000000000000099' };
     const revisionCreate = jest.fn().mockResolvedValue([]);
     const propertyCreate = jest.fn().mockImplementation(async ([value]: any[]) => [{
@@ -210,7 +228,22 @@ describe('property publishing validation', () => {
       return Promise.resolve({ url: `https://cdn.example/photo-${index}.jpg`, publicId: `photo-${index}`, resourceType: 'image', deliveryType: 'upload', classification: AssetClassification.PUBLIC_PROPERTY_MEDIA });
     });
 
-    const result = await instance.create(userId, { ...dto, advertiserType: 'broker', advertiserAccountId: '64b000000000000000000099', paymentMethodCodes: ['mortgage', 'cash'], marketingMode: PropertyMarketingMode.PLATFORM_MANAGED }, validFiles());
+    const managedResult = await instance.create(userId, {
+      ...dto,
+      marketingMode: PropertyMarketingMode.PLATFORM_MANAGED,
+      paymentMethodCodes: ['mortgage', 'cash'],
+      imageLabels: [],
+      imageSlotIds: [],
+      coverImageIndex: 0,
+    }, {});
+    expect(revisionCreate).toHaveBeenNthCalledWith(1, [expect.objectContaining({
+      marketingMode: PropertyMarketingMode.PLATFORM_MANAGED,
+      galleryMedia: [],
+      privateEvidenceAssets: [],
+    })], expect.objectContaining({ session }));
+    expect(managedResult.property.images).toEqual([]);
+
+    const result = await instance.create(userId, { ...dto, advertiserType: 'broker', advertiserAccountId: '64b000000000000000000099', paymentMethodCodes: ['mortgage', 'cash'] }, validFiles());
 
     expect(propertyCreate).toHaveBeenCalledWith([expect.objectContaining({
       advertiserAccountTypeSnapshot: AccountType.USER,
@@ -221,7 +254,7 @@ describe('property publishing validation', () => {
       revisionNumber: 1,
       moderationStatus: 'draft',
       paymentMethodCodes: ['cash', 'mortgage'],
-      marketingMode: PropertyMarketingMode.PLATFORM_MANAGED,
+      marketingMode: PropertyMarketingMode.SELF_SERVICE,
       galleryMedia: expect.arrayContaining(requiredPhotoSlots.map((slotId) => expect.objectContaining({ slotId }))),
       privateEvidenceAssets: [],
     })], expect.objectContaining({ session }));
@@ -271,7 +304,7 @@ describe('property publishing validation', () => {
     };
     const publicDto = instance.toOwner(stored);
     const adminDto = instance.toAdmin(stored, true);
-    expect(publicDto.images).toEqual([{ url: 'https://cdn.example/image.jpg', label: 'front', slotId: undefined }]);
+    expect(publicDto.images).toEqual([expect.objectContaining({ url: 'https://cdn.example/image.jpg', label: 'front', tagCode: 'other', order: 0 })]);
     expect(publicDto).not.toHaveProperty('titleDeed');
     expect(adminDto).not.toHaveProperty('titleDeed');
     expect(adminDto.hasTitleDeed).toBe(true);
@@ -308,8 +341,8 @@ describe('property publishing validation', () => {
       },
     });
     expect(publicDto.images).toEqual([
-      { url: 'https://cdn.example/gallery.jpg', label: 'front', slotId: undefined },
-      { url: 'https://cdn.example/entrance.jpg', label: 'entrance', slotId: undefined },
+      expect.objectContaining({ url: 'https://cdn.example/gallery.jpg', label: 'front', tagCode: 'other', order: 0 }),
+      expect.objectContaining({ url: 'https://cdn.example/entrance.jpg', label: 'entrance', tagCode: 'other', order: 1 }),
     ]);
     expect(publicDto).not.toHaveProperty('entranceImage');
     expect(JSON.stringify(publicDto)).not.toMatch(/provider-id|privateEvidenceAssets/);
@@ -334,9 +367,35 @@ describe('property publishing validation', () => {
         privateEvidenceAssets: [{ publicId: 'private-id' }],
       },
     });
-    expect(dto.images).toEqual([{ url: 'https://cdn.example/legacy.jpg', label: undefined, slotId: undefined }]);
+    expect(dto.images).toEqual([expect.objectContaining({ url: 'https://cdn.example/legacy.jpg', tagCode: 'other', order: 0 })]);
     expect(dto.entranceImage).toBeUndefined();
     expect(JSON.stringify(dto)).not.toMatch(/pending\.jpg|pending-entrance|private-id/);
+  });
+
+  it('keeps the aggregate property ID in Admin rows with a pending revision', () => {
+    const aggregateId = '64b000000000000000000099';
+    const pendingRevisionId = '64b000000000000000000088';
+    const dto = (service() as any).toAdmin({
+      _id: { toString: () => aggregateId },
+      status: 'pending_review',
+      propertyContractVersion: 1,
+      totalPriceMinor: 1000,
+      currency: 'EGP',
+      images: [],
+      pendingRevisionId: {
+        _id: { toString: () => pendingRevisionId },
+        revisionNumber: 1,
+        decisionVersion: 0,
+        moderationStatus: 'pending_review',
+        title: 'Pending revision',
+        totalPriceMinor: 1000,
+        currency: 'EGP',
+        galleryMedia: [],
+      },
+    });
+
+    expect(dto.id).toBe(aggregateId);
+    expect(dto.revisionId).toBe(pendingRevisionId);
   });
 
   it('allows the owner to access private evidence and denies an unrelated user', async () => {
@@ -383,4 +442,108 @@ describe('property publishing validation', () => {
       expect(evidenceAssets.downloadAuthenticatedAsset).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('Admin PLATFORM_MANAGED flexible media', () => {
+  const propertyId = '64b000000000000000000090';
+  const revisionId = '64b000000000000000000091';
+  const adminId = '64b000000000000000000092';
+  const media = (mediaId = '1f66a82e-5e20-45fc-a9f0-2fa70895ec75', tagCode = PropertyMediaTagCode.BEDROOM) => ({
+    publicId: `provider-${mediaId}`, url: `https://cdn.example/${mediaId}.png`, resourceType: 'image',
+    deliveryType: 'upload', classification: AssetClassification.PUBLIC_PROPERTY_MEDIA, mediaId, tagCode, sortOrder: 0,
+  });
+
+  function context(galleryMedia: any[] = []) {
+    const pending = {
+      _id: revisionId, propertyId, moderationStatus: 'pending_review', marketingMode: 'PLATFORM_MANAGED', decisionVersion: 3,
+      livingRooms: 1, bedrooms: 1, kitchens: 1, bathrooms: 1, galleryMedia, privateEvidenceAssets: [{ publicId: 'private-evidence' }],
+    };
+    const lean = (value: unknown) => ({ lean: () => ({ exec: jest.fn().mockResolvedValue(value) }) });
+    const session = { withTransaction: jest.fn(async (work: () => Promise<void>) => work()), endSession: jest.fn() };
+    const revisions = {
+      findOne: jest.fn().mockReturnValue(lean(pending)),
+      findOneAndUpdate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ ...pending, decisionVersion: 4 }) }),
+    };
+    const properties = { findOne: jest.fn().mockReturnValue(lean({ _id: propertyId, pendingRevisionId: revisionId })), updateOne: jest.fn() };
+    const evidenceAssets = {
+      uploadPublicPropertyMedia: jest.fn().mockResolvedValue({ publicId: 'uploaded', secureUrl: 'https://cdn.example/uploaded.png', resourceType: 'image', deliveryType: 'upload', classification: AssetClassification.PUBLIC_PROPERTY_MEDIA, format: 'png', bytes: validPng.length }),
+      deleteOrEnqueue: jest.fn().mockResolvedValue(undefined),
+    };
+    const audit = { logRequired: jest.fn().mockResolvedValue(undefined) };
+    const instance = Object.create(PropertiesService.prototype) as any;
+    Object.assign(instance, { revisions, properties, evidenceAssets, audit, connection: { startSession: jest.fn().mockResolvedValue(session) }, getForAdmin: jest.fn().mockResolvedValue({ property: { id: propertyId } }) });
+    return { service: instance as PropertiesService, revisions, properties, evidenceAssets, audit };
+  }
+
+  const file = { mimetype: 'image/png', buffer: validPng } as Express.Multer.File;
+
+  it('adds tagged public media to the exact pending revision without publishing it', async () => {
+    const value = context();
+    await expect(value.service.addPlatformMediaForAdmin(propertyId, revisionId, PropertyMediaTagCode.BEDROOM, 3, file, adminId)).resolves.toEqual({ property: { id: propertyId } });
+    expect(value.revisions.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: revisionId, propertyId: expect.anything(), moderationStatus: 'pending_review', marketingMode: 'PLATFORM_MANAGED', decisionVersion: 3 }),
+      expect.objectContaining({ $set: { galleryMedia: [expect.objectContaining({ mediaId: expect.any(String), tagCode: PropertyMediaTagCode.BEDROOM, sortOrder: 0, classification: AssetClassification.PUBLIC_PROPERTY_MEDIA })] }, $inc: { decisionVersion: 1 } }),
+      expect.objectContaining({ session: expect.anything(), overwriteImmutable: true }),
+    );
+    expect(value.properties.updateOne).not.toHaveBeenCalled();
+    expect(value.audit.logRequired).toHaveBeenCalled();
+  });
+
+  it('allows duplicate controlled tags without room-count constraints', async () => {
+    const value = context([media()]);
+    await value.service.addPlatformMediaForAdmin(propertyId, revisionId, PropertyMediaTagCode.BEDROOM, 3, file, adminId);
+    const gallery = value.revisions.findOneAndUpdate.mock.calls[0][1].$set.galleryMedia;
+    expect(gallery).toHaveLength(2);
+    expect(gallery.map((item: any) => item.tagCode)).toEqual([PropertyMediaTagCode.BEDROOM, PropertyMediaTagCode.BEDROOM]);
+  });
+
+  it('rejects spoofed image content before upload', async () => {
+    const value = context();
+    await expect(value.service.addPlatformMediaForAdmin(propertyId, revisionId, PropertyMediaTagCode.EXTERIOR, 3, { mimetype: 'image/png', buffer: Buffer.from('not-an-image') } as Express.Multer.File, adminId))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(value.evidenceAssets.uploadPublicPropertyMedia).not.toHaveBeenCalled();
+  });
+
+  it('replaces public media without touching private evidence', async () => {
+    const value = context([media()]);
+    await value.service.replacePlatformMediaForAdmin(propertyId, revisionId, media().mediaId, PropertyMediaTagCode.KITCHEN, 3, file, adminId);
+    const update = value.revisions.findOneAndUpdate.mock.calls[0][1];
+    expect(update.$set.galleryMedia).toHaveLength(1);
+    expect(JSON.stringify(update)).not.toContain('private-evidence');
+    expect(update.$set.galleryMedia[0]).toEqual(expect.objectContaining({ tagCode: PropertyMediaTagCode.KITCHEN }));
+    expect(value.evidenceAssets.deleteOrEnqueue).toHaveBeenCalledWith([expect.objectContaining({ publicId: expect.stringContaining('provider-') })], expect.stringContaining('replaced'));
+  });
+
+  it('changes a tag and reorders platform media using optimistic revision versioning', async () => {
+    const first = media();
+    const second = { ...media('cf505086-1b68-4e67-b784-cd862d2aa355', PropertyMediaTagCode.KITCHEN), sortOrder: 1 };
+    const value = context([first, second]);
+    await value.service.updatePlatformMediaForAdmin(propertyId, revisionId, second.mediaId, { tagCode: PropertyMediaTagCode.BEDROOM, sortOrder: 0, version: 3 }, adminId);
+    const gallery = value.revisions.findOneAndUpdate.mock.calls[0][1].$set.galleryMedia;
+    expect(gallery).toEqual([
+      expect.objectContaining({ mediaId: second.mediaId, tagCode: PropertyMediaTagCode.BEDROOM, sortOrder: 0 }),
+      expect.objectContaining({ mediaId: first.mediaId, tagCode: PropertyMediaTagCode.BEDROOM, sortOrder: 1 }),
+    ]);
+  });
+
+  it('removes media only from a mutable pending PLATFORM_MANAGED revision', async () => {
+    const value = context([media()]);
+    await value.service.removePlatformMediaForAdmin(propertyId, revisionId, media().mediaId, 3, adminId);
+    expect(value.revisions.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ moderationStatus: 'pending_review', marketingMode: 'PLATFORM_MANAGED', decisionVersion: 3 }),
+      { $set: { galleryMedia: [] }, $inc: { decisionVersion: 1 } },
+      expect.objectContaining({ session: expect.anything(), overwriteImmutable: true }),
+    );
+    expect(value.properties.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('projects the one-photo platform minimum without guided missing slots', () => {
+    const value = context([media()]);
+    const dto = (value.service as any).revisionAdmin({
+      _id: revisionId, revisionNumber: 1, decisionVersion: 3, moderationStatus: 'pending_review', marketingMode: 'PLATFORM_MANAGED',
+      livingRooms: 1, bedrooms: 1, kitchens: 1, bathrooms: 1, galleryMedia: [media()], privateEvidenceAssets: [],
+    });
+    expect(dto.mediaCompleteness).toMatchObject({ requiredPhotoSlots: [], missingPhotoSlots: [], minimumPhotoCount: 1, photoCount: 1, complete: true });
+    expect(dto.images[0]).toEqual(expect.objectContaining({ id: media().mediaId, tagCode: PropertyMediaTagCode.BEDROOM, order: 0 }));
+  });
 });

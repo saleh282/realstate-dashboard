@@ -3,6 +3,21 @@ export enum PropertyMarketingMode {
   PLATFORM_MANAGED = 'PLATFORM_MANAGED',
 }
 
+export enum PropertyMediaTagCode {
+  EXTERIOR = 'exterior',
+  ENTRANCE = 'entrance',
+  LIVING_ROOM = 'living_room',
+  BEDROOM = 'bedroom',
+  KITCHEN = 'kitchen',
+  BATHROOM = 'bathroom',
+  OTHER = 'other',
+}
+
+export enum PropertyMediaOrigin {
+  ADVERTISER = 'advertiser',
+  PLATFORM = 'platform',
+}
+
 export enum PropertyRevisionModerationStatus {
   DRAFT = 'draft',
   PENDING_REVIEW = 'pending_review',

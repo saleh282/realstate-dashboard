@@ -1,5 +1,6 @@
-import { IsIn, IsInt, IsMongoId, IsString, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
+import { IsEnum, IsIn, IsInt, IsMongoId, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PropertyMediaTagCode } from '../property.types';
 
 export class ReviewPropertyDto {
   @IsIn(['approved', 'rejected'])
@@ -23,6 +24,34 @@ export class ReviewPropertyDto {
 export class SubmitPropertyRevisionDto {
   @IsMongoId()
   revisionId: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  version: number;
+}
+
+export class AdminPropertyMediaDto {
+  @IsEnum(PropertyMediaTagCode)
+  tagCode: PropertyMediaTagCode;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  version: number;
+}
+
+export class UpdateAdminPropertyMediaDto {
+  @IsOptional()
+  @IsEnum(PropertyMediaTagCode)
+  tagCode?: PropertyMediaTagCode;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(19)
+  sortOrder?: number;
 
   @Type(() => Number)
   @IsInt()

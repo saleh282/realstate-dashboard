@@ -207,6 +207,18 @@ describe('admin controller authorization', () => {
       .expect(200);
   });
 
+  it('prevents unauthenticated and marketplace users from uploading platform property media', async () => {
+    const path = '/admin/properties/64b000000000000000000090/revisions/64b000000000000000000091/media';
+    await request(app.getHttpServer()).post(path).expect(401);
+    await request(app.getHttpServer())
+      .post(path)
+      .set('Authorization', 'Bearer user')
+      .field('tagCode', 'exterior')
+      .field('version', '0')
+      .attach('image', Buffer.from([0xff, 0xd8, 0xff]), { filename: 'photo.jpg', contentType: 'image/jpeg' })
+      .expect(403);
+  });
+
   it('requires authentication for a broker applicant history', async () => {
     await request(app.getHttpServer()).get('/broker/applications/me').expect(401);
     await request(app.getHttpServer())

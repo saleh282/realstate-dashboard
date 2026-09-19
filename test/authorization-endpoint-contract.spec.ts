@@ -49,12 +49,15 @@ describe('MAZAD-016 endpoint policy contract', () => {
     expect(capabilities(AdminPropertiesController, 'createForAccount')).toEqual([
       Capability.ADMIN_PROPERTY_PROXY_CREATE,
     ]);
+    expect(capabilities(AdminPropertiesController, 'addPlatformMedia')).toBeUndefined();
+    expect(capabilities(AdminPropertiesController)).toContain(Capability.ADMIN_PROPERTY_REVIEW);
   });
 
   it('declares policies for every current property command/read boundary', () => {
     expect(capabilities(PropertiesController, 'create')).toEqual([Capability.PROPERTY_CREATE]);
     expect(capabilities(PropertiesController, 'mine')).toEqual([Capability.PROPERTY_READ_OWN]);
-    expect(capabilities(PropertiesController, 'get')).toEqual([Capability.PROPERTY_READ_OWN]);
+    expect(capabilities(PropertiesController, 'getMine')).toEqual([Capability.PROPERTY_READ_OWN]);
+    expect(capabilities(PropertiesController, 'getPublished')).toBeUndefined();
     expect(capabilities(PropertiesController, 'getOwnTitleDeed')).toEqual([Capability.PROPERTY_READ_OWN]);
     expect(capabilities(PropertiesController, 'updateVisibility')).toEqual([Capability.PROPERTY_MANAGE_OWN]);
   });

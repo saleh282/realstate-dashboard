@@ -9,10 +9,14 @@ function sessionQuery(value: unknown) {
   return { session: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(value) }) };
 }
 
-function lifecycleService(options: { currentPublicRevisionId?: string; revision?: unknown; aggregateModified?: number } = {}) {
+function lifecycleService(options: { currentPublicRevisionId?: string; revision?: unknown; approvalCandidate?: unknown; aggregateModified?: number } = {}) {
   const session = { withTransaction: jest.fn(async (work: () => Promise<void>) => work()), endSession: jest.fn() };
   const property = { _id: propertyId, pendingRevisionId: revisionId, currentPublicRevisionId: options.currentPublicRevisionId, publishedAt: undefined };
   const revisions = {
+    findOne: jest.fn().mockReturnValue({ session: () => ({ lean: () => ({ exec: jest.fn().mockResolvedValue(options.approvalCandidate === undefined ? {
+      _id: revisionId, decisionVersion: 0, marketingMode: 'PLATFORM_MANAGED', livingRooms: 1, bedrooms: 1, kitchens: 1, bathrooms: 1,
+      galleryMedia: [{ mediaId: '1f66a82e-5e20-45fc-a9f0-2fa70895ec75', tagCode: 'exterior', sortOrder: 0 }],
+    } : options.approvalCandidate) }) }) }),
     findOneAndUpdate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(options.revision === undefined ? { _id: revisionId, revisionNumber: 1 } : options.revision) }),
   };
   const properties = {
@@ -26,7 +30,7 @@ function lifecycleService(options: { currentPublicRevisionId?: string; revision?
 }
 
 describe('MAZAD-019 property revision lifecycle', () => {
-  it('revalidates required media and active catalogs at submit time', async () => {
+  const submissionService = () => {
     const activeQuery = (value: unknown) => ({ session: () => ({ lean: () => ({ exec: jest.fn().mockResolvedValue(value) }) }) });
     const countQuery = (value: number) => ({ session: () => ({ exec: jest.fn().mockResolvedValue(value) }) });
     const service = Object.create(PropertiesService.prototype) as any;
@@ -35,15 +39,53 @@ describe('MAZAD-019 property revision lifecycle', () => {
       propertyTypes: { findOne: jest.fn().mockReturnValue(activeQuery({ purposeCategoryId: { toString: () => 'category' } })) },
       options: { countDocuments: jest.fn().mockReturnValue(countQuery(1)) },
     });
+    return service;
+  };
+
+  const submissionCandidate = (overrides: Record<string, unknown> = {}) => ({
+    totalPriceMinor: 100, currency: 'EGP', marketingMode: 'SELF_SERVICE', paymentMethodCodes: ['cash'],
+    purposeCategoryId: '64b000000000000000000010', purposeSubcategoryId: '64b000000000000000000011',
+    livingRooms: 1, bedrooms: 1, kitchens: 1, bathrooms: 1,
+    galleryMedia: ['exterior', 'entrance', 'living_1', 'bedroom_1', 'kitchen_1', 'bathroom_1'].map(slotId => ({ slotId })),
+    privateEvidenceAssets: [],
+    ...overrides,
+  });
+
+  it('rejects SELF_SERVICE submission when a required classified photo is missing', async () => {
+    const service = submissionService();
     await expect(service.validateRevisionForSubmission({
-      totalPriceMinor: 100, currency: 'EGP', marketingMode: 'SELF_SERVICE', paymentMethodCodes: ['cash'],
-      purposeCategoryId: '64b000000000000000000010', purposeSubcategoryId: '64b000000000000000000011',
-      livingRooms: 1, bedrooms: 1, kitchens: 1, bathrooms: 1,
+      ...submissionCandidate(),
       galleryMedia: [{ slotId: 'exterior' }, { slotId: 'entrance' }, { slotId: 'living_1' }, { slotId: 'bedroom_1' }, { slotId: 'kitchen_1' }],
     }, {})).rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.REQUIRED_PHOTO_SLOTS_MISSING, missingPhotoSlots: ['bathroom_1'] }) });
   });
 
-  it('atomically approves the current pending revision and moves the public pointer', async () => {
+  it('allows SELF_SERVICE submission when every required classified photo exists', async () => {
+    await expect(submissionService().validateRevisionForSubmission(submissionCandidate(), {})).resolves.toBeUndefined();
+  });
+
+  it('allows PLATFORM_MANAGED customer submission with zero advertiser public photos', async () => {
+    await expect(submissionService().validateRevisionForSubmission(submissionCandidate({
+      marketingMode: 'PLATFORM_MANAGED', galleryMedia: [],
+    }), {})).resolves.toBeUndefined();
+  });
+
+  it('keeps private evidence independent and optional under the existing submission contract', async () => {
+    await expect(submissionService().validateRevisionForSubmission(submissionCandidate({
+      marketingMode: 'PLATFORM_MANAGED', galleryMedia: [], privateEvidenceAssets: [],
+    }), {})).resolves.toBeUndefined();
+  });
+
+  it('blocks approval/publication until PLATFORM_MANAGED has at least one public photo', async () => {
+    const context = lifecycleService({ approvalCandidate: {
+      _id: revisionId, decisionVersion: 0, marketingMode: 'PLATFORM_MANAGED', livingRooms: 1, bedrooms: 1, kitchens: 1, bathrooms: 1, galleryMedia: [],
+    } });
+    await expect(context.service.reviewForAdmin(propertyId, revisionId, 0, 'approved', undefined, actorId))
+      .rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.REQUIRED_PHOTO_SLOTS_MISSING }) });
+    expect(context.revisions.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(context.properties.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('approves PLATFORM_MANAGED publication with one valid platform photo without room-slot coverage', async () => {
     const context = lifecycleService();
     await expect(context.service.reviewForAdmin(propertyId, revisionId, 0, 'approved', undefined, actorId)).resolves.toEqual({ property: { id: propertyId } });
     expect(context.revisions.findOneAndUpdate).toHaveBeenCalledWith(
@@ -68,7 +110,7 @@ describe('MAZAD-019 property revision lifecycle', () => {
   });
 
   it('returns deterministic conflict for a stale or repeated decision', async () => {
-    const context = lifecycleService({ revision: null });
+    const context = lifecycleService({ revision: null, approvalCandidate: null });
     await expect(context.service.reviewForAdmin(propertyId, revisionId, 0, 'approved', undefined, actorId)).rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.REVISION_VERSION_CONFLICT }) });
     expect(context.session.endSession).toHaveBeenCalled();
   });
@@ -77,10 +119,18 @@ describe('MAZAD-019 property revision lifecycle', () => {
     const service = Object.create(PropertiesService.prototype) as any;
     const dto = service.toMarketplacePublic({
       _id: { toString: () => propertyId }, status: 'approved', lifecycleStatus: 'active',
+      advertiserAccountId: { toString: () => actorId }, createdByActorId: { toString: () => actorId }, lifecycleVersion: 4,
       currentPublicRevisionId: { _id: { toString: () => '64b000000000000000000077' }, revisionNumber: 1, title: 'public', totalPriceMinor: 100, currency: 'EGP', galleryMedia: [] },
       pendingRevisionId: { _id: { toString: () => revisionId }, revisionNumber: 2, title: 'secret pending', totalPriceMinor: 200, currency: 'EGP', galleryMedia: [] },
     });
     expect(dto.title).toBe('public');
     expect(JSON.stringify(dto)).not.toContain('secret pending');
+    expect(dto).not.toHaveProperty('advertiserAccountId');
+    expect(dto).not.toHaveProperty('advertiserAccountTypeSnapshot');
+    expect(dto).not.toHaveProperty('createdByActorId');
+    expect(dto).not.toHaveProperty('revisionId');
+    expect(dto).not.toHaveProperty('lifecycleVersion');
+    expect(dto).not.toHaveProperty('pendingRevisionId');
+    expect(dto).not.toHaveProperty('currentPublicRevisionId');
   });
 });
