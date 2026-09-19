@@ -15,6 +15,7 @@ import { CloudinaryModule } from '../config/cloudinary.module';
 import { PropertyRevision, PropertyRevisionSchema } from './schemas/property-revision.schema';
 import { PropertyPurposeCategoriesModule } from '../property-purpose-categories/property-purpose-categories.module';
 import { UsersModule } from '../users/users.module';
+import { PropertyAuctionLockService } from './property-auction-lock.service';
 
 @Module({
   imports: [PassportModule, AuditModule, CloudinaryModule, PropertyPurposeCategoriesModule, UsersModule, MongooseModule.forFeature([
@@ -24,7 +25,7 @@ import { UsersModule } from '../users/users.module';
     { name: Governorate.name, schema: GovernorateSchema },
   ])],
   controllers: [PropertiesController, AdminPropertiesController],
-  providers: [PropertiesService, RolesGuard],
+  providers: [PropertiesService, RolesGuard, PropertyAuctionLockService],
   exports: [PropertiesService],
 })
 export class PropertiesModule {}

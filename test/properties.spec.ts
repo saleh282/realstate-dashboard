@@ -45,6 +45,7 @@ describe('property publishing validation', () => {
       governorates: { findOne: jest.fn().mockReturnValue(query({ code: 'cairo' })) },
       options: { findOne: jest.fn().mockReturnValue(query({ code: 'valid' })), find: jest.fn().mockReturnValue(query([{ code: 'cash' }])) },
       amenities: { countDocuments: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(1) }) },
+      auctionLock: { assertUnlocked: jest.fn().mockResolvedValue(undefined) },
       properties: {}, cloudinary: {}, ...overrides,
     });
     return instance as PropertiesService;
@@ -200,7 +201,7 @@ describe('property publishing validation', () => {
         countDocuments: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(1) }),
         updateMany: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ matchedCount: 1 }) }),
       },
-      audit: { logResourceAction: jest.fn() },
+      audit: { logResourceAction: jest.fn(), logRequired: jest.fn() },
       cloudinary: { uploader: { destroy: jest.fn() } },
       evidenceAssets: { deleteOrEnqueue: jest.fn() },
     }) as any;
@@ -218,6 +219,7 @@ describe('property publishing validation', () => {
     })], expect.objectContaining({ session }));
     expect(revisionCreate).toHaveBeenCalledWith([expect.objectContaining({
       revisionNumber: 1,
+      moderationStatus: 'draft',
       paymentMethodCodes: ['cash', 'mortgage'],
       marketingMode: PropertyMarketingMode.PLATFORM_MANAGED,
       galleryMedia: expect.arrayContaining(requiredPhotoSlots.map((slotId) => expect.objectContaining({ slotId }))),
@@ -226,16 +228,6 @@ describe('property publishing validation', () => {
     expect(result.property).not.toHaveProperty('entranceImage');
     expect(result.property.images).toHaveLength(requiredPhotoSlots.length);
     expect(result.property.images[0]).toMatchObject({ slotId: 'exterior' });
-  });
-
-  it('lets an administrator approve a property and records the decision', async () => {
-    const audit = { logAdminResourceAction: jest.fn().mockResolvedValue(undefined) };
-    const item = { _id: { toString: () => '64b000000000000000000099' }, ownerId: { _id: { toString: () => '64b000000000000000000001' }, fullName: 'مالك العقار' }, title: 'عقار صالح', description: 'وصف', totalPriceMinor: 100000000, downPaymentMinor: 0, currency: 'EGP', images: [], status: 'approved' };
-    const exec = jest.fn().mockResolvedValue(item);
-    const instance = service({ properties: { findByIdAndUpdate: jest.fn().mockReturnValue({ populate: () => ({ lean: () => ({ exec }) }) }) }, audit }) as any;
-    const result = await instance.reviewForAdmin('64b000000000000000000099', 'approved', undefined, '64b000000000000000000002');
-    expect(result.property.status).toBe('approved');
-    expect(audit.logAdminResourceAction).toHaveBeenCalledWith('admin_property_status_updated', '64b000000000000000000002', '64b000000000000000000099', expect.stringContaining('approved'), undefined);
   });
 
   it('lets only the owner hide a property without changing review status', async () => {

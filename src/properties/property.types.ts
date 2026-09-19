@@ -4,8 +4,14 @@ export enum PropertyMarketingMode {
 }
 
 export enum PropertyRevisionModerationStatus {
+  DRAFT = 'draft',
   PENDING_REVIEW = 'pending_review',
   APPROVED = 'approved',
   REJECTED = 'rejected',
-  HIDDEN = 'hidden',
+}
+
+export enum PropertyLifecycleStatus {
+  ACTIVE = 'active',
+  ARCHIVED = 'archived',
+  ADMIN_HIDDEN = 'admin_hidden',
 }

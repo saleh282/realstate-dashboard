@@ -5,9 +5,10 @@ import { SystemRole } from '../auth/roles.enum';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { ReviewPropertyDto } from './dto/review-property.dto';
+import { ReviewPropertyDto, UpdatePropertyLifecycleDto } from './dto/review-property.dto';
+import { PropertyLifecycleStatus } from './property.types';
 import { PropertiesService } from './properties.service';
-import { AdminCreatePropertyDto } from './dto/create-property.dto';
+import { AdminCreatePropertyDto, CreatePropertyDto } from './dto/create-property.dto';
 import { EvidenceErrorCode } from '../common/errors/evidence-error-codes';
 import { CapabilityGuard } from '../authorization/capability.guard';
 import { RequireCapabilities } from '../authorization/capabilities.decorator';
@@ -44,6 +45,19 @@ export class AdminPropertiesController {
   ) {
     const { advertiserAccountId, ...propertyDto } = dto;
     return this.service.createForAdmin(req.user.userId, advertiserAccountId, propertyDto as AdminCreatePropertyDto, files, req.ip);
+  }
+
+  @Post(':propertyId/revisions/proxy')
+  @RequireCapabilities(Capability.ADMIN_PROPERTY_PROXY_CREATE)
+  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'titleDeed', maxCount: 1 }], {
+    limits: { fileSize: 10 * 1024 * 1024, files: 22 },
+    fileFilter: (_req, file, cb) => {
+      const allowed = file.fieldname === 'titleDeed' ? allowedEvidence : allowedImages;
+      return allowed.has(file.mimetype) ? cb(null, true) : cb(new BadRequestException({ message: 'صيغة أحد ملفات العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
+    },
+  }))
+  createRevisionForAccount(@Param('propertyId') id: string, @Req() req: any, @Body() dto: CreatePropertyDto, @UploadedFiles() files: { images?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] }) {
+    return this.service.createDraftRevisionForAdmin(req.user.userId, id, dto, files, req.ip);
   }
 
   @Get(':propertyId')
@@ -87,6 +101,18 @@ export class AdminPropertiesController {
 
   @Patch(':propertyId/status')
   review(@Param('propertyId') id: string, @Body() dto: ReviewPropertyDto, @Req() req: any) {
-    return this.service.reviewForAdmin(id, dto.status, dto.reason, req.user.userId, req.ip);
+    return this.service.reviewForAdmin(id, dto.revisionId, dto.version, dto.status, dto.reason, req.user.userId, req.ip);
+  }
+
+  @Patch(':propertyId/revisions/:revisionId/review')
+  reviewRevision(@Param('propertyId') id: string, @Param('revisionId') revisionId: string, @Body() dto: ReviewPropertyDto, @Req() req: any) {
+    if (dto.revisionId !== revisionId) throw new BadRequestException({ message: 'معرّف النسخة غير متطابق', code: 'PROPERTY_STATE_CONFLICT' });
+    return this.service.reviewForAdmin(id, revisionId, dto.version, dto.status, dto.reason, req.user.userId, req.ip);
+  }
+
+  @Patch(':propertyId/lifecycle')
+  updateLifecycle(@Param('propertyId') id: string, @Body() dto: UpdatePropertyLifecycleDto, @Req() req: any) {
+    if (dto.status === 'archived') throw new BadRequestException({ message: 'الإيقاف العادي ينفذه المعلن', code: 'PROPERTY_STATE_CONFLICT' });
+    return this.service.forceLifecycleForAdmin(id, dto.status as PropertyLifecycleStatus.ACTIVE | PropertyLifecycleStatus.ADMIN_HIDDEN, dto.version, dto.reason, req.user.userId, req.ip);
   }
 }
