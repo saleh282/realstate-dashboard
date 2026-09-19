@@ -16,6 +16,7 @@ export class PropertyAsset {
   @Prop({ enum: ['jpg', 'jpeg', 'png', 'webp', 'pdf'] }) format?: 'jpg' | 'jpeg' | 'png' | 'webp' | 'pdf';
   @Prop({ min: 1 }) bytes?: number;
   @Prop() label?: string;
+  @Prop({ trim: true, maxlength: 80 }) slotId?: string;
 }
 
 const PropertyAssetSchema = SchemaFactory.createForClass(PropertyAsset);

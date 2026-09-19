@@ -100,6 +100,33 @@ describe('authenticated KYC asset delivery', () => {
     expect(result).not.toHaveProperty('secureUrl');
   });
 
+  it('uploads classified public property media with a safe generated provider name', async () => {
+    const upload_stream = jest.fn((options, callback) => {
+      const stream = new PassThrough();
+      stream.on('finish', () => callback(null, {
+        public_id: 'public/random',
+        secure_url: 'https://cdn.example/public/random.png',
+      }));
+      return stream;
+    });
+    const service = new CloudinaryAssetService({ uploader: { upload_stream } });
+    const result = await service.uploadPublicPropertyMedia(
+      { buffer: Buffer.from('bytes'), originalname: '../../unsafe.png' } as Express.Multer.File,
+      { mime: 'image/png', format: 'png', width: 1, height: 1 },
+    );
+    expect(upload_stream).toHaveBeenCalledWith(expect.objectContaining({
+      folder: 'real-estate-auction/public/properties/photos',
+      use_filename: false,
+      unique_filename: true,
+      overwrite: false,
+    }), expect.any(Function));
+    expect(result).toMatchObject({
+      publicId: 'public/random',
+      secureUrl: 'https://cdn.example/public/random.png',
+      classification: AssetClassification.PUBLIC_PROPERTY_MEDIA,
+    });
+  });
+
   it('durably queues cleanup when provider deletion fails', async () => {
     const exec = jest.fn().mockResolvedValue(undefined);
     const cleanupTasks = { updateOne: jest.fn().mockReturnValue({ exec }) };

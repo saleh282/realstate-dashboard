@@ -61,7 +61,7 @@ describe('V1 EGP minor-unit contract', () => {
       governorateCode: 'cairo', city: 'Cairo', district: 'District', latitude: 30, longitude: 31, area: 100,
       bedrooms: 2, livingRooms: 1, kitchens: 1, bathrooms: 1, floor: 1, totalFloors: 5, buildingYear: 2020,
       finishingStatusCode: 'finished', deliveryStatusCode: 'ready', amenityCodes: [], isPriceNegotiable: false,
-      paymentMethodCodes: ['cash'], marketingMode: 'SELF_SERVICE', imageLabels: ['front'], coverImageIndex: 0, hidePhone: false,
+      paymentMethodCodes: ['cash'], marketingMode: 'SELF_SERVICE', imageLabels: ['front'], imageSlotIds: ['exterior'], coverImageIndex: 0, hidePhone: false,
       currency: EGP_CURRENCY,
     };
     const valid = plainToInstance(CreatePropertyDto, { ...base, totalPriceMinor: String(MONEY_MINOR_MAX) });

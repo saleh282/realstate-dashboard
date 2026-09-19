@@ -5,7 +5,11 @@ import { AccountType, BrokerStatus } from '../src/users/identity.types';
 import { PropertyMarketingMode } from '../src/properties/property.types';
 import { PropertyErrorCode } from '../src/common/errors/property-error-codes';
 
-const query = (value: unknown) => ({ lean: () => ({ exec: jest.fn().mockResolvedValue(value) }) });
+const query = (value: unknown) => {
+  const chain: any = { lean: () => ({ exec: jest.fn().mockResolvedValue(value) }) };
+  chain.populate = () => chain;
+  return chain;
+};
 const validPng = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010802000000000000000000000049454e4400000000', 'hex');
 
 describe('property publishing validation', () => {
@@ -13,6 +17,13 @@ describe('property publishing validation', () => {
   const adminId = '64b000000000000000000002';
   const categoryId = '64b000000000000000000010';
   const subcategoryId = '64b000000000000000000011';
+  const requiredPhotoSlots = [
+    'exterior', 'entrance', 'living_1', 'bedroom_1', 'bedroom_2', 'bedroom_3',
+    'kitchen_1', 'bathroom_1', 'bathroom_2',
+  ];
+  const validFiles = () => ({
+    images: requiredPhotoSlots.map((_, index) => ({ mimetype: 'image/png', buffer: Buffer.concat([validPng, Buffer.from([index])]) } as any)),
+  });
   const dto: any = {
     operationType: 'sale', purposeCategoryId: categoryId, purposeSubcategoryId: subcategoryId, title: 'شقة ممتازة للبيع',
     description: 'وصف تفصيلي صالح للعقار المعروض للبيع', governorateCode: 'cairo',
@@ -21,7 +32,8 @@ describe('property publishing validation', () => {
     totalFloors: 5, buildingYear: 2020, finishingStatusCode: 'fully_finished',
     deliveryStatusCode: 'immediate', amenityCodes: ['elevator'], totalPriceMinor: 100000000,
     currency: 'EGP', isPriceNegotiable: true, paymentMethodCodes: ['cash'], marketingMode: PropertyMarketingMode.SELF_SERVICE,
-    imageLabels: ['الواجهة'], coverImageIndex: 0, advertiserType: 'broker', hidePhone: false,
+    imageLabels: requiredPhotoSlots, imageSlotIds: requiredPhotoSlots,
+    coverImageIndex: 0, advertiserType: 'broker', hidePhone: false,
   };
 
   function service(overrides: Record<string, unknown> = {}) {
@@ -42,9 +54,36 @@ describe('property publishing validation', () => {
     await expect(service().create(userId, dto, {})).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it.each(requiredPhotoSlots)('rejects submission when required photo slot %s is missing', async (missingSlot) => {
+    const suppliedSlots = requiredPhotoSlots.filter((slot) => slot !== missingSlot);
+    await expect(service().create(userId, {
+      ...dto,
+      imageLabels: suppliedSlots,
+      imageSlotIds: suppliedSlots,
+    }, {
+      images: suppliedSlots.map(() => ({ mimetype: 'image/png', buffer: validPng } as any)),
+    })).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'PROPERTY_REQUIRED_PHOTO_SLOTS_MISSING',
+        missingPhotoSlots: [missingSlot],
+      }),
+    });
+  });
+
+  it('requires exterior and entrance to use distinct photo content', async () => {
+    const files = validFiles();
+    files.images[1].buffer = files.images[0].buffer;
+    await expect(service().create(userId, dto, files)).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'PROPERTY_PHOTO_SLOT_MEDIA_DUPLICATED',
+        duplicatePhotoSlots: ['exterior', 'entrance'],
+      }),
+    });
+  });
+
   it('rejects excessive public image count before upload', async () => {
     const images = Array.from({ length: 21 }, () => ({ mimetype: 'image/png', buffer: Buffer.from('x') } as any));
-    await expect(service().create(userId, { ...dto, imageLabels: Array(21).fill('x') }, { images }))
+    await expect(service().create(userId, { ...dto, imageLabels: Array(21).fill('x'), imageSlotIds: Array.from({ length: 21 }, (_, index) => `additional_${index + 1}`) }, { images }))
       .rejects.toMatchObject({ response: expect.objectContaining({ code: 'EVIDENCE_FILE_COUNT_EXCEEDED' }) });
   });
 
@@ -54,9 +93,7 @@ describe('property publishing validation', () => {
       propertyTypes: { findOne: jest.fn().mockReturnValue(query(null)) },
       upload,
     }) as any;
-    await expect(instance.create(userId, dto, {
-      images: [{ mimetype: 'image/png', buffer: validPng }],
-    })).rejects.toThrow('نوع العقار');
+    await expect(instance.create(userId, dto, validFiles())).rejects.toThrow('نوع العقار');
     expect(upload).not.toHaveBeenCalled();
   });
 
@@ -119,12 +156,12 @@ describe('property publishing validation', () => {
     const instance = service({
       propertyTypes: { findOne: jest.fn().mockReturnValue(query({ _id: { toString: () => subcategoryId }, code: 'apartment', purposeCategoryId: { toString: () => '64b000000000000000000099' } })) },
     }) as any;
-    await expect(instance.create(userId, dto, { images: [{ mimetype: 'image/png', buffer: validPng } as any] }))
+    await expect(instance.create(userId, dto, validFiles()))
       .rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.PURPOSE_HIERARCHY_MISMATCH }) });
   });
 
   it('rejects missing/inactive purpose parents and children', async () => {
-    const files = { images: [{ mimetype: 'image/png', buffer: validPng } as any] };
+    const files = validFiles();
     await expect(service({ purposeCategories: { findOne: jest.fn().mockReturnValue(query(null)) } }).create(userId, dto, files))
       .rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.PURPOSE_CATEGORY_INVALID }) });
     await expect(service({ propertyTypes: { findOne: jest.fn().mockReturnValue(query(null)) } }).create(userId, dto, files))
@@ -132,7 +169,7 @@ describe('property publishing validation', () => {
   });
 
   it('rejects empty, unknown, or inactive payment-method selections', async () => {
-    const files = { images: [{ mimetype: 'image/png', buffer: validPng } as any] };
+    const files = validFiles();
     await expect(service().create(userId, { ...dto, paymentMethodCodes: [] }, files))
       .rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.PAYMENT_METHODS_INVALID }) });
     const instance = service({ options: { findOne: jest.fn().mockReturnValue(query({ code: 'valid' })), find: jest.fn().mockReturnValue(query([])) } });
@@ -140,7 +177,7 @@ describe('property publishing validation', () => {
       .rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.PAYMENT_METHODS_INVALID }) });
   });
 
-  it('creates revision 1 with server attribution, multiple payments, and separate entrance media', async () => {
+  it('creates revision 1 with one categorized public-media collection', async () => {
     const propertyId = { toString: () => '64b000000000000000000099' };
     const revisionCreate = jest.fn().mockResolvedValue([]);
     const propertyCreate = jest.fn().mockImplementation(async ([value]: any[]) => [{
@@ -167,14 +204,12 @@ describe('property publishing validation', () => {
       cloudinary: { uploader: { destroy: jest.fn() } },
       evidenceAssets: { deleteOrEnqueue: jest.fn() },
     }) as any;
-    instance.uploadPublicImage = jest.fn()
-      .mockResolvedValueOnce({ url: 'https://cdn.example/gallery.jpg', publicId: 'gallery', resourceType: 'image', deliveryType: 'upload', classification: AssetClassification.PUBLIC_PROPERTY_MEDIA })
-      .mockResolvedValueOnce({ url: 'https://cdn.example/entrance.jpg', publicId: 'entrance', resourceType: 'image', deliveryType: 'upload', classification: AssetClassification.PUBLIC_PROPERTY_MEDIA });
-
-    const result = await instance.create(userId, { ...dto, advertiserType: 'broker', advertiserAccountId: '64b000000000000000000099', paymentMethodCodes: ['mortgage', 'cash'], marketingMode: PropertyMarketingMode.PLATFORM_MANAGED }, {
-      images: [{ mimetype: 'image/png', buffer: validPng } as any],
-      entranceImage: [{ mimetype: 'image/png', buffer: validPng } as any],
+    instance.uploadPublicImage = jest.fn().mockImplementation(() => {
+      const index = instance.uploadPublicImage.mock.calls.length;
+      return Promise.resolve({ url: `https://cdn.example/photo-${index}.jpg`, publicId: `photo-${index}`, resourceType: 'image', deliveryType: 'upload', classification: AssetClassification.PUBLIC_PROPERTY_MEDIA });
     });
+
+    const result = await instance.create(userId, { ...dto, advertiserType: 'broker', advertiserAccountId: '64b000000000000000000099', paymentMethodCodes: ['mortgage', 'cash'], marketingMode: PropertyMarketingMode.PLATFORM_MANAGED }, validFiles());
 
     expect(propertyCreate).toHaveBeenCalledWith([expect.objectContaining({
       advertiserAccountTypeSnapshot: AccountType.USER,
@@ -185,12 +220,12 @@ describe('property publishing validation', () => {
       revisionNumber: 1,
       paymentMethodCodes: ['cash', 'mortgage'],
       marketingMode: PropertyMarketingMode.PLATFORM_MANAGED,
-      entranceImageAsset: expect.objectContaining({ publicId: 'entrance' }),
-      galleryMedia: [expect.objectContaining({ publicId: 'gallery' })],
+      galleryMedia: expect.arrayContaining(requiredPhotoSlots.map((slotId) => expect.objectContaining({ slotId }))),
       privateEvidenceAssets: [],
     })], expect.objectContaining({ session }));
-    expect(result.property.entranceImage).toEqual(expect.objectContaining({ url: 'https://cdn.example/entrance.jpg' }));
-    expect(result.property.images).toEqual([{ url: 'https://cdn.example/gallery.jpg', label: 'الواجهة' }]);
+    expect(result.property).not.toHaveProperty('entranceImage');
+    expect(result.property.images).toHaveLength(requiredPhotoSlots.length);
+    expect(result.property.images[0]).toMatchObject({ slotId: 'exterior' });
   });
 
   it('lets an administrator approve a property and records the decision', async () => {
@@ -242,9 +277,9 @@ describe('property publishing validation', () => {
         classification: AssetClassification.PRIVATE_PROPERTY_EVIDENCE,
       },
     };
-    const publicDto = instance.toPublic(stored);
+    const publicDto = instance.toOwner(stored);
     const adminDto = instance.toAdmin(stored, true);
-    expect(publicDto.images).toEqual([{ url: 'https://cdn.example/image.jpg', label: 'front' }]);
+    expect(publicDto.images).toEqual([{ url: 'https://cdn.example/image.jpg', label: 'front', slotId: undefined }]);
     expect(publicDto).not.toHaveProperty('titleDeed');
     expect(adminDto).not.toHaveProperty('titleDeed');
     expect(adminDto.hasTitleDeed).toBe(true);
@@ -252,7 +287,7 @@ describe('property publishing validation', () => {
   });
 
   it('keeps a new revision-backed aggregate readable before its revision is populated', () => {
-    const publicDto = (service() as any).toPublic({
+    const publicDto = (service() as any).toOwner({
       _id: { toString: () => '64b000000000000000000099' },
       propertyContractVersion: 1,
       totalPriceMinor: 1000,
@@ -264,8 +299,8 @@ describe('property publishing validation', () => {
     expect(publicDto).not.toHaveProperty('downPaymentMinor');
   });
 
-  it('projects revision media without leaking entrance or private-evidence provider identifiers', () => {
-    const publicDto = (service() as any).toPublic({
+  it('unifies historical entrance media on read without fabricating a slot classification', () => {
+    const publicDto = (service() as any).toOwner({
       _id: { toString: () => '64b000000000000000000099' },
       status: 'pending_review',
       pendingRevisionId: {
@@ -280,9 +315,36 @@ describe('property publishing validation', () => {
         moderationStatus: 'pending_review',
       },
     });
-    expect(publicDto.images).toEqual([{ url: 'https://cdn.example/gallery.jpg', label: 'front' }]);
-    expect(publicDto.entranceImage).toEqual({ url: 'https://cdn.example/entrance.jpg', label: 'entrance' });
+    expect(publicDto.images).toEqual([
+      { url: 'https://cdn.example/gallery.jpg', label: 'front', slotId: undefined },
+      { url: 'https://cdn.example/entrance.jpg', label: 'entrance', slotId: undefined },
+    ]);
+    expect(publicDto).not.toHaveProperty('entranceImage');
     expect(JSON.stringify(publicDto)).not.toMatch(/provider-id|privateEvidenceAssets/);
+  });
+
+  it('never projects pending revision media through the public marketplace DTO', () => {
+    const dto = (service() as any).toMarketplacePublic({
+      _id: { toString: () => '64b000000000000000000099' },
+      status: 'approved',
+      propertyContractVersion: 1,
+      totalPriceMinor: 1000,
+      currency: 'EGP',
+      images: [{ url: 'https://cdn.example/legacy.jpg', publicId: 'legacy-id' }],
+      pendingRevisionId: {
+        _id: { toString: () => '64b000000000000000000088' },
+        revisionNumber: 2,
+        title: 'Unpublished edit',
+        totalPriceMinor: 2000,
+        currency: 'EGP',
+        galleryMedia: [{ url: 'https://cdn.example/pending.jpg', publicId: 'pending-id' }],
+        entranceImageAsset: { url: 'https://cdn.example/pending-entrance.jpg', publicId: 'pending-entrance-id' },
+        privateEvidenceAssets: [{ publicId: 'private-id' }],
+      },
+    });
+    expect(dto.images).toEqual([{ url: 'https://cdn.example/legacy.jpg', label: undefined, slotId: undefined }]);
+    expect(dto.entranceImage).toBeUndefined();
+    expect(JSON.stringify(dto)).not.toMatch(/pending\.jpg|pending-entrance|private-id/);
   });
 
   it('allows the owner to access private evidence and denies an unrelated user', async () => {
@@ -308,4 +370,25 @@ describe('property publishing validation', () => {
     expect(evidenceAssets.downloadAuthenticatedAsset).toHaveBeenCalledWith(expect.objectContaining({ publicId: 'private-deed' }));
     expect(audit.logResourceAction).toHaveBeenCalled();
   });
+
+  it.each([AccountType.USER, AccountType.BROKER, AccountType.COMPANY])(
+    'denies a different %s account private property evidence without exposing asset existence',
+    async () => {
+      const stored = {
+        _id: { toString: () => '64b000000000000000000099' },
+        ownerId: { toString: () => '64b000000000000000000001' },
+        titleDeed: { publicId: 'private-deed', resourceType: 'raw' },
+      };
+      const properties = { findOne: jest.fn().mockReturnValue(query(null)) };
+      const evidenceAssets = { downloadAuthenticatedAsset: jest.fn() };
+      const instance = service({ properties, evidenceAssets }) as any;
+      await expect(instance.downloadPrivateEvidenceForOwner(
+        '64b000000000000000000002',
+        stored._id.toString(),
+        undefined,
+        0,
+      )).rejects.toMatchObject({ response: expect.objectContaining({ code: 'EVIDENCE_NOT_FOUND' }) });
+      expect(evidenceAssets.downloadAuthenticatedAsset).not.toHaveBeenCalled();
+    },
+  );
 });

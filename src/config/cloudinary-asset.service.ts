@@ -18,6 +18,50 @@ export class CloudinaryAssetService {
     private readonly cleanupTasks?: Model<EvidenceCleanupTaskDocument>,
   ) {}
 
+  async uploadPublicPropertyMedia(
+    file: Express.Multer.File,
+    detected: DetectedEvidenceFile,
+  ): Promise<StoredAssetMetadata & { secureUrl: string }> {
+    if (detected.mime === 'application/pdf') {
+      throw new ServiceUnavailableException({
+        message: 'صيغة صورة العقار غير مدعومة',
+        code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED,
+      });
+    }
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        const stream = this.cloudinary.uploader.upload_stream(
+          {
+            folder: 'real-estate-auction/public/properties/photos',
+            resource_type: 'image',
+            type: 'upload',
+            use_filename: false,
+            unique_filename: true,
+            overwrite: false,
+          },
+          (error: unknown, uploadResult: unknown) =>
+            error || !uploadResult ? reject(error ?? new Error('Missing upload result')) : resolve(uploadResult),
+        );
+        streamifier.createReadStream(file.buffer).pipe(stream);
+      });
+      return {
+        publicId: result.public_id,
+        secureUrl: result.secure_url,
+        resourceType: 'image',
+        deliveryType: 'upload',
+        classification: AssetClassification.PUBLIC_PROPERTY_MEDIA,
+        format: detected.format,
+        bytes: file.buffer.length,
+      };
+    } catch {
+      this.logger.error('Public property media upload failed');
+      throw new ServiceUnavailableException({
+        message: 'تعذر رفع صورة العقار، حاول مرة أخرى لاحقاً',
+        code: EvidenceErrorCode.UPLOAD_FAILED,
+      });
+    }
+  }
+
   async uploadPrivateEvidence(
     file: Express.Multer.File,
     folder: string,

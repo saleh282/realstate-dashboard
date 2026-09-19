@@ -20,14 +20,14 @@ export class PropertiesController {
   @Post()
   @UseGuards(JwtAuthGuard, CapabilityGuard)
   @RequireCapabilities(Capability.PROPERTY_CREATE)
-  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'entranceImage', maxCount: 1 }, { name: 'titleDeed', maxCount: 1 }], {
+  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'titleDeed', maxCount: 1 }], {
     limits: { fileSize: 10 * 1024 * 1024, files: 22 },
     fileFilter: (_req, file, cb) => {
       const allowed = file.fieldname === 'titleDeed' ? allowedDeeds : allowedImages;
       return allowed.has(file.mimetype) ? cb(null, true) : cb(new BadRequestException({ message: 'صيغة أحد ملفات العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
     },
   }))
-  create(@Req() req: any, @Body() dto: CreatePropertyDto, @UploadedFiles() files: { images?: Express.Multer.File[]; entranceImage?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] }) {
+  create(@Req() req: any, @Body() dto: CreatePropertyDto, @UploadedFiles() files: { images?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] }) {
     return this.service.createSelf(req.user.userId, dto, files, req.ip);
   }
 
@@ -61,6 +61,28 @@ export class PropertiesController {
       'Content-Type': evidence.contentType,
       'Content-Disposition': 'inline; filename="property-evidence"',
       'Cache-Control': 'private, no-store, max-age=0',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    return new StreamableFile(evidence.buffer);
+  }
+
+  @Get('mine/:propertyId/revisions/:revisionId/evidence/:evidenceIndex')
+  @UseGuards(JwtAuthGuard, CapabilityGuard)
+  @RequireCapabilities(Capability.PROPERTY_READ_OWN)
+  async getOwnPrivateEvidence(
+    @Req() req: any,
+    @Param('propertyId') id: string,
+    @Param('revisionId') revisionId: string,
+    @Param('evidenceIndex') rawIndex: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    if (!/^\d+$/.test(rawIndex)) throw new BadRequestException({ message: 'معرّف ملف الإثبات غير صالح', code: EvidenceErrorCode.NOT_FOUND });
+    const evidence = await this.service.downloadPrivateEvidenceForOwner(req.user.userId, id, revisionId, Number(rawIndex), req.ip);
+    response.set({
+      'Content-Type': evidence.contentType,
+      'Content-Disposition': 'inline; filename="property-evidence"',
+      'Cache-Control': 'private, no-store, max-age=0',
+      Pragma: 'no-cache',
       'X-Content-Type-Options': 'nosniff',
     });
     return new StreamableFile(evidence.buffer);

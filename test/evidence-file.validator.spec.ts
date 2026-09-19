@@ -40,4 +40,12 @@ describe('private evidence file validation', () => {
     try { validateEvidenceFile(file(Buffer.from('%PDF-1.7 without eof'), 'application/pdf'), policy); fail('expected rejection'); }
     catch (error) { expect(codeOf(error).code).toBe(EvidenceErrorCode.FILE_INVALID); }
   });
+
+  it('rejects image dimensions above the configured pixel bound with a stable code', () => {
+    const overDimension = Buffer.from(png);
+    overDimension.writeUInt32BE(100, 16);
+    overDimension.writeUInt32BE(100, 20);
+    try { validateEvidenceFile(file(overDimension), policy); fail('expected rejection'); }
+    catch (error) { expect(codeOf(error).code).toBe(EvidenceErrorCode.IMAGE_DIMENSIONS_INVALID); }
+  });
 });
