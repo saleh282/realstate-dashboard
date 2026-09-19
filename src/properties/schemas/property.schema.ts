@@ -3,6 +3,7 @@ import { HydratedDocument, Types } from 'mongoose';
 import { EGP_CURRENCY, isMoneyMinorAmount } from '../../common/money/money';
 import { AssetClassification, EvidenceDeliveryType } from '../../config/evidence-asset.types';
 import { AccountType } from '../../users/identity.types';
+import { PropertyLifecycleStatus } from '../property.types';
 
 export type PropertyDocument = HydratedDocument<Property>;
 
@@ -31,6 +32,11 @@ export class Property {
   @Prop({ type: Types.ObjectId, ref: 'PropertyRevision' }) currentPublicRevisionId?: Types.ObjectId;
   @Prop({ type: Types.ObjectId, ref: 'PropertyRevision' }) pendingRevisionId?: Types.ObjectId;
   @Prop({ default: 0, min: 0 }) revisionSequence: number;
+  @Prop({ required: true, enum: PropertyLifecycleStatus, default: PropertyLifecycleStatus.ACTIVE, index: true }) lifecycleStatus: PropertyLifecycleStatus;
+  @Prop({ default: 0, min: 0 }) lifecycleVersion: number;
+  @Prop() publishedAt?: Date;
+  @Prop() archivedAt?: Date;
+  @Prop({ trim: true, maxlength: 1000 }) lifecycleReason?: string;
   @Prop({ min: 1 }) propertyContractVersion?: number;
   @Prop() propertyContractMigratedAt?: Date;
   @Prop({ trim: true }) propertyContractMigrationRunId?: string;

@@ -451,6 +451,47 @@ export const accountDeletionIndexesMigration: MigrationDefinition = {
   },
 };
 
+const propertyLifecycleIndexes = [
+  { collection: 'property_revisions', key: { propertyId: 1, moderationStatus: 1 }, options: { unique: true, partialFilterExpression: { moderationStatus: 'pending_review' }, name: 'property_one_pending_revision' } },
+  { collection: 'property_revisions', key: { propertyId: 1, moderationStatus: 1 }, options: { unique: true, partialFilterExpression: { moderationStatus: 'draft' }, name: 'property_one_draft_revision' } },
+  { collection: 'property_revisions', key: { moderationStatus: 1, submittedAt: 1, _id: 1 }, options: { name: 'property_revision_pending_queue' } },
+  { collection: 'properties', key: { lifecycleStatus: 1, currentPublicRevisionId: 1, createdAt: -1 }, options: { name: 'property_public_lifecycle' } },
+] as const;
+
+export const propertyLifecycleMigration: MigrationDefinition = {
+  id: '019-property-lifecycle',
+  version: 1,
+  description: 'Backfill aggregate lifecycle controls and create revision-state concurrency indexes',
+  dependencies: ['015-property-domain-indexes', '017-account-deletion-indexes'],
+  rollback: {
+    kind: 'none',
+    remediation: 'Disable lifecycle commands and inspect migration_ledger; retain all aggregate pointers and immutable revisions.',
+    restoreProcedure: 'Restore a verified snapshot to a separate database and reconcile pointer/state reports before reviewed repair.',
+  },
+  async preflight({ db }) {
+    const duplicateActive = await db.collection('property_revisions').aggregate([
+      { $match: { moderationStatus: { $in: ['draft', 'pending_review'] } } },
+      { $group: { _id: { propertyId: '$propertyId', moderationStatus: '$moderationStatus' }, count: { $sum: 1 } } },
+      { $match: { count: { $gt: 1 } } }, { $limit: 20 },
+    ]).toArray();
+    const missingLifecycle = await db.collection('properties').countDocuments({ lifecycleStatus: { $exists: false } });
+    let alreadyApplied = 0;
+    for (const expected of propertyLifecycleIndexes) if ((await existingIndexNames(db, expected.collection)).has(expected.options.name)) alreadyApplied += 1;
+    return { eligible: missingLifecycle + propertyLifecycleIndexes.length - alreadyApplied, alreadyApplied, blockers: duplicateActive.length ? [{ code: 'PROPERTY_MULTIPLE_ACTIVE_REVISIONS', message: `${duplicateActive.length} properties have duplicate draft/pending revisions and require manual reconciliation` }] : [], summary: { missingLifecycle, historicalFieldsFabricated: 0 } };
+  },
+  async migrateBatch({ db }) {
+    const result = await db.collection('properties').updateMany({ lifecycleStatus: { $exists: false } }, { $set: { lifecycleStatus: 'active', lifecycleVersion: 0 } });
+    for (const index of propertyLifecycleIndexes) await db.collection(index.collection).createIndex(index.key, index.options as any);
+    return { scanned: result.matchedCount, modified: result.modifiedCount + propertyLifecycleIndexes.length, done: true };
+  },
+  async validate({ db }) {
+    const missing: string[] = [];
+    for (const expected of propertyLifecycleIndexes) if (!(await existingIndexNames(db, expected.collection)).has(expected.options.name)) missing.push(expected.options.name);
+    const withoutLifecycle = await db.collection('properties').countDocuments({ lifecycleStatus: { $exists: false } });
+    return { valid: missing.length === 0 && withoutLifecycle === 0, errors: [...missing.map(name => ({ code: 'PROPERTY_LIFECYCLE_INDEX_MISSING', message: `Required property lifecycle index ${name} is missing` })), ...(withoutLifecycle ? [{ code: 'PROPERTY_LIFECYCLE_BACKFILL_INCOMPLETE', message: `${withoutLifecycle} properties lack lifecycle state` }] : [])], summary: { missingIndexes: missing, withoutLifecycle } };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
@@ -458,6 +499,7 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyAttributionRevisionMigration,
   propertyDomainIndexesMigration,
   accountDeletionIndexesMigration,
+  propertyLifecycleMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {
