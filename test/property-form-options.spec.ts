@@ -1,6 +1,6 @@
 import { PropertyFormOptionsController } from '../src/property-form-options/property-form-options.controller';
 import { DEFAULT_PROPERTY_OPTIONS, PROPERTY_OPTION_GROUPS } from '../src/property-options/property-option.constants';
-import { DEFAULT_CITIES, DEFAULT_GOVERNORATES } from '../src/governorates/governorate.constants';
+import { DEFAULT_CITIES, DEFAULT_GOVERNORATES, DEFAULT_GOVERNORATE_MAP_VIEWPORTS } from '../src/governorates/governorate.constants';
 
 describe('Property form options catalog', () => {
   it('returns active form catalogs including the purpose hierarchy', async () => {
@@ -32,9 +32,16 @@ describe('Property form options catalog', () => {
     }
     expect(new Set(DEFAULT_GOVERNORATES.map(item => item[0])).size).toBe(DEFAULT_GOVERNORATES.length);
     expect(DEFAULT_GOVERNORATES).toHaveLength(27);
+    expect(Object.keys(DEFAULT_GOVERNORATE_MAP_VIEWPORTS)).toHaveLength(27);
     expect(new Set(DEFAULT_CITIES.map(item => `${item[0]}:${item[1]}`)).size).toBe(DEFAULT_CITIES.length);
     for (const [governorateCode] of DEFAULT_GOVERNORATES) {
       expect(DEFAULT_CITIES.some(item => item[0] === governorateCode)).toBe(true);
+      const viewport = DEFAULT_GOVERNORATE_MAP_VIEWPORTS[governorateCode];
+      expect(viewport).toBeDefined();
+      expect(viewport.bounds.southWest.latitude).toBeLessThan(viewport.center.latitude);
+      expect(viewport.center.latitude).toBeLessThan(viewport.bounds.northEast.latitude);
+      expect(viewport.bounds.southWest.longitude).toBeLessThan(viewport.center.longitude);
+      expect(viewport.center.longitude).toBeLessThan(viewport.bounds.northEast.longitude);
     }
   });
 });

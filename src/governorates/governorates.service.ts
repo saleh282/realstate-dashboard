@@ -7,7 +7,7 @@ import { CreateCityDto } from './dto/create-city.dto';
 import { CreateGovernorateDto } from './dto/create-governorate.dto';
 import { UpdateCityDto } from './dto/update-city.dto';
 import { UpdateGovernorateDto } from './dto/update-governorate.dto';
-import { DEFAULT_CITIES, DEFAULT_GOVERNORATES, GOVERNORATE_ICON_OPTIONS } from './governorate.constants';
+import { DEFAULT_CITIES, DEFAULT_GOVERNORATES, DEFAULT_GOVERNORATE_MAP_VIEWPORTS, GOVERNORATE_ICON_OPTIONS, GovernorateMapViewport } from './governorate.constants';
 import { City, CityDocument } from './schemas/city.schema';
 import { Governorate, GovernorateDocument } from './schemas/governorate.schema';
 
@@ -20,11 +20,17 @@ export class GovernoratesService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    await Promise.all(DEFAULT_GOVERNORATES.map(([code, nameAr, nameEn, sortOrder]) => this.model.updateOne(
-      { code },
-      { $setOnInsert: { code, nameAr, nameEn, sortOrder, iconKey: 'location', isActive: true, usageCount: 0 } },
-      { upsert: true },
-    ).exec()));
+    await Promise.all(DEFAULT_GOVERNORATES.map(async ([code, nameAr, nameEn, sortOrder]) => {
+      await this.model.updateOne(
+        { code },
+        { $setOnInsert: { code, nameAr, nameEn, sortOrder, iconKey: 'location', isActive: true, usageCount: 0, mapViewport: DEFAULT_GOVERNORATE_MAP_VIEWPORTS[code] } },
+        { upsert: true },
+      ).exec();
+      await this.model.updateOne(
+        { code, mapViewport: { $exists: false } },
+        { $set: { mapViewport: DEFAULT_GOVERNORATE_MAP_VIEWPORTS[code] } },
+      ).exec();
+    }));
     const governorates = await this.model.find({ code: { $in: DEFAULT_GOVERNORATES.map(item => item[0]) } }).select({ _id: 1, code: 1 }).lean().exec();
     const ids = new Map(governorates.map(item => [item.code, item._id]));
     await Promise.all(DEFAULT_CITIES.map(([governorateCode, code, nameAr, nameEn], index) => {
@@ -75,6 +81,7 @@ export class GovernoratesService implements OnModuleInit {
   }
 
   async create(dto: CreateGovernorateDto, actor: string, ip?: string) {
+    this.assertMapViewport(dto.mapViewport);
     try {
       const item = await this.model.create({ ...dto, code: this.toCode(dto.nameEn), createdBy: new Types.ObjectId(actor) });
       await this.audit.logAdminResourceAction(AuditAction.ADMIN_GOVERNORATE_CREATED, actor, item._id.toString(), `created governorate ${item.code}`, ip);
@@ -87,6 +94,7 @@ export class GovernoratesService implements OnModuleInit {
 
   async update(id: string, dto: UpdateGovernorateDto, actor: string, ip?: string) {
     this.assertId(id, 'المحافظة');
+    if (dto.mapViewport) this.assertMapViewport(dto.mapViewport);
     const update = this.trimStrings(dto);
     const item = await this.model.findByIdAndUpdate(id, { ...update, updatedBy: new Types.ObjectId(actor) }, { new: true, runValidators: true }).lean().exec();
     if (!item) throw new NotFoundException('المحافظة غير موجودة');
@@ -164,8 +172,26 @@ export class GovernoratesService implements OnModuleInit {
     return code;
   }
 
+  private assertMapViewport(viewport: GovernorateMapViewport) {
+    const { center, bounds } = viewport;
+    if (
+      bounds.southWest.latitude >= bounds.northEast.latitude ||
+      bounds.southWest.longitude >= bounds.northEast.longitude
+    ) {
+      throw new BadRequestException('حدود عرض المحافظة غير صالحة');
+    }
+    if (
+      center.latitude < bounds.southWest.latitude ||
+      center.latitude > bounds.northEast.latitude ||
+      center.longitude < bounds.southWest.longitude ||
+      center.longitude > bounds.northEast.longitude
+    ) {
+      throw new BadRequestException('مركز المحافظة يجب أن يقع داخل حدود العرض');
+    }
+  }
+
   private toPublic(item: any) {
-    return { id: item._id.toString(), code: item.code, nameAr: item.nameAr, nameEn: item.nameEn, iconKey: item.iconKey, sortOrder: item.sortOrder };
+    return { id: item._id.toString(), code: item.code, nameAr: item.nameAr, nameEn: item.nameEn, iconKey: item.iconKey, sortOrder: item.sortOrder, mapViewport: item.mapViewport ?? null };
   }
 
   private toAdmin(item: any) {
