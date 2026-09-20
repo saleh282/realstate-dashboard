@@ -15,6 +15,8 @@ export class ManagedMarketingPackageSnapshot {
   @Prop({ trim: true, immutable: true }) detailsAr?: string;
   @Prop({ trim: true, immutable: true }) detailsEn?: string;
   @Prop({ type: [String], required: true, immutable: true }) includedServiceCodes: string[];
+  @Prop({ type: [String], required: true, immutable: true }) benefitsAr: string[];
+  @Prop({ type: [String], required: true, immutable: true }) benefitsEn: string[];
   @Prop({ required: true, immutable: true, validate: { validator: (value: unknown) => isMoneyMinorAmount(value, { positive: true }) } }) priceMinor: number;
   @Prop({ type: String, required: true, enum: [EGP_CURRENCY], immutable: true }) currency: typeof EGP_CURRENCY;
 }
@@ -40,3 +42,4 @@ export class ManagedMarketingRequest {
 export const ManagedMarketingRequestSchema = SchemaFactory.createForClass(ManagedMarketingRequest);
 ManagedMarketingRequestSchema.index({ advertiserAccountId: 1, createdAt: -1 }, { name: 'managed_marketing_request_advertiser_history' });
 ManagedMarketingRequestSchema.index({ status: 1, createdAt: 1, _id: 1 }, { name: 'managed_marketing_request_review_queue' });
+ManagedMarketingRequestSchema.index({ propertyRevisionId: 1 }, { unique: true, name: 'managed_marketing_request_revision_unique' });

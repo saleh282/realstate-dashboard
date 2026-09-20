@@ -73,6 +73,48 @@ describe('MAZAD-016 authorization policy matrix', () => {
     expect(AuthorizationPolicyService.can(verified, Capability.PROPERTY_CREATE)).toBe(true);
   });
 
+  it.each([
+    [AccountType.USER, BrokerStatus.NOT_APPLIED],
+    [AccountType.BROKER, BrokerStatus.APPROVED],
+    [AccountType.COMPANY, BrokerStatus.NOT_APPLIED],
+  ])('allows active %s accounts to request managed marketing without a KYC gate', (accountType, brokerStatus) => {
+    const identity = principal({
+      accountType,
+      brokerStatus,
+      verificationTrustState: VerificationTrustState.UNVERIFIED,
+    });
+    expect(AuthorizationPolicyService.can(identity, Capability.MANAGED_MARKETING_REQUEST)).toBe(true);
+  });
+
+  it('does not turn managed marketing into a broker-only capability', () => {
+    expect(() => AuthorizationPolicyService.assert(
+      principal({ accountType: AccountType.USER, brokerStatus: BrokerStatus.NOT_APPLIED }),
+      Capability.MANAGED_MARKETING_REQUEST,
+    )).not.toThrow();
+  });
+
+  it('keeps broker approval scoped to broker/property commands, not the platform service request', () => {
+    const pendingBroker = principal({
+      accountType: AccountType.BROKER,
+      brokerStatus: BrokerStatus.PENDING,
+    });
+    expect(AuthorizationPolicyService.can(
+      pendingBroker,
+      Capability.MANAGED_MARKETING_REQUEST,
+    )).toBe(true);
+    expect(AuthorizationPolicyService.can(pendingBroker, Capability.PROPERTY_CREATE)).toBe(false);
+  });
+
+  it.each([AccountStatus.SUSPENDED, AccountStatus.BLOCKED, AccountStatus.PERMANENTLY_BANNED])(
+    'keeps managed-marketing mutations blocked for %s accounts',
+    (accountStatus) => {
+      expect(AuthorizationPolicyService.can(
+        principal({ accountStatus }),
+        Capability.MANAGED_MARKETING_REQUEST,
+      )).toBe(false);
+    },
+  );
+
   it('requires an approved active broker for broker-only capabilities', () => {
     const approved = principal({ accountType: AccountType.BROKER, brokerStatus: BrokerStatus.APPROVED });
     const suspended = principal({ accountType: AccountType.BROKER, brokerStatus: BrokerStatus.SUSPENDED });

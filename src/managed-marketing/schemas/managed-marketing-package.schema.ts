@@ -12,6 +12,8 @@ export class ManagedMarketingPackage {
   @Prop({ trim: true, maxlength: 1000 }) detailsAr?: string;
   @Prop({ trim: true, maxlength: 1000 }) detailsEn?: string;
   @Prop({ type: [String], required: true, default: [] }) includedServiceCodes: string[];
+  @Prop({ type: [String], required: true, default: [] }) benefitsAr: string[];
+  @Prop({ type: [String], required: true, default: [] }) benefitsEn: string[];
   @Prop({ validate: { validator: (value: unknown) => value === undefined || isMoneyMinorAmount(value, { positive: true }) } }) priceMinor?: number;
   @Prop({ type: String, enum: [EGP_CURRENCY], default: EGP_CURRENCY, immutable: true }) currency: typeof EGP_CURRENCY;
   @Prop({ default: false, index: true }) isActive: boolean;

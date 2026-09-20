@@ -92,13 +92,19 @@ describe('MAZAD-015 property domain contract', () => {
   it('copies an immutable active-package snapshot without coupling history to later package edits', () => {
     const source = {
       _id: new ObjectId(), version: 3, code: 'premium', nameAr: 'مميز', nameEn: 'Premium',
-      includedServiceCodes: ['inspection', 'photography'], priceMinor: 250_000, currency: 'EGP' as const, isActive: true,
+      includedServiceCodes: ['inspection', 'photography'], benefitsAr: ['معاينة العقار', 'تصوير احترافي'], benefitsEn: ['Property inspection', 'Professional photography'], priceMinor: 250_000, currency: 'EGP' as const, isActive: true,
     };
     const snapshot = buildManagedMarketingPackageSnapshot(source);
     source.nameEn = 'Changed';
     source.includedServiceCodes.push('boost');
-    expect(snapshot).toMatchObject({ packageVersion: 3, nameEn: 'Premium', priceMinor: 250_000, includedServiceCodes: ['inspection', 'photography'] });
+    expect(snapshot).toMatchObject({ packageVersion: 3, nameEn: 'Premium', priceMinor: 250_000, includedServiceCodes: ['inspection', 'photography'], benefitsAr: ['معاينة العقار', 'تصوير احترافي'] });
     expect(Object.isFrozen(snapshot)).toBe(true);
+  });
+
+  it('enforces one managed-marketing request snapshot per property revision', () => {
+    expect(ManagedMarketingRequestSchema.indexes()).toEqual(expect.arrayContaining([
+      [{ propertyRevisionId: 1 }, expect.objectContaining({ unique: true, name: 'managed_marketing_request_revision_unique' })],
+    ]));
   });
 
   it('rejects inactive or unpriced managed-marketing packages', () => {
