@@ -492,6 +492,35 @@ export const propertyLifecycleMigration: MigrationDefinition = {
   },
 };
 
+export const managedMarketingRequestIndexesMigration: MigrationDefinition = {
+  id: '020-managed-marketing-request-indexes',
+  version: 1,
+  description: 'Enforce one managed-marketing request snapshot per property revision',
+  dependencies: ['015-property-domain-indexes'],
+  rollback: {
+    kind: 'none',
+    remediation: 'Retain the uniqueness guarantee and review duplicate request creation attempts.',
+    restoreProcedure: 'Restore the verified pre-migration snapshot to a separate database if rollback is required.',
+  },
+  async preflight({ db }) {
+    const duplicates = await db.collection('managed_marketing_requests').aggregate([
+      { $group: { _id: '$propertyRevisionId', count: { $sum: 1 } } },
+      { $match: { _id: { $exists: true }, count: { $gt: 1 } } },
+      { $limit: 20 },
+    ]).toArray();
+    const exists = (await existingIndexNames(db, 'managed_marketing_requests')).has('managed_marketing_request_revision_unique');
+    return { eligible: exists ? 0 : 1, alreadyApplied: exists ? 1 : 0, blockers: duplicates.length ? [{ code: 'MANAGED_MARKETING_REQUEST_REVISION_DUPLICATES', message: `${duplicates.length} duplicate revision requests require review`, sampleIds: duplicates.map(item => String(item._id)) }] : [] };
+  },
+  async migrateBatch({ db }) {
+    await db.collection('managed_marketing_requests').createIndex({ propertyRevisionId: 1 }, { unique: true, name: 'managed_marketing_request_revision_unique' });
+    return { scanned: 1, modified: 1, done: true };
+  },
+  async validate({ db }) {
+    const exists = (await existingIndexNames(db, 'managed_marketing_requests')).has('managed_marketing_request_revision_unique');
+    return { valid: exists, errors: exists ? [] : [{ code: 'MANAGED_MARKETING_REQUEST_REVISION_INDEX_MISSING', message: 'Required managed-marketing revision index is missing' }] };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
@@ -500,6 +529,7 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyDomainIndexesMigration,
   accountDeletionIndexesMigration,
   propertyLifecycleMigration,
+  managedMarketingRequestIndexesMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {

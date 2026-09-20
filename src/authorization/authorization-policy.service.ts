@@ -25,11 +25,13 @@ const ADMIN_CAPABILITIES = new Set<Capability>([
   Capability.ADMIN_PROPERTY_PROXY_CREATE,
   Capability.ADMIN_BROKER_REVIEW,
   Capability.ADMIN_CATALOG_MANAGE,
+  Capability.ADMIN_MANAGED_MARKETING_MANAGE,
 ]);
 
 const MARKETPLACE_MUTATIONS = new Set<Capability>([
   Capability.PROPERTY_CREATE,
   Capability.PROPERTY_MANAGE_OWN,
+  Capability.MANAGED_MARKETING_REQUEST,
   Capability.BROKER_APPLICATION_SUBMIT,
   Capability.BROKER_INTEREST_MANAGE,
   Capability.AUCTION_CREATE_OWN,
@@ -43,6 +45,7 @@ const MARKETPLACE_CAPABILITIES = new Set<Capability>([
   Capability.PROPERTY_CREATE,
   Capability.PROPERTY_READ_OWN,
   Capability.PROPERTY_MANAGE_OWN,
+  Capability.MANAGED_MARKETING_REQUEST,
   Capability.BROKER_APPLICATION_READ_OWN,
   Capability.BROKER_APPLICATION_SUBMIT,
   Capability.BROKER_INTEREST_MANAGE,
@@ -111,6 +114,12 @@ export class AuthorizationPolicyService {
     }
     if (capability === Capability.BROKER_INTEREST_MANAGE) {
       return principal.accountType === AccountType.BROKER && principal.brokerStatus === BrokerStatus.APPROVED;
+    }
+    if (capability === Capability.MANAGED_MARKETING_REQUEST) {
+      // A managed-marketing request is an own-property platform service, not a
+      // broker activity. Property commands retain their broker eligibility
+      // rules, while the service enforces ownership and revision eligibility.
+      return true;
     }
     if (
       capability === Capability.PROPERTY_CREATE ||

@@ -67,6 +67,11 @@ export enum AuditAction {
   ADMIN_BROKER_REQUIREMENT_CREATED = 'admin_broker_requirement_created',
   ADMIN_BROKER_REQUIREMENT_UPDATED = 'admin_broker_requirement_updated',
   ADMIN_BROKER_REQUIREMENT_ARCHIVED = 'admin_broker_requirement_archived',
+  ADMIN_MANAGED_MARKETING_PACKAGE_CREATED = 'admin_managed_marketing_package_created',
+  ADMIN_MANAGED_MARKETING_PACKAGE_UPDATED = 'admin_managed_marketing_package_updated',
+  MANAGED_MARKETING_REQUEST_CREATED = 'managed_marketing_request_created',
+  MANAGED_MARKETING_REQUEST_CANCELLED = 'managed_marketing_request_cancelled',
+  ADMIN_MANAGED_MARKETING_REQUEST_REVIEWED = 'admin_managed_marketing_request_reviewed',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false }, collection: 'audit_logs' })

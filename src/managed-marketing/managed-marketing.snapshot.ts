@@ -11,6 +11,8 @@ export type ManagedMarketingPackageSource = {
   detailsAr?: string;
   detailsEn?: string;
   includedServiceCodes: string[];
+  benefitsAr?: string[];
+  benefitsEn?: string[];
   priceMinor?: number;
   currency: typeof EGP_CURRENCY;
   isActive: boolean;
@@ -32,6 +34,8 @@ export function buildManagedMarketingPackageSnapshot(source: ManagedMarketingPac
     detailsAr: source.detailsAr,
     detailsEn: source.detailsEn,
     includedServiceCodes: Object.freeze([...source.includedServiceCodes]),
+    benefitsAr: Object.freeze([...(source.benefitsAr ?? [])]),
+    benefitsEn: Object.freeze([...(source.benefitsEn ?? [])]),
     priceMinor: source.priceMinor,
     currency: EGP_CURRENCY,
   });
