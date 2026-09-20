@@ -14,9 +14,10 @@ export class PropertyFormOptionsController {
   ) {}
   @Get()
   async list() {
-    const [optionResult, governorateResult, purposeResult, typeResult] = await Promise.all([
+    const [optionResult, governorateResult, cityResult, purposeResult, typeResult] = await Promise.all([
       this.options.listPublic(),
       this.governorates.listPublic(),
+      this.governorates.listPublicCities(),
       this.purposes.listPublic(),
       this.propertyTypes.listPublicMapped(),
     ]);
@@ -26,6 +27,7 @@ export class PropertyFormOptionsController {
       deliveryStatuses: byGroup('delivery_status'),
       paymentMethods: byGroup('payment_method'),
       governorates: governorateResult.items,
+      cities: cityResult.items,
       purposeCategories: purposeResult.items,
       purposeSubcategories: typeResult.items,
     };

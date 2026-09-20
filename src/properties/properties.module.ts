@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { PassportModule } from '@nestjs/passport';
 import { Amenity, AmenitySchema } from '../amenities/schemas/amenity.schema';
 import { Governorate, GovernorateSchema } from '../governorates/schemas/governorate.schema';
+import { City, CitySchema } from '../governorates/schemas/city.schema';
 import { PropertyOption, PropertyOptionSchema } from '../property-options/schemas/property-option.schema';
 import { PropertyType, PropertyTypeSchema } from '../property-types/schemas/property-type.schema';
 import { PropertiesController } from './properties.controller';
@@ -23,6 +24,7 @@ import { PropertyAuctionLockService } from './property-auction-lock.service';
     { name: PropertyRevision.name, schema: PropertyRevisionSchema },
     { name: Amenity.name, schema: AmenitySchema }, { name: PropertyOption.name, schema: PropertyOptionSchema },
     { name: Governorate.name, schema: GovernorateSchema },
+    { name: City.name, schema: CitySchema },
   ])],
   controllers: [PropertiesController, AdminPropertiesController],
   providers: [PropertiesService, RolesGuard, PropertyAuctionLockService],

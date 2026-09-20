@@ -43,6 +43,10 @@ describe('property publishing validation', () => {
       purposeCategories: { findOne: jest.fn().mockReturnValue(query({ _id: { toString: () => categoryId } })), updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ matchedCount: 1 }) }) },
       propertyTypes: { findOne: jest.fn().mockReturnValue(query({ _id: { toString: () => subcategoryId }, code: 'apartment', purposeCategoryId: { toString: () => categoryId } })), updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ matchedCount: 1 }) }) },
       governorates: { findOne: jest.fn().mockReturnValue(query({ code: 'cairo' })) },
+      cities: {
+        findOne: jest.fn().mockReturnValue(query({ _id: '64b000000000000000000020', nameAr: 'القاهرة' })),
+        updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ matchedCount: 1 }) }),
+      },
       options: { findOne: jest.fn().mockReturnValue(query({ code: 'valid' })), find: jest.fn().mockReturnValue(query([{ code: 'cash' }])) },
       amenities: { countDocuments: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(1) }) },
       auctionLock: { assertUnlocked: jest.fn().mockResolvedValue(undefined) },
@@ -114,6 +118,11 @@ describe('property publishing validation', () => {
     }) as any;
     await expect(instance.create(userId, dto, validFiles())).rejects.toThrow('نوع العقار');
     expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('rejects a city that is not active under the selected governorate', async () => {
+    const instance = service({ cities: { findOne: jest.fn().mockReturnValue(query(null)) } });
+    await expect(instance.create(userId, dto, validFiles())).rejects.toThrow('المدينة');
   });
 
   it('rejects inconsistent price and building values', async () => {

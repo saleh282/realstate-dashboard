@@ -4,6 +4,7 @@ import { Connection, Model, Types } from 'mongoose';
 import { createHash, randomUUID } from 'node:crypto';
 import { Amenity, AmenityDocument } from '../amenities/schemas/amenity.schema';
 import { Governorate, GovernorateDocument } from '../governorates/schemas/governorate.schema';
+import { City, CityDocument } from '../governorates/schemas/city.schema';
 import { PropertyOption, PropertyOptionDocument } from '../property-options/schemas/property-option.schema';
 import { PropertyType, PropertyTypeDocument } from '../property-types/schemas/property-type.schema';
 import { CreatePropertyDto } from './dto/create-property.dto';
@@ -49,6 +50,7 @@ export class PropertiesService {
     @InjectModel(Amenity.name) private readonly amenities: Model<AmenityDocument>,
     @InjectModel(PropertyOption.name) private readonly options: Model<PropertyOptionDocument>,
     @InjectModel(Governorate.name) private readonly governorates: Model<GovernorateDocument>,
+    @InjectModel(City.name) private readonly cities: Model<CityDocument>,
     private readonly evidenceAssets: CloudinaryAssetService,
     private readonly audit: AuditLogService,
     @InjectConnection() private readonly connection: Connection,
@@ -164,10 +166,18 @@ export class PropertiesService {
       this.options.find({ group: 'payment_method', code: { $in: dto.paymentMethodCodes }, isActive: true }).lean().exec(),
       this.amenities.countDocuments({ code: { $in: dto.amenityCodes }, isActive: true }).exec(),
     ]);
+    const city = governorate
+      ? await this.cities.findOne({ governorateId: governorate._id, nameAr: dto.city.trim(), isActive: true }).lean().exec()
+      : null;
+    const storedLegacyCity = existingDraft?.city ?? existingProperty?.city;
+    const legacyCityAllowed = Boolean(existingProperty && typeof storedLegacyCity === 'string' && storedLegacyCity.trim() === dto.city.trim());
     if (!purpose) throw new BadRequestException({ message: 'غرض العقار غير موجود أو غير متاح', code: PropertyErrorCode.PURPOSE_CATEGORY_INVALID });
     if (!type) throw new BadRequestException({ message: 'نوع العقار الفرعي غير موجود أو غير متاح', code: PropertyErrorCode.PURPOSE_SUBCATEGORY_INVALID });
     if (!type.purposeCategoryId || type.purposeCategoryId.toString() !== purpose._id.toString()) {
       throw new BadRequestException({ message: 'نوع العقار الفرعي لا يتبع غرض العقار المحدد', code: PropertyErrorCode.PURPOSE_HIERARCHY_MISMATCH });
+    }
+    if (governorate && !city && !legacyCityAllowed) {
+      throw new BadRequestException({ message: 'المدينة غير موجودة أو لا تتبع المحافظة المحددة', code: PropertyErrorCode.CATALOG_VALUE_INVALID });
     }
     if (payments.length !== dto.paymentMethodCodes.length) {
       throw new BadRequestException({ message: 'إحدى طرق السداد غير موجودة أو غير متاحة', code: PropertyErrorCode.PAYMENT_METHODS_INVALID });
@@ -318,10 +328,13 @@ export class PropertiesService {
           } else {
             await this.revisions.create([{ _id: revisionId, ...revisionContent }], { session });
           }
-          const [purposeUsage, typeUsage, governorateUsage, optionUsage, amenityUsage] = await Promise.all([
+          const [purposeUsage, typeUsage, governorateUsage, cityUsage, optionUsage, amenityUsage] = await Promise.all([
             this.purposeCategories.updateOne({ _id: purpose._id, isActive: true }, { $inc: { usageCount: 1 } }, { session }).exec(),
             this.propertyTypes.updateOne({ _id: type._id, purposeCategoryId: purpose._id, isActive: true }, { $inc: { usageCount: 1 } }, { session }).exec(),
             this.governorates.updateOne({ code: dto.governorateCode, isActive: true }, { $inc: { usageCount: 1 } }, { session }).exec(),
+            city
+              ? this.cities.updateOne({ _id: city._id, governorateId: governorate!._id, isActive: true }, { $inc: { usageCount: 1 } }, { session }).exec()
+              : Promise.resolve({ matchedCount: legacyCityAllowed ? 1 : 0 }),
             this.options.updateMany({ $or: [
               { group: 'finishing_status', code: dto.finishingStatusCode, isActive: true },
               { group: 'delivery_status', code: dto.deliveryStatusCode, isActive: true },
@@ -332,7 +345,7 @@ export class PropertiesService {
           if (purposeUsage.matchedCount !== 1 || typeUsage.matchedCount !== 1) {
             throw new BadRequestException({ message: 'تم تغيير تصنيف غرض العقار؛ أعد تحميل الخيارات', code: PropertyErrorCode.PURPOSE_HIERARCHY_MISMATCH });
           }
-          if (governorateUsage.matchedCount !== 1 || optionUsage.matchedCount !== dto.paymentMethodCodes.length + 2 || amenityUsage.matchedCount !== dto.amenityCodes.length) {
+          if (governorateUsage.matchedCount !== 1 || cityUsage.matchedCount !== 1 || optionUsage.matchedCount !== dto.paymentMethodCodes.length + 2 || amenityUsage.matchedCount !== dto.amenityCodes.length) {
             throw new BadRequestException({ message: 'تم تغيير أحد خيارات العقار؛ أعد تحميل الخيارات', code: PropertyErrorCode.CATALOG_VALUE_INVALID });
           }
           if (!existingProperty) await this.audit.logRequired({ action: AuditAction.PROPERTY_CREATED, actorUserId: attribution.actorId.toString(), targetResourceId: propertyId.toString(), reason: 'property aggregate created', ip, metadata: { advertiserAccountId: attribution.advertiserId.toString(), revisionId: revisionId.toString(), revisionNumber } }, session);

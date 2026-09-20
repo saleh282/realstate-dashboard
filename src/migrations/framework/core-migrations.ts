@@ -521,6 +521,51 @@ export const managedMarketingRequestIndexesMigration: MigrationDefinition = {
   },
 };
 
+const cityCatalogIndexes = [
+  { key: { governorateId: 1, code: 1 }, options: { unique: true, name: 'city_governorate_code_unique' } },
+  { key: { governorateId: 1, nameAr: 1 }, options: { unique: true, name: 'city_governorate_name_ar_unique' } },
+  { key: { governorateId: 1, isActive: 1, sortOrder: 1, nameAr: 1 }, options: { name: 'city_public_catalog_order' } },
+] as const;
+
+export const cityCatalogIndexesMigration: MigrationDefinition = {
+  id: '021-city-catalog-indexes',
+  version: 1,
+  description: 'Enforce governorate-scoped city uniqueness and public catalog lookup indexes',
+  dependencies: ['015-property-domain-indexes'],
+  rollback: {
+    kind: 'none',
+    remediation: 'Keep the catalog uniqueness guarantees and manually reconcile only duplicates reported by preflight.',
+    restoreProcedure: 'Restore the verified pre-migration snapshot to a separate database if rollback is required.',
+  },
+  async preflight({ db }) {
+    const duplicates = await db.collection('cities').aggregate([
+      { $group: { _id: { governorateId: '$governorateId', code: '$code' }, count: { $sum: 1 } } },
+      { $match: { count: { $gt: 1 } } },
+      { $limit: 20 },
+    ]).toArray();
+    const duplicateNames = await db.collection('cities').aggregate([
+      { $group: { _id: { governorateId: '$governorateId', nameAr: '$nameAr' }, count: { $sum: 1 } } },
+      { $match: { count: { $gt: 1 } } },
+      { $limit: 20 },
+    ]).toArray();
+    const names = await existingIndexNames(db, 'cities');
+    const missing = cityCatalogIndexes.filter(index => !names.has(index.options.name));
+    const blockers = [...duplicates, ...duplicateNames].length
+      ? [{ code: 'CITY_CATALOG_DUPLICATES', message: 'Duplicate city codes or Arabic names require manual reconciliation before unique indexes can be created', sampleIds: [...duplicates, ...duplicateNames].map(item => JSON.stringify(item._id)) }]
+      : [];
+    return { eligible: missing.length, alreadyApplied: cityCatalogIndexes.length - missing.length, blockers };
+  },
+  async migrateBatch({ db }) {
+    for (const index of cityCatalogIndexes) await db.collection('cities').createIndex(index.key, index.options);
+    return { scanned: cityCatalogIndexes.length, modified: cityCatalogIndexes.length, done: true };
+  },
+  async validate({ db }) {
+    const names = await existingIndexNames(db, 'cities');
+    const missing = cityCatalogIndexes.filter(index => !names.has(index.options.name)).map(index => index.options.name);
+    return { valid: missing.length === 0, errors: missing.map(name => ({ code: 'CITY_CATALOG_INDEX_MISSING', message: `Required city catalog index ${name} is missing` })), summary: { missingIndexes: missing } };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
@@ -530,6 +575,7 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   accountDeletionIndexesMigration,
   propertyLifecycleMigration,
   managedMarketingRequestIndexesMigration,
+  cityCatalogIndexesMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {
