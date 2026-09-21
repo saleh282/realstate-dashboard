@@ -11,6 +11,6 @@ export function buildCorsOptions(env: NodeJS.ProcessEnv): CorsOptions {
     origin: isProduction ? configuredOrigins : configuredOrigins.length ? configuredOrigins : true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-Name'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-Name', 'Idempotency-Key'],
   };
 }

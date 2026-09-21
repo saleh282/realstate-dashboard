@@ -17,9 +17,10 @@ import { PropertyRevision, PropertyRevisionSchema } from './schemas/property-rev
 import { PropertyPurposeCategoriesModule } from '../property-purpose-categories/property-purpose-categories.module';
 import { UsersModule } from '../users/users.module';
 import { PropertyAuctionLockService } from './property-auction-lock.service';
+import { IdempotencyModule } from '../common/idempotency/idempotency.module';
 
 @Module({
-  imports: [PassportModule, AuditModule, CloudinaryModule, PropertyPurposeCategoriesModule, UsersModule, MongooseModule.forFeature([
+  imports: [PassportModule, AuditModule, IdempotencyModule, CloudinaryModule, PropertyPurposeCategoriesModule, UsersModule, MongooseModule.forFeature([
     { name: Property.name, schema: PropertySchema }, { name: PropertyType.name, schema: PropertyTypeSchema },
     { name: PropertyRevision.name, schema: PropertyRevisionSchema },
     { name: Amenity.name, schema: AmenitySchema }, { name: PropertyOption.name, schema: PropertyOptionSchema },

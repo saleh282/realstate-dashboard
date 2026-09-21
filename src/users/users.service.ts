@@ -747,6 +747,57 @@ export class UsersService {
     return user.save();
   }
 
+  /**
+   * Compare-and-set password change used by single-use reset tokens: only
+   * succeeds while the stored hash is still the one the token was issued for.
+   */
+  async updatePasswordIfCurrent(
+    userId: string,
+    currentPasswordHash: string,
+    newPasswordHash: string,
+  ): Promise<boolean> {
+    const result = await this.userModel
+      .updateOne(
+        { _id: userId, password: currentPasswordHash },
+        {
+          $set: { password: newPasswordHash, failedLoginAttempts: 0 },
+          $unset: { accountLockedUntil: 1 },
+        },
+      )
+      .exec();
+    return result.modifiedCount === 1;
+  }
+
+  /**
+   * Atomically replaces the credentials of a self-registered account that has
+   * never proven ownership of any identifier. Returns false if the account was
+   * verified concurrently, in which case nothing is modified.
+   */
+  async replaceUnverifiedRegistration(
+    userId: string,
+    data: { passwordHash: string; fullName: string },
+  ): Promise<boolean> {
+    const result = await this.userModel
+      .updateOne(
+        {
+          _id: userId,
+          emailVerifiedAt: { $exists: false },
+          phoneVerifiedAt: { $exists: false },
+          emailVerified: { $ne: true },
+        },
+        {
+          $set: {
+            password: data.passwordHash,
+            fullName: data.fullName,
+            failedLoginAttempts: 0,
+          },
+          $unset: { accountLockedUntil: 1 },
+        },
+      )
+      .exec();
+    return result.modifiedCount === 1;
+  }
+
   private authorizationDenied(message: string) {
     return new ForbiddenException({ message, code: AuthorizationErrorCode.FORBIDDEN });
   }

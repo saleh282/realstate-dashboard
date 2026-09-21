@@ -3,6 +3,11 @@ import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model, Types } from 'mongoose';
 import { AuditLog, AuditLogDocument, AuditAction } from './schemas/audit-log.schema';
 import { randomUUID } from 'crypto';
+import { currentRequestId } from '../common/request-context/request-context';
+
+// Audit rows share the id of the HTTP request that caused them so an entry can be
+// traced to the access log and the client-visible X-Request-Id.
+const auditRequestId = () => currentRequestId() ?? randomUUID();
 
 @Injectable()
 export class AuditLogService {
@@ -17,7 +22,7 @@ export class AuditLogService {
         action,
         userId: userId ? new Types.ObjectId(userId) : null,
         ip: ip ?? 'unknown',
-        requestId: randomUUID(),
+        requestId: auditRequestId(),
       });
     } catch (err) {
       this.logger.warn(`Failed to write audit log (${action}): ${err.message}`);
@@ -41,7 +46,7 @@ export class AuditLogService {
         reason,
         ip: ip ?? 'unknown',
         metadata,
-        requestId: randomUUID(),
+        requestId: auditRequestId(),
       });
     } catch (err) {
       this.logger.warn(`Failed to write admin audit log (${action})`);
@@ -79,7 +84,7 @@ export class AuditLogService {
         reason: options.reason,
         ip: options.ip ?? 'unknown',
         metadata: options.metadata,
-        requestId: options.requestId ?? randomUUID(),
+        requestId: options.requestId ?? auditRequestId(),
       }],
       { session },
     );
@@ -100,7 +105,7 @@ export class AuditLogService {
         targetResourceId,
         reason,
         ip: ip ?? 'unknown',
-        requestId: randomUUID(),
+        requestId: auditRequestId(),
       });
     } catch {
       this.logger.warn(`Failed to write admin resource audit log (${action})`);
@@ -122,7 +127,7 @@ export class AuditLogService {
         targetResourceId,
         reason,
         ip: ip ?? 'unknown',
-        requestId: randomUUID(),
+        requestId: auditRequestId(),
       });
     } catch {
       this.logger.warn(`Failed to write resource audit log (${action})`);

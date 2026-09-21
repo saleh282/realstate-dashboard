@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import { createHash, randomUUID } from 'node:crypto';
@@ -24,6 +24,8 @@ import { PropertyLifecycleStatus, PropertyMarketingMode, PropertyMediaOrigin, Pr
 import { PropertyErrorCode } from '../common/errors/property-error-codes';
 import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
 import { PropertyAuctionLockService } from './property-auction-lock.service';
+import { IdempotencyService, canonicalize, sha256 } from '../common/idempotency/idempotency.service';
+import { hasClearGovernorateConflict, isPointInsideEgypt } from '../common/validators/egypt-location.validator';
 
 const PROPERTY_IMAGE_POLICY = { kind: 'image' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000 };
 const PROPERTY_EVIDENCE_POLICY = { kind: 'document' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000, allowPdf: true };
@@ -55,15 +57,30 @@ export class PropertiesService {
     private readonly audit: AuditLogService,
     @InjectConnection() private readonly connection: Connection,
     private readonly auctionLock: PropertyAuctionLockService,
+    @Optional() private readonly idempotency?: IdempotencyService,
   ) {}
+
+  /** Digest of everything that defines a create/revision request, including file bytes. */
+  private requestFingerprint(target: string, dto: CreatePropertyDto, files: PropertyCreateFiles): string {
+    const digest = (list?: Express.Multer.File[]) =>
+      (list ?? []).map((file) => `${file.fieldname}:${file.mimetype}:${sha256(file.buffer)}`);
+    return sha256(canonicalize({ target, dto, images: digest(files?.images), titleDeed: digest(files?.titleDeed) }));
+  }
 
   async create(actorId: string, dto: CreatePropertyDto, files: PropertyCreateFiles, ip?: string) {
     return this.createSelf(actorId, dto, files, ip);
   }
 
-  async createSelf(actorId: string, dto: CreatePropertyDto, files: PropertyCreateFiles, ip?: string) {
-    const attribution = await this.resolveAdvertiser(actorId, actorId, false);
-    return this.createWithAttribution(attribution, dto, files, ip);
+  async createSelf(actorId: string, dto: CreatePropertyDto, files: PropertyCreateFiles, ip?: string, idempotencyKey?: string) {
+    const run = async () => {
+      const attribution = await this.resolveAdvertiser(actorId, actorId, false);
+      return this.createWithAttribution(attribution, dto, files, ip);
+    };
+    if (!this.idempotency) return run();
+    return this.idempotency.execute(
+      { scope: 'property.create', accountId: actorId, key: idempotencyKey, fingerprint: () => this.requestFingerprint('new', dto, files) },
+      run,
+    );
   }
 
   async createForAdmin(actorId: string, advertiserAccountId: string, dto: CreatePropertyDto, files: PropertyCreateFiles, ip?: string) {
@@ -71,8 +88,16 @@ export class PropertiesService {
     return this.createWithAttribution(attribution, dto, files, ip);
   }
 
-  async createDraftRevision(actorId: string, propertyId: string, dto: CreatePropertyDto, files: PropertyCreateFiles, ip?: string) {
+  async createDraftRevision(actorId: string, propertyId: string, dto: CreatePropertyDto, files: PropertyCreateFiles, ip?: string, idempotencyKey?: string) {
     this.assertId(propertyId);
+    if (!this.idempotency) return this.createDraftRevisionOnce(actorId, propertyId, dto, files, ip);
+    return this.idempotency.execute(
+      { scope: 'property.revision', accountId: actorId, key: idempotencyKey, fingerprint: () => this.requestFingerprint(propertyId, dto, files) },
+      () => this.createDraftRevisionOnce(actorId, propertyId, dto, files, ip),
+    );
+  }
+
+  private async createDraftRevisionOnce(actorId: string, propertyId: string, dto: CreatePropertyDto, files: PropertyCreateFiles, ip?: string) {
     await this.auctionLock.assertUnlocked(propertyId);
     const accountId = new Types.ObjectId(actorId);
     const property = await this.properties.findOne({ _id: propertyId, lifecycleStatus: { $nin: [PropertyLifecycleStatus.ARCHIVED, PropertyLifecycleStatus.ADMIN_HIDDEN] }, $or: [{ advertiserAccountId: accountId }, { advertiserAccountId: { $exists: false }, ownerId: accountId }] }).lean().exec();
@@ -96,6 +121,9 @@ export class PropertiesService {
   }
 
   private async createWithAttribution(attribution: PropertyAttribution, dto: CreatePropertyDto, files: PropertyCreateFiles, ip?: string, existingProperty?: any, existingDraft?: any) {
+    if (!isPointInsideEgypt(dto.latitude, dto.longitude)) {
+      throw new BadRequestException({ message: 'يجب أن يكون موقع العقار داخل مصر', code: 'PROPERTY_LOCATION_OUTSIDE_EGYPT' });
+    }
     if (existingDraft && dto.expectedRevisionVersion !== (existingDraft.decisionVersion ?? 0)) {
       throw new ConflictException({ message: 'تغيرت المسودة؛ أعد تحميل العقار قبل الحفظ', code: PropertyErrorCode.REVISION_VERSION_CONFLICT });
     }
@@ -178,6 +206,9 @@ export class PropertiesService {
     }
     if (governorate && !city && !legacyCityAllowed) {
       throw new BadRequestException({ message: 'المدينة غير موجودة أو لا تتبع المحافظة المحددة', code: PropertyErrorCode.CATALOG_VALUE_INVALID });
+    }
+    if (governorate && hasClearGovernorateConflict(dto.latitude, dto.longitude, dto.governorateCode)) {
+      throw new BadRequestException({ message: 'إحداثيات العقار لا تتوافق مع المحافظة المحددة', code: 'PROPERTY_LOCATION_GOVERNORATE_MISMATCH' });
     }
     if (payments.length !== dto.paymentMethodCodes.length) {
       throw new BadRequestException({ message: 'إحدى طرق السداد غير موجودة أو غير متاحة', code: PropertyErrorCode.PAYMENT_METHODS_INVALID });
@@ -564,8 +595,16 @@ export class PropertiesService {
     } finally { await session.endSession(); }
   }
 
-  async submitRevision(ownerId: string, propertyId: string, revisionId: string, version: number, ip?: string) {
+  async submitRevision(ownerId: string, propertyId: string, revisionId: string, version: number, ip?: string, idempotencyKey?: string) {
     this.assertId(propertyId); this.assertId(revisionId);
+    if (!this.idempotency) return this.submitRevisionOnce(ownerId, propertyId, revisionId, version, ip);
+    return this.idempotency.execute(
+      { scope: 'property.submit', accountId: ownerId, key: idempotencyKey, fingerprint: () => sha256(canonicalize({ propertyId, revisionId, version })) },
+      () => this.submitRevisionOnce(ownerId, propertyId, revisionId, version, ip),
+    );
+  }
+
+  private async submitRevisionOnce(ownerId: string, propertyId: string, revisionId: string, version: number, ip?: string) {
     const accountId = new Types.ObjectId(ownerId);
     const session = await this.connection.startSession();
     try {

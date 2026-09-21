@@ -6,7 +6,8 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { KycModule } from './kyc/kyc.module';
 import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard } from '@nestjs/throttler';
+import { AppThrottlerGuard } from './common/security/app-throttler.guard';
+import { HealthModule } from './health/health.module';
 import { validateEnvironment } from './config/environment.validation';
 import { CloudinaryModule } from './config/cloudinary.module';
 import { AdminModule } from './admin/admin.module';
@@ -21,6 +22,7 @@ import { PropertyPurposeCategoriesModule } from './property-purpose-categories/p
 import { ManagedMarketingModule } from './managed-marketing/managed-marketing.module';
 import { AuthorizationModule } from './authorization/authorization.module';
 import { AccountDeletionModule } from './account-deletion/account-deletion.module';
+import { GeocodingModule } from './geocoding/geocoding.module';
 
 @Module({
   imports: [
@@ -51,7 +53,9 @@ import { AccountDeletionModule } from './account-deletion/account-deletion.modul
     ManagedMarketingModule,
     AuthorizationModule,
     AccountDeletionModule,
+    GeocodingModule,
+    HealthModule,
   ],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }],
 })
 export class AppModule {}

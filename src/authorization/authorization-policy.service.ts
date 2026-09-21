@@ -87,6 +87,14 @@ export class AuthorizationPolicyService {
     if (capability === Capability.SUPER_ADMIN_ROLE_MANAGE) {
       return principal.systemRole === SystemRole.SUPER_ADMIN && principal.accountStatus === AccountStatus.ACTIVE;
     }
+    if (capability === Capability.GEOCODING_USE) {
+      // Address lookup backs property entry, so it follows who may create
+      // listings (plus staff who create them on an account's behalf).
+      if (principal.accountStatus !== AccountStatus.ACTIVE) return false;
+      if (staff) return true;
+      return principal.systemRole === SystemRole.USER &&
+        (principal.accountType !== AccountType.BROKER || principal.brokerStatus === BrokerStatus.APPROVED);
+    }
     if (ADMIN_CAPABILITIES.has(capability)) {
       return staff && principal.accountStatus === AccountStatus.ACTIVE;
     }

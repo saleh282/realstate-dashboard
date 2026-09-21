@@ -15,6 +15,8 @@ export class EvidenceCleanupTask {
   @Prop({ default: 0, min: 0 }) attempts: number;
   @Prop({ maxlength: 500 }) lastError?: string;
   @Prop() completedAt?: Date;
+  // Lease while a worker holds the task, then the earliest retry time after a failure.
+  @Prop() nextAttemptAt?: Date;
 }
 
 export const EvidenceCleanupTaskSchema = SchemaFactory.createForClass(EvidenceCleanupTask);

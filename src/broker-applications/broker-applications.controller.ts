@@ -13,7 +13,8 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { BoundedFileFields } from '../common/uploads/bounded-upload.interceptor';
+import { UPLOAD_REQUEST_LIMITS } from '../common/uploads/upload-policies';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { EvidenceErrorCode } from '../common/errors/evidence-error-codes';
@@ -35,19 +36,22 @@ export class BrokerApplicationsController {
   @Post('applications')
   @RequireCapabilities(Capability.BROKER_APPLICATION_SUBMIT)
   @UseInterceptors(
-    FileFieldsInterceptor([{ name: 'verificationDocument', maxCount: 2 }], {
-      limits: { fileSize: 10 * 1024 * 1024, files: 2 },
-      fileFilter: (_request, file, callback) => {
-        if (file.mimetype !== 'application/pdf') {
-          return callback(
-            new BadRequestException({
-              message: 'صيغة مستند الوسيط غير مدعومة',
-              code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED,
-            }),
-            false,
-          );
-        }
-        callback(null, true);
+    BoundedFileFields([{ name: 'verificationDocument', maxCount: 2 }], {
+      maxRequestBytes: UPLOAD_REQUEST_LIMITS.broker,
+      multer: {
+        limits: { fileSize: 10 * 1024 * 1024, files: 2 },
+        fileFilter: (_request, file, callback) => {
+          if (file.mimetype !== 'application/pdf') {
+            return callback(
+              new BadRequestException({
+                message: 'صيغة مستند الوسيط غير مدعومة',
+                code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED,
+              }),
+              false,
+            );
+          }
+          callback(null, true);
+        },
       },
     }),
   )

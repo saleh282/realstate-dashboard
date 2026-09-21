@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
 import type { Response } from 'express';
-import { FileFieldsInterceptor, FileInterceptor } from '@nestjs/platform-express';
+import { BoundedFile, BoundedFileFields } from '../common/uploads/bounded-upload.interceptor';
+import { UPLOAD_REQUEST_LIMITS } from '../common/uploads/upload-policies';
 import { SystemRole } from '../auth/roles.enum';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
@@ -31,11 +32,14 @@ export class AdminPropertiesController {
 
   @Post('proxy')
   @RequireCapabilities(Capability.ADMIN_PROPERTY_PROXY_CREATE)
-  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'titleDeed', maxCount: 1 }], {
-    limits: { fileSize: 10 * 1024 * 1024, files: 22 },
-    fileFilter: (_req, file, cb) => {
-      const allowed = file.fieldname === 'titleDeed' ? allowedEvidence : allowedImages;
-      return allowed.has(file.mimetype) ? cb(null, true) : cb(new BadRequestException({ message: 'صيغة أحد ملفات العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
+  @UseInterceptors(BoundedFileFields([{ name: 'images', maxCount: 20 }, { name: 'titleDeed', maxCount: 1 }], {
+    maxRequestBytes: UPLOAD_REQUEST_LIMITS.propertyAdmin,
+    multer: {
+      limits: { fileSize: 10 * 1024 * 1024, files: 22 },
+      fileFilter: (_req, file, cb) => {
+        const allowed = file.fieldname === 'titleDeed' ? allowedEvidence : allowedImages;
+        return allowed.has(file.mimetype) ? cb(null, true) : cb(new BadRequestException({ message: 'صيغة أحد ملفات العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
+      },
     },
   }))
   createForAccount(
@@ -49,11 +53,14 @@ export class AdminPropertiesController {
 
   @Post(':propertyId/revisions/proxy')
   @RequireCapabilities(Capability.ADMIN_PROPERTY_PROXY_CREATE)
-  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'titleDeed', maxCount: 1 }], {
-    limits: { fileSize: 10 * 1024 * 1024, files: 22 },
-    fileFilter: (_req, file, cb) => {
-      const allowed = file.fieldname === 'titleDeed' ? allowedEvidence : allowedImages;
-      return allowed.has(file.mimetype) ? cb(null, true) : cb(new BadRequestException({ message: 'صيغة أحد ملفات العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
+  @UseInterceptors(BoundedFileFields([{ name: 'images', maxCount: 20 }, { name: 'titleDeed', maxCount: 1 }], {
+    maxRequestBytes: UPLOAD_REQUEST_LIMITS.propertyAdmin,
+    multer: {
+      limits: { fileSize: 10 * 1024 * 1024, files: 22 },
+      fileFilter: (_req, file, cb) => {
+        const allowed = file.fieldname === 'titleDeed' ? allowedEvidence : allowedImages;
+        return allowed.has(file.mimetype) ? cb(null, true) : cb(new BadRequestException({ message: 'صيغة أحد ملفات العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
+      },
     },
   }))
   createRevisionForAccount(@Param('propertyId') id: string, @Req() req: any, @Body() dto: CreatePropertyDto, @UploadedFiles() files: { images?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] }) {
@@ -64,22 +71,28 @@ export class AdminPropertiesController {
   get(@Param('propertyId') id: string) { return this.service.getForAdmin(id); }
 
   @Post(':propertyId/revisions/:revisionId/media')
-  @UseInterceptors(FileInterceptor('image', {
-    limits: { fileSize: 10 * 1024 * 1024, files: 1 },
-    fileFilter: (_req, file, cb) => allowedImages.has(file.mimetype)
-      ? cb(null, true)
-      : cb(new BadRequestException({ message: 'صيغة صورة العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false),
+  @UseInterceptors(BoundedFile('image', {
+    maxRequestBytes: UPLOAD_REQUEST_LIMITS.adminSingleMedia,
+    multer: {
+      limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+      fileFilter: (_req, file, cb) => allowedImages.has(file.mimetype)
+        ? cb(null, true)
+        : cb(new BadRequestException({ message: 'صيغة صورة العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false),
+    },
   }))
   addPlatformMedia(@Param('propertyId') propertyId: string, @Param('revisionId') revisionId: string, @Body() dto: AdminPropertyMediaDto, @UploadedFile() image: Express.Multer.File, @Req() req: any) {
     return this.service.addPlatformMediaForAdmin(propertyId, revisionId, dto.tagCode, dto.version, image, req.user.userId, req.ip);
   }
 
   @Put(':propertyId/revisions/:revisionId/media/:mediaId')
-  @UseInterceptors(FileInterceptor('image', {
-    limits: { fileSize: 10 * 1024 * 1024, files: 1 },
-    fileFilter: (_req, file, cb) => allowedImages.has(file.mimetype)
-      ? cb(null, true)
-      : cb(new BadRequestException({ message: 'صيغة صورة العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false),
+  @UseInterceptors(BoundedFile('image', {
+    maxRequestBytes: UPLOAD_REQUEST_LIMITS.adminSingleMedia,
+    multer: {
+      limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+      fileFilter: (_req, file, cb) => allowedImages.has(file.mimetype)
+        ? cb(null, true)
+        : cb(new BadRequestException({ message: 'صيغة صورة العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false),
+    },
   }))
   replacePlatformMedia(@Param('propertyId') propertyId: string, @Param('revisionId') revisionId: string, @Param('mediaId') mediaId: string, @Body() dto: AdminPropertyMediaDto, @UploadedFile() image: Express.Multer.File, @Req() req: any) {
     return this.service.replacePlatformMediaForAdmin(propertyId, revisionId, mediaId, dto.tagCode, dto.version, image, req.user.userId, req.ip);

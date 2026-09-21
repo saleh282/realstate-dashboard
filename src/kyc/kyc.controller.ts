@@ -1,5 +1,6 @@
 import { BadRequestException, Controller, Get, Post, Req, UseGuards, UseInterceptors } from '@nestjs/common';
-import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { BoundedFileFields } from '../common/uploads/bounded-upload.interceptor';
+import { UPLOAD_REQUEST_LIMITS } from '../common/uploads/upload-policies';
 import { UploadedFiles } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { KycService } from './kyc.service';
@@ -18,19 +19,22 @@ export class KycController {
   @Post('submit')
   @RequireCapabilities(Capability.KYC_SELF_SUBMIT)
   @UseInterceptors(
-    FileFieldsInterceptor(
+    BoundedFileFields(
       [
         { name: 'idFront', maxCount: 1 },
         { name: 'idBack', maxCount: 1 },
         { name: 'selfie', maxCount: 1 },
       ],
       {
-        limits: { fileSize: 5 * 1024 * 1024 }, // 5MB per file
-        fileFilter: (_req, file, callback) => {
-          if (!allowedKycMimeTypes.has(file.mimetype)) {
-            return callback(new BadRequestException({ message: 'صيغة ملف التحقق غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
-          }
-          callback(null, true);
+        maxRequestBytes: UPLOAD_REQUEST_LIMITS.kyc,
+        multer: {
+          limits: { fileSize: 5 * 1024 * 1024, files: 3 }, // 5MB per file
+          fileFilter: (_req, file, callback) => {
+            if (!allowedKycMimeTypes.has(file.mimetype)) {
+              return callback(new BadRequestException({ message: 'صيغة ملف التحقق غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
+            }
+            callback(null, true);
+          },
         },
       },
     ),

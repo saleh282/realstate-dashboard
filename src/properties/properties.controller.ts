@@ -1,5 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, Req, Res, StreamableFile, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
-import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { BadRequestException, Body, Controller, Get, Headers, Param, Patch, Post, Query, Req, Res, StreamableFile, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BoundedFileFields } from '../common/uploads/bounded-upload.interceptor';
+import { UPLOAD_REQUEST_LIMITS } from '../common/uploads/upload-policies';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreatePropertyDto } from './dto/create-property.dto';
@@ -22,29 +23,35 @@ export class PropertiesController {
   @Post()
   @UseGuards(JwtAuthGuard, CapabilityGuard)
   @RequireCapabilities(Capability.PROPERTY_CREATE)
-  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'titleDeed', maxCount: 1 }], {
-    limits: { fileSize: 10 * 1024 * 1024, files: 22 },
-    fileFilter: (_req, file, cb) => {
-      const allowed = file.fieldname === 'titleDeed' ? allowedDeeds : allowedImages;
-      return allowed.has(file.mimetype) ? cb(null, true) : cb(new BadRequestException({ message: 'صيغة أحد ملفات العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
+  @UseInterceptors(BoundedFileFields([{ name: 'images', maxCount: 20 }, { name: 'titleDeed', maxCount: 1 }], {
+    maxRequestBytes: UPLOAD_REQUEST_LIMITS.propertyOwner,
+    multer: {
+      limits: { fileSize: 10 * 1024 * 1024, files: 22 },
+      fileFilter: (_req, file, cb) => {
+        const allowed = file.fieldname === 'titleDeed' ? allowedDeeds : allowedImages;
+        return allowed.has(file.mimetype) ? cb(null, true) : cb(new BadRequestException({ message: 'صيغة أحد ملفات العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
+      },
     },
   }))
-  create(@Req() req: any, @Body() dto: CreatePropertyDto, @UploadedFiles() files: { images?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] }) {
-    return this.service.createSelf(req.user.userId, dto, files, req.ip);
+  create(@Req() req: any, @Body() dto: CreatePropertyDto, @UploadedFiles() files: { images?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] }, @Headers('idempotency-key') idempotencyKey?: string) {
+    return this.service.createSelf(req.user.userId, dto, files, req.ip, idempotencyKey);
   }
 
   @Post('mine/:propertyId/revisions')
   @UseGuards(JwtAuthGuard, CapabilityGuard)
   @RequireCapabilities(Capability.PROPERTY_MANAGE_OWN)
-  @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 20 }, { name: 'titleDeed', maxCount: 1 }], {
-    limits: { fileSize: 10 * 1024 * 1024, files: 22 },
-    fileFilter: (_req, file, cb) => {
-      const allowed = file.fieldname === 'titleDeed' ? allowedDeeds : allowedImages;
-      return allowed.has(file.mimetype) ? cb(null, true) : cb(new BadRequestException({ message: 'صيغة أحد ملفات العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
+  @UseInterceptors(BoundedFileFields([{ name: 'images', maxCount: 20 }, { name: 'titleDeed', maxCount: 1 }], {
+    maxRequestBytes: UPLOAD_REQUEST_LIMITS.propertyOwner,
+    multer: {
+      limits: { fileSize: 10 * 1024 * 1024, files: 22 },
+      fileFilter: (_req, file, cb) => {
+        const allowed = file.fieldname === 'titleDeed' ? allowedDeeds : allowedImages;
+        return allowed.has(file.mimetype) ? cb(null, true) : cb(new BadRequestException({ message: 'صيغة أحد ملفات العقار غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
+      },
     },
   }))
-  createRevision(@Req() req: any, @Param('propertyId') id: string, @Body() dto: CreatePropertyDto, @UploadedFiles() files: { images?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] }) {
-    return this.service.createDraftRevision(req.user.userId, id, dto, files, req.ip);
+  createRevision(@Req() req: any, @Param('propertyId') id: string, @Body() dto: CreatePropertyDto, @UploadedFiles() files: { images?: Express.Multer.File[]; titleDeed?: Express.Multer.File[] }, @Headers('idempotency-key') idempotencyKey?: string) {
+    return this.service.createDraftRevision(req.user.userId, id, dto, files, req.ip, idempotencyKey);
   }
 
   @Get()
@@ -74,8 +81,8 @@ export class PropertiesController {
   @Post('mine/:propertyId/revisions/submit')
   @UseGuards(JwtAuthGuard, CapabilityGuard)
   @RequireCapabilities(Capability.PROPERTY_MANAGE_OWN)
-  submitRevision(@Req() req: any, @Param('propertyId') id: string, @Body() dto: SubmitPropertyRevisionDto) {
-    return this.service.submitRevision(req.user.userId, id, dto.revisionId, dto.version, req.ip);
+  submitRevision(@Req() req: any, @Param('propertyId') id: string, @Body() dto: SubmitPropertyRevisionDto, @Headers('idempotency-key') idempotencyKey?: string) {
+    return this.service.submitRevision(req.user.userId, id, dto.revisionId, dto.version, req.ip, idempotencyKey);
   }
 
   @Get('mine/:propertyId/evidence/title-deed')

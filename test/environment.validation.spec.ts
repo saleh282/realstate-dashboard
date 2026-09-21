@@ -74,4 +74,27 @@ describe('environment validation', () => {
       'https://app.example.com',
     ]);
   });
+
+  describe('Phase 1 operational settings', () => {
+    const invalid = (extra: Record<string, string>) => () => validateEnvironment({ ...validDevelopment, ...extra });
+
+    it('validates shutdown timing', () => {
+      expect(invalid({ SHUTDOWN_DRAIN_MS: '5000', SHUTDOWN_TIMEOUT_MS: '25000' })).not.toThrow();
+      expect(invalid({ SHUTDOWN_DRAIN_MS: 'soon' })).toThrow('SHUTDOWN_DRAIN_MS');
+      expect(invalid({ SHUTDOWN_DRAIN_MS: '30000', SHUTDOWN_TIMEOUT_MS: '20000' })).toThrow('smaller than SHUTDOWN_TIMEOUT_MS');
+    });
+
+    it('validates upload budgets', () => {
+      expect(invalid({ UPLOAD_MAX_INFLIGHT_BYTES: '268435456', UPLOAD_MAX_CONCURRENT_PER_USER: '3' })).not.toThrow();
+      expect(invalid({ UPLOAD_MAX_CONCURRENT_PER_USER: '0' })).toThrow('UPLOAD_MAX_CONCURRENT_PER_USER');
+      expect(invalid({ UPLOAD_MAX_INFLIGHT_BYTES: '12' })).toThrow('UPLOAD_MAX_INFLIGHT_BYTES');
+    });
+
+    it('validates the cleanup worker settings', () => {
+      expect(invalid({ CLEANUP_WORKER_ENABLED: 'true', CLEANUP_INTERVAL_SECONDS: '300', CLEANUP_BATCH_SIZE: '50' })).not.toThrow();
+      expect(invalid({ CLEANUP_WORKER_ENABLED: 'yes' })).toThrow('CLEANUP_WORKER_ENABLED');
+      expect(invalid({ CLEANUP_INTERVAL_SECONDS: '5' })).toThrow('CLEANUP_INTERVAL_SECONDS');
+      expect(invalid({ CLEANUP_BATCH_SIZE: '1000' })).toThrow('CLEANUP_BATCH_SIZE');
+    });
+  });
 });

@@ -1,3 +1,5 @@
+import { isPublicOsmNominatim } from '../geocoding/geocoding.config';
+import { parseTrustProxy } from './trust-proxy.config';
 import {
   PASSWORD_POLICY_MESSAGE,
   isValidPassword,
@@ -25,6 +27,19 @@ function requireKeys(config: Environment, keys: string[], errors: string[]): voi
   }
 }
 
+function validateInteger(
+  config: Environment,
+  key: string,
+  errors: string[],
+  { min = 1, max = Number.MAX_SAFE_INTEGER }: { min?: number; max?: number } = {},
+): void {
+  const value = valueOf(config, key);
+  if (!value) return;
+  if (!/^\d+$/.test(value) || Number(value) < min || Number(value) > max) {
+    errors.push(`${key} must be an integer between ${min} and ${max}`);
+  }
+}
+
 function validateBoolean(config: Environment, key: string, errors: string[]): void {
   const value = valueOf(config, key);
   if (value && !['true', 'false'].includes(value.toLowerCase())) {
@@ -49,6 +64,46 @@ export function validateEnvironment(config: Environment): Environment {
     const value = valueOf(config, key);
     if (!value || !durationPattern.test(value)) {
       errors.push(`${key} must look like 15m, 1h, or 7d`);
+    }
+  }
+
+  errors.push(...parseTrustProxy(valueOf(config, 'TRUST_PROXY')).errors);
+  if (nodeEnv === 'production' && !valueOf(config, 'TRUST_PROXY')) {
+    // Unset would silently put every caller behind a proxy in one rate-limit
+    // bucket, so production must state its topology explicitly.
+    errors.push(
+      'TRUST_PROXY is required in production: list the proxy IPs/CIDRs allowed to set X-Forwarded-For (for example the admin dashboard host), or set false only when clients connect directly',
+    );
+  }
+
+  validateInteger(config, 'SHUTDOWN_DRAIN_MS', errors, { min: 0, max: 120_000 });
+  validateInteger(config, 'SHUTDOWN_TIMEOUT_MS', errors, { min: 1_000, max: 300_000 });
+  if (
+    valueOf(config, 'SHUTDOWN_DRAIN_MS') &&
+    valueOf(config, 'SHUTDOWN_TIMEOUT_MS') &&
+    Number(valueOf(config, 'SHUTDOWN_DRAIN_MS')) >= Number(valueOf(config, 'SHUTDOWN_TIMEOUT_MS'))
+  ) {
+    errors.push('SHUTDOWN_DRAIN_MS must be smaller than SHUTDOWN_TIMEOUT_MS');
+  }
+
+  validateInteger(config, 'UPLOAD_MAX_INFLIGHT_BYTES', errors, { min: 1024 * 1024 });
+  validateInteger(config, 'UPLOAD_MAX_CONCURRENT_PER_USER', errors, { min: 1, max: 20 });
+
+  validateBoolean(config, 'CLEANUP_WORKER_ENABLED', errors);
+  validateInteger(config, 'CLEANUP_INTERVAL_SECONDS', errors, { min: 30, max: 86_400 });
+  validateInteger(config, 'CLEANUP_BATCH_SIZE', errors, { min: 1, max: 100 });
+  validateInteger(config, 'CLEANUP_ALERT_AGE_SECONDS', errors, { min: 60 });
+
+  const resetSecret = valueOf(config, 'JWT_RESET_SECRET');
+  if (resetSecret) {
+    if (nodeEnv === 'production' && resetSecret.length < 32) {
+      errors.push('JWT_RESET_SECRET must be at least 32 characters in production');
+    }
+    if (
+      resetSecret === valueOf(config, 'JWT_ACCESS_SECRET') ||
+      resetSecret === valueOf(config, 'JWT_REFRESH_SECRET')
+    ) {
+      errors.push('JWT_RESET_SECRET must differ from the access and refresh secrets');
     }
   }
 
@@ -118,7 +173,35 @@ export function validateEnvironment(config: Environment): Environment {
     }
   }
 
+  const geocodingBaseUrl = valueOf(config, 'GEOCODING_PROVIDER_BASE_URL');
+  if (geocodingBaseUrl && !urlPattern.test(geocodingBaseUrl)) {
+    errors.push('GEOCODING_PROVIDER_BASE_URL must be an HTTP(S) URL');
+  }
+
+  const geocodingProvider = valueOf(config, 'GEOCODING_PROVIDER').toLowerCase();
+  if (geocodingProvider && !['nominatim', 'disabled'].includes(geocodingProvider)) {
+    errors.push('GEOCODING_PROVIDER must be nominatim or disabled');
+  }
+  validateBoolean(config, 'GEOCODING_ALLOW_PUBLIC_PROVIDER', errors);
+  validateInteger(config, 'GEOCODING_MIN_INTERVAL_MS', errors, { min: 0 });
+  validateInteger(config, 'GEOCODING_MAX_CONCURRENCY', errors, { min: 1, max: 64 });
+  validateInteger(config, 'GEOCODING_MAX_QUEUE', errors, { min: 1, max: 1000 });
+  validateInteger(config, 'GEOCODING_QUEUE_TIMEOUT_MS', errors, { min: 1 });
+  validateInteger(config, 'GEOCODING_CACHE_MAX_ENTRIES', errors, { min: 1, max: 100_000 });
+
   if (nodeEnv === 'production') {
+    if (
+      geocodingProvider !== 'disabled' &&
+      isPublicOsmNominatim(valueOf(config, 'GEOCODING_PROVIDER_BASE_URL')) &&
+      valueOf(config, 'GEOCODING_ALLOW_PUBLIC_PROVIDER').toLowerCase() !== 'true'
+    ) {
+      errors.push(
+        'GEOCODING_PROVIDER_BASE_URL must point to a self-hosted or commercial geocoder in production (the public OpenStreetMap Nominatim service forbids production use); set GEOCODING_ALLOW_PUBLIC_PROVIDER=true only as a temporary, explicit override',
+      );
+    }
+    if (!valueOf(config, 'GEOCODING_USER_AGENT')) {
+      errors.push('GEOCODING_USER_AGENT is required in production');
+    }
     const origins = valueOf(config, 'CORS_ORIGINS');
     if (!origins) errors.push('CORS_ORIGINS is required in production');
     for (const origin of origins

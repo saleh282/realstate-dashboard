@@ -8,6 +8,13 @@ import { AssetClassification, StoredAssetMetadata } from './evidence-asset.types
 import { CLOUDINARY } from './cloudinary.provider';
 import { EvidenceCleanupTask, EvidenceCleanupTaskDocument } from './schemas/evidence-cleanup-task.schema';
 
+const CLEANUP_LEASE_MS = 5 * 60_000;
+const CLEANUP_MAX_BACKOFF_MS = 6 * 60 * 60_000;
+
+export function cleanupBackoffMs(attempt: number): number {
+  return Math.min(60_000 * 2 ** Math.min(Math.max(attempt, 1), 12), CLEANUP_MAX_BACKOFF_MS);
+}
+
 @Injectable()
 export class CloudinaryAssetService {
   private readonly logger = new Logger(CloudinaryAssetService.name);
@@ -145,26 +152,78 @@ export class CloudinaryAssetService {
     }));
   }
 
-  async reconcilePendingCleanup(limit = 50): Promise<{ processed: number; completed: number }> {
-    if (!this.cleanupTasks) return { processed: 0, completed: 0 };
-    const tasks = await this.cleanupTasks.find({ status: 'pending' }).sort({ createdAt: 1 }).limit(Math.min(Math.max(limit, 1), 100)).exec();
+  /**
+   * Retries queued deletions. Each task is claimed atomically (its
+   * nextAttemptAt is pushed out by a lease) so concurrent workers never process
+   * the same task; failures back off exponentially so a permanently failing
+   * task cannot starve the ones behind it. Cloudinary treats destroying an
+   * already-deleted asset as success, which keeps the operation idempotent.
+   */
+  async reconcilePendingCleanup(
+    limit = 50,
+    options: { leaseMs?: number } = {},
+  ): Promise<{ processed: number; completed: number; failed: number }> {
+    if (!this.cleanupTasks) return { processed: 0, completed: 0, failed: 0 };
+    const batchSize = Math.min(Math.max(Math.trunc(limit) || 1, 1), 100);
+    const leaseMs = options.leaseMs ?? CLEANUP_LEASE_MS;
+    let processed = 0;
     let completed = 0;
-    for (const task of tasks) {
+    let failed = 0;
+    for (let index = 0; index < batchSize; index++) {
+      const now = new Date();
+      const task = await this.cleanupTasks.findOneAndUpdate(
+        { status: 'pending', $or: [{ nextAttemptAt: null }, { nextAttemptAt: { $lte: now } }] },
+        { $set: { nextAttemptAt: new Date(now.getTime() + leaseMs) } },
+        { sort: { createdAt: 1 }, new: true },
+      ).exec();
+      if (!task) break;
+      processed += 1;
       try {
         await this.destroy(task.toObject() as StoredAssetMetadata);
         await this.cleanupTasks.updateOne(
           { _id: task._id, status: 'pending' },
-          { $set: { status: 'completed', completedAt: new Date() }, $inc: { attempts: 1 }, $unset: { lastError: 1 } },
+          {
+            $set: { status: 'completed', completedAt: new Date() },
+            $inc: { attempts: 1 },
+            $unset: { lastError: 1, nextAttemptAt: 1 },
+          },
         ).exec();
         completed += 1;
       } catch (error) {
+        failed += 1;
         await this.cleanupTasks.updateOne(
           { _id: task._id, status: 'pending' },
-          { $set: { lastError: this.safeError(error) }, $inc: { attempts: 1 } },
+          {
+            $set: {
+              lastError: this.safeError(error),
+              nextAttemptAt: new Date(Date.now() + cleanupBackoffMs((task.attempts ?? 0) + 1)),
+            },
+            $inc: { attempts: 1 },
+          },
         ).exec();
       }
     }
-    return { processed: tasks.length, completed };
+    return { processed, completed, failed };
+  }
+
+  /** Backlog figures for alerting; never includes asset identifiers. */
+  async cleanupBacklog(stuckAttempts = 5): Promise<{
+    pending: number;
+    stuck: number;
+    oldestPendingAgeSeconds: number | null;
+  }> {
+    if (!this.cleanupTasks) return { pending: 0, stuck: 0, oldestPendingAgeSeconds: null };
+    const [pending, stuck, oldest] = await Promise.all([
+      this.cleanupTasks.countDocuments({ status: 'pending' }).exec(),
+      this.cleanupTasks.countDocuments({ status: 'pending', attempts: { $gte: stuckAttempts } }).exec(),
+      this.cleanupTasks.findOne({ status: 'pending' }).sort({ createdAt: 1 }).select('createdAt').lean().exec(),
+    ]);
+    const createdAt = (oldest as { createdAt?: Date } | null)?.createdAt;
+    return {
+      pending,
+      stuck,
+      oldestPendingAgeSeconds: createdAt ? Math.max(0, Math.floor((Date.now() - createdAt.getTime()) / 1000)) : null,
+    };
   }
 
   async downloadAuthenticatedAsset(asset: StoredAssetMetadata): Promise<{ buffer: Buffer; contentType: string }> {

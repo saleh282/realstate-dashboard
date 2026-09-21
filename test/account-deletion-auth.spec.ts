@@ -3,6 +3,7 @@ import * as bcrypt from 'bcrypt';
 import { AuthService } from '../src/auth/auth.service';
 import { AccountStatus } from '../src/users/identity.types';
 import { AuthErrorCode } from '../src/common/errors/auth-error-codes';
+import { passwordFingerprint } from '../src/auth/token-types';
 
 function createService() {
   const user: any = {
@@ -16,9 +17,15 @@ function createService() {
     findByIdentifier: jest.fn().mockResolvedValue(user),
     findById: jest.fn().mockResolvedValue(user),
     save: jest.fn().mockResolvedValue(user),
+    updatePasswordIfCurrent: jest.fn().mockResolvedValue(true),
   };
   const jwt: any = {
-    verify: jest.fn().mockReturnValue({ sub: user._id.toString(), purpose: 'password_reset' }),
+    verify: jest.fn().mockImplementation(() => ({
+      sub: user._id.toString(),
+      purpose: 'password_reset',
+      typ: 'password_reset',
+      pwf: passwordFingerprint('secret', user.password),
+    })),
   };
   const config: any = { get: jest.fn().mockReturnValue('secret') };
   const otp: any = {
@@ -80,7 +87,7 @@ describe('MAZAD-017 authentication state integration', () => {
       newPassword: 'NewPassword123!',
       confirmPassword: 'NewPassword123!',
     })).resolves.toMatchObject({ message: expect.any(String) });
-    expect(fixture.users.save).toHaveBeenCalled();
+    expect(fixture.users.updatePasswordIfCurrent).toHaveBeenCalled();
     expect(fixture.refresh.revokeAllForUser).toHaveBeenCalled();
     expect(fixture.deletion.restoreAfterVerification).not.toHaveBeenCalled();
     expect(fixture.user.accountStatus).toBe(AccountStatus.DELETION_PENDING);

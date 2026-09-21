@@ -248,23 +248,24 @@ describe('authenticated KYC asset delivery', () => {
     });
   });
 
-  it('reconciles queued cleanup with bounded provider deletion', async () => {
-    const task = {
-      _id: 'task-1',
-      toObject: () => asset,
-    };
-    const updateExec = jest.fn().mockResolvedValue(undefined);
+  it('reconciles queued cleanup by claiming each task before deleting it', async () => {
+    const task = { _id: 'task-1', attempts: 0, toObject: () => asset };
+    const findOneAndUpdate = jest.fn()
+      .mockReturnValueOnce({ exec: jest.fn().mockResolvedValue(task) })
+      .mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
     const cleanupTasks = {
-      find: jest.fn().mockReturnValue({
-        sort: () => ({ limit: () => ({ exec: jest.fn().mockResolvedValue([task]) }) }),
-      }),
-      updateOne: jest.fn().mockReturnValue({ exec: updateExec }),
+      findOneAndUpdate,
+      updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(undefined) }),
     };
     const destroy = jest.fn().mockResolvedValue({ result: 'ok' });
     const service = new CloudinaryAssetService({ uploader: { destroy } }, cleanupTasks as any);
 
-    await expect(service.reconcilePendingCleanup(500)).resolves.toEqual({ processed: 1, completed: 1 });
-    expect(cleanupTasks.find).toHaveBeenCalledWith({ status: 'pending' });
+    await expect(service.reconcilePendingCleanup(500)).resolves.toEqual({ processed: 1, completed: 1, failed: 0 });
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'pending' }),
+      { $set: { nextAttemptAt: expect.any(Date) } },
+      expect.objectContaining({ sort: { createdAt: 1 }, new: true }),
+    );
     expect(cleanupTasks.updateOne).toHaveBeenCalledWith(
       { _id: 'task-1', status: 'pending' },
       expect.objectContaining({ $set: expect.objectContaining({ status: 'completed' }) }),

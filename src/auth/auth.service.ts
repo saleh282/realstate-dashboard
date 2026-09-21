@@ -28,7 +28,16 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
 import { hashPassword } from '../common/security/password-hashing';
 import { SystemRole } from './roles.enum';
+import { randomUUID } from 'crypto';
 import { normalizeIdentifier } from '../common/validators/identifier.validator';
+import {
+  ACCESS_TOKEN_TYPE,
+  PASSWORD_RESET_AUDIENCE,
+  PASSWORD_RESET_TOKEN_TYPE,
+  derivePasswordResetSecret,
+  fingerprintsMatch,
+  passwordFingerprint,
+} from './token-types';
 import { AuthErrorCode } from '../common/errors/auth-error-codes';
 import {
   AccountStatus,
@@ -39,6 +48,7 @@ import {
   identityProjection,
   isIdentifierVerified,
   resolveAccountStatus,
+  resolveAccountType,
   resolveSystemRole,
 } from '../users/identity.types';
 import { AccountDeletionService } from '../account-deletion/account-deletion.service';
@@ -88,6 +98,31 @@ export class AuthService {
       });
     }
     return status;
+  }
+
+  private invalidResetToken() {
+    return new BadRequestException({
+      message: 'انتهت صلاحية الجلسة، يرجى إعادة طلب رمز التحقق',
+      code: AuthErrorCode.SESSION_EXPIRED,
+    });
+  }
+
+  private passwordResetSecret(): string {
+    return derivePasswordResetSecret(
+      this.config.get('JWT_RESET_SECRET'),
+      this.config.get('JWT_ACCESS_SECRET'),
+    );
+  }
+
+  private isSelfRegisteredPendingAccount(user: any): boolean {
+    return (
+      resolveSystemRole(user) === SystemRole.USER &&
+      resolveAccountType(user) === AccountType.USER &&
+      resolveAccountStatus(user) === AccountStatus.ACTIVE &&
+      !user.emailVerifiedAt &&
+      !user.phoneVerifiedAt &&
+      user.emailVerified !== true
+    );
   }
 
   private userResponse(user: any) {
@@ -140,6 +175,37 @@ export class AuthService {
     const existing = await this.usersService.findByIdentifier(identifier);
     if (existing) {
       if (!isIdentifierVerified(existing, identifier)) {
+        // An unverified account has no established owner. Whoever registered
+        // first must not keep control of the credentials once a later
+        // registration (typically the real mailbox owner) arrives, so the
+        // newest registration atomically replaces the password and name.
+        await this.otpVerificationService.assertCanResend(
+          identifier,
+          OtpCollectionPurpose.REGISTER,
+        );
+        if (this.isSelfRegisteredPendingAccount(existing)) {
+          const replaced = await this.usersService.replaceUnverifiedRegistration(
+            existing._id.toString(),
+            {
+              passwordHash: await hashPassword(dto.password),
+              fullName: dto.fullName,
+            },
+          );
+          if (!replaced) {
+            throw new ConflictException({
+              message: 'البريد الإلكتروني مسجل ومفعل بالفعل',
+              code: AuthErrorCode.ACCOUNT_ALREADY_VERIFIED,
+              isVerified: true,
+              requiresVerification: false,
+              otpSent: false,
+              identifier,
+            });
+          }
+          await this.refreshTokenService.revokeAllForUser(
+            existing._id.toString(),
+            'REGISTRATION_REPLACED',
+          );
+        }
         const code = await this.otpVerificationService.generateAndStore(
           identifier,
           OtpCollectionPurpose.REGISTER,
@@ -361,7 +427,10 @@ export class AuthService {
       throw err;
     }
 
-    const user = await this.usersService.findByIdentifier(identifier);
+    const user = await this.usersService.findByIdentifier(
+      identifier,
+      dto.purpose !== OtpPurpose.REGISTER,
+    );
     if (!user) {
       throw new BadRequestException('المستخدم غير موجود');
     }
@@ -377,12 +446,22 @@ export class AuthService {
       };
     }
 
-    // password_reset -> issue a short-lived resetToken for the next step
+    // password_reset -> issue a short-lived, single-use resetToken. It is signed
+    // with a key access tokens cannot validate against and is bound to the
+    // current password hash, so it dies as soon as the password changes.
+    const resetSecret = this.passwordResetSecret();
     const resetToken = this.jwtService.sign(
-      { sub: user._id.toString(), purpose: 'password_reset' },
       {
-        secret: this.config.get('JWT_ACCESS_SECRET'),
+        sub: user._id.toString(),
+        typ: PASSWORD_RESET_TOKEN_TYPE,
+        purpose: PASSWORD_RESET_TOKEN_TYPE,
+        pwf: passwordFingerprint(resetSecret, String(user.password ?? '')),
+      },
+      {
+        secret: resetSecret,
         expiresIn: '10m',
+        audience: PASSWORD_RESET_AUDIENCE,
+        jwtid: randomUUID(),
       },
     );
 
@@ -395,19 +474,21 @@ export class AuthService {
   async resetPassword(dto: ResetPasswordDto, ip?: string) {
     // The shared password policy + confirmPassword match are enforced by ResetPasswordDto.
 
-    let payload: { sub: string; purpose: string };
+    const resetSecret = this.passwordResetSecret();
+    let payload: { sub: string; purpose?: string; typ?: string; pwf?: string };
     try {
       payload = this.jwtService.verify(dto.resetToken, {
-        secret: this.config.get('JWT_ACCESS_SECRET'),
+        secret: resetSecret,
+        audience: PASSWORD_RESET_AUDIENCE,
       });
     } catch {
-      throw new BadRequestException({
-        message: 'انتهت صلاحية الجلسة، يرجى إعادة طلب رمز التحقق',
-        code: AuthErrorCode.SESSION_EXPIRED,
-      });
+      throw this.invalidResetToken();
     }
 
-    if (payload.purpose !== 'password_reset') {
+    if (
+      payload.purpose !== PASSWORD_RESET_TOKEN_TYPE ||
+      payload.typ !== PASSWORD_RESET_TOKEN_TYPE
+    ) {
       throw new BadRequestException('رمز غير صالح');
     }
 
@@ -415,13 +496,24 @@ export class AuthService {
     if (!user) {
       throw new BadRequestException('المستخدم غير موجود');
     }
+    // A used token no longer matches: the fingerprint is bound to the password
+    // hash that existed when the token was issued.
+    const currentHash = String(user.password ?? '');
+    if (
+      !currentHash ||
+      !fingerprintsMatch(payload.pwf, passwordFingerprint(resetSecret, currentHash))
+    ) {
+      throw this.invalidResetToken();
+    }
     const resetStatus = resolveAccountStatus(user);
     if (resetStatus !== AccountStatus.DELETION_PENDING) this.assertCanAuthenticate(user);
 
-    user.password = await hashPassword(dto.newPassword);
-    user.failedLoginAttempts = 0;
-    user.accountLockedUntil = undefined;
-    await this.usersService.save(user);
+    const updated = await this.usersService.updatePasswordIfCurrent(
+      user._id.toString(),
+      currentHash,
+      await hashPassword(dto.newPassword),
+    );
+    if (!updated) throw this.invalidResetToken();
 
     // force re-login everywhere - drop all existing sessions
     await this.refreshTokenService.revokeAllForUser(user._id.toString());
@@ -458,7 +550,7 @@ export class AuthService {
 
   private signAccessToken(userId: string, sessionId: string) {
     return this.jwtService.sign(
-      { sub: userId, sid: sessionId },
+      { sub: userId, sid: sessionId, typ: ACCESS_TOKEN_TYPE },
       {
         secret: this.config.get('JWT_ACCESS_SECRET'),
         expiresIn: this.config.get('JWT_ACCESS_EXPIRES_IN') ?? '15m',

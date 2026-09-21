@@ -4,12 +4,14 @@ import {
 } from '@nestjs/common';
 import { AuthService } from '../src/auth/auth.service';
 import { JwtStrategy } from '../src/auth/jwt.strategy';
+import { passwordFingerprint } from '../src/auth/token-types';
 import { UserRole } from '../src/auth/roles.enum';
 import { AccountStatus } from '../src/users/identity.types';
 
 describe('active-account session enforcement', () => {
   const payload = {
     sub: '64b000000000000000000001',
+    sid: 'session-id',
     identifier: 'person@example.com',
   };
 
@@ -144,15 +146,21 @@ describe('active-account session enforcement', () => {
     const user = {
       _id: { toString: () => payload.sub },
       accountStatus: AccountStatus.ACTIVE,
+      password: 'stored-password-hash',
     };
     const service = Object.create(AuthService.prototype) as any;
     service.config = { get: jest.fn().mockReturnValue('secret') };
     service.jwtService = {
-      verify: jest.fn().mockReturnValue({ sub: payload.sub, purpose: 'password_reset' }),
+      verify: jest.fn().mockReturnValue({
+        sub: payload.sub,
+        purpose: 'password_reset',
+        typ: 'password_reset',
+        pwf: passwordFingerprint('secret', user.password),
+      }),
     };
     service.usersService = {
       findById: jest.fn().mockResolvedValue(user),
-      save: jest.fn(),
+      updatePasswordIfCurrent: jest.fn().mockResolvedValue(true),
     };
     service.refreshTokenService = { revokeAllForUser: jest.fn() };
     service.auditLogService = { log: jest.fn() };

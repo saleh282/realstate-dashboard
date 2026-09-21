@@ -11,7 +11,10 @@ const registration = {
 
 function createAuthService(existing?: { emailVerified: boolean; email: string }) {
   const usersService = {
-    findByIdentifier: jest.fn().mockResolvedValue(existing ?? null),
+    findByIdentifier: jest.fn().mockResolvedValue(
+      existing ? { _id: { toString: () => 'existing-user-id' }, ...existing } : null,
+    ),
+    replaceUnverifiedRegistration: jest.fn().mockResolvedValue(true),
     create: jest.fn().mockResolvedValue({
       _id: { toString: () => 'new-user-id' },
       emailVerified: false,
@@ -19,7 +22,9 @@ function createAuthService(existing?: { emailVerified: boolean; email: string })
   };
   const otpVerificationService = {
     generateAndStore: jest.fn().mockResolvedValue('123456'),
+    assertCanResend: jest.fn().mockResolvedValue(undefined),
   };
+  const refreshTokenService = { revokeAllForUser: jest.fn().mockResolvedValue(undefined) };
   const mailService = { sendOtp: jest.fn().mockResolvedValue(undefined) };
   const smsService = { sendOtp: jest.fn() };
   const auditLogService = { log: jest.fn().mockResolvedValue(undefined) };
@@ -31,7 +36,7 @@ function createAuthService(existing?: { emailVerified: boolean; email: string })
     otpVerificationService as any,
     mailService as any,
     smsService as any,
-    {} as any,
+    refreshTokenService as any,
     auditLogService as any,
   );
 

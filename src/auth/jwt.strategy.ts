@@ -14,6 +14,7 @@ import {
 } from '../users/identity.types';
 import { AuthErrorCode } from '../common/errors/auth-error-codes';
 import { RefreshTokenService } from '../refresh-token/refresh-token.service';
+import { ACCESS_TOKEN_TYPE } from './token-types';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
@@ -29,7 +30,19 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
   }
 
-  async validate(payload: { sub: string; sid?: string }) {
+  async validate(payload: { sub: string; sid?: string; typ?: string; purpose?: string }) {
+    // Only session-bound access tokens authenticate requests. Purpose-scoped
+    // tokens (password reset, etc.) and session-less tokens are never accepted.
+    if (
+      payload.purpose !== undefined ||
+      (payload.typ !== undefined && payload.typ !== ACCESS_TOKEN_TYPE) ||
+      !payload.sid
+    ) {
+      throw new UnauthorizedException({
+        message: 'رمز الدخول غير صالح',
+        code: AuthErrorCode.INVALID_TOKEN_TYPE,
+      });
+    }
     const user = await this.usersService.findById(payload.sub);
     if (!user) throw new UnauthorizedException('المستخدم غير موجود');
     const accountStatus = resolveAccountStatus(user);
@@ -57,10 +70,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
         code: AuthErrorCode.ACCOUNT_ALREADY_ANONYMIZED,
       });
     }
-    if (
-      payload.sid &&
-      !(await this.refreshTokenService.isSessionActive(payload.sub, payload.sid))
-    ) {
+    if (!(await this.refreshTokenService.isSessionActive(payload.sub, payload.sid))) {
       throw new UnauthorizedException({
         message: 'انتهت صلاحية الجلسة',
         code: AuthErrorCode.SESSION_REVOKED,

@@ -8,7 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { randomUUID } from 'crypto';
+import { getRequestId, resolveRequestId } from '../common/request-context/request-context';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { SystemRole } from '../auth/roles.enum';
@@ -32,10 +32,7 @@ export class AdminCompaniesController {
     @Headers('x-request-id') suppliedRequestId: string | undefined,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const requestId =
-      typeof suppliedRequestId === 'string' && suppliedRequestId.length <= 100
-        ? suppliedRequestId
-        : randomUUID();
+    const requestId = getRequestId(request) ?? resolveRequestId(suppliedRequestId);
     response.setHeader('X-Request-Id', requestId);
     return this.companies.create(payload, {
       actorUserId: request.user.userId,
