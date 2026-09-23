@@ -23,6 +23,7 @@ import { ManagedMarketingModule } from './managed-marketing/managed-marketing.mo
 import { AuthorizationModule } from './authorization/authorization.module';
 import { AccountDeletionModule } from './account-deletion/account-deletion.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
+import { FavoritesModule } from './favorites/favorites.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { GeocodingModule } from './geocoding/geocoding.module';
     AuthorizationModule,
     AccountDeletionModule,
     GeocodingModule,
+    FavoritesModule,
     HealthModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }],

@@ -45,6 +45,7 @@ const MARKETPLACE_CAPABILITIES = new Set<Capability>([
   Capability.PROPERTY_CREATE,
   Capability.PROPERTY_READ_OWN,
   Capability.PROPERTY_MANAGE_OWN,
+  Capability.FAVORITE_MANAGE_OWN,
   Capability.MANAGED_MARKETING_REQUEST,
   Capability.BROKER_APPLICATION_READ_OWN,
   Capability.BROKER_APPLICATION_SUBMIT,
@@ -106,7 +107,8 @@ export class AuthorizationPolicyService {
       capability === Capability.KYC_SELF_READ ||
       capability === Capability.KYC_SELF_SUBMIT ||
       capability === Capability.PROPERTY_READ_OWN ||
-      capability === Capability.BROKER_APPLICATION_READ_OWN
+      capability === Capability.BROKER_APPLICATION_READ_OWN ||
+      capability === Capability.FAVORITE_MANAGE_OWN
     ) {
       return true;
     }

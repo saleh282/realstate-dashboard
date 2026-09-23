@@ -9,7 +9,7 @@ import { ListPublishedPropertiesDto } from '../src/properties/dto/list-published
  *
  * `fakeCollection` is a tiny in-memory stand-in for the Mongoose query chain
  * (`find(filter).sort().skip().limit().populate().lean().exec()`) that applies
- * the same operators `PropertiesService` actually issues ($ne, $nin, $exists,
+ * the same operators `PropertiesService` actually issues ($ne, $nin, $in, $exists,
  * $gte/$lte, $regex/$options, $or, equality incl. ObjectId-like values). This
  * lets the filter/sort/pagination behaviour be exercised end-to-end against
  * realistic fixtures instead of asserting on mocked call shapes.
@@ -29,6 +29,7 @@ function matchesCondition(value: unknown, condition: unknown): boolean {
         case '$exists': return (value !== undefined) === opValue;
         case '$ne': return coerce(value) !== coerce(opValue);
         case '$nin': return !(opValue as unknown[]).map(coerce).includes(coerce(value));
+        case '$in': return (opValue as unknown[]).map(coerce).includes(coerce(value));
         case '$gte': return value !== undefined && (value as number) >= (opValue as number);
         case '$lte': return value !== undefined && (value as number) <= (opValue as number);
         case '$regex': return new RegExp(opValue as string, (condition as any).$options ?? '').test(String(value ?? ''));
@@ -74,6 +75,9 @@ function fakeCollection(docs: Record<string, any>[]) {
     }),
     countDocuments: jest.fn((filter: Record<string, unknown> = {}) => ({
       exec: async () => docs.filter((doc) => matchesFilter(doc, filter)).length,
+    })),
+    exists: jest.fn((filter: Record<string, unknown> = {}) => ({
+      exec: async () => (docs.some((doc) => matchesFilter(doc, filter)) ? { _id: (docs.find((doc) => matchesFilter(doc, filter)) as any)._id } : null),
     })),
   };
 }
@@ -447,5 +451,92 @@ describe('MAZAD-021 approval denormalization', () => {
     const [, update] = updateOne.mock.calls[0];
     expect(update.$set).not.toHaveProperty('governorateCode');
     expect(update.$set).not.toHaveProperty('totalPriceMinor');
+  });
+});
+
+/**
+ * MAZAD-022 favorites reuses the exact same public-visibility gate through
+ * two small read helpers on PropertiesService, rather than a parallel
+ * favorites-only notion of "visible". These tests exercise those helpers
+ * directly against the same fixtures/harness as the MAZAD-021 suite above.
+ */
+describe('PropertiesService favorite-support helpers (MAZAD-022)', () => {
+  // getPublicProjectionsByIds/isPubliclyVisible short-circuit on
+  // Types.ObjectId.isValid, so fixtures here need real ObjectId-hex ids
+  // (unlike the string ids the MAZAD-021 suite above uses elsewhere).
+  const ID_APPROVED = '64b000000000000000000101';
+  const ID_APPROVED_2 = '64b000000000000000000102';
+  const ID_PENDING = '64b000000000000000000103';
+  const ID_OWNER_HIDDEN = '64b000000000000000000104';
+  const ID_ARCHIVED = '64b000000000000000000105';
+  const ID_ADMIN_HIDDEN = '64b000000000000000000106';
+  const ID_NONEXISTENT = '64b0000000000000000000ff';
+
+  const docs = [
+    makeProperty({ id: ID_APPROVED }),
+    makeProperty({ id: ID_APPROVED_2 }),
+    makeProperty({ id: ID_PENDING, status: 'pending_review', currentPublicRevisionId: undefined }),
+    makeProperty({ id: ID_OWNER_HIDDEN, isOwnerVisible: false }),
+    makeProperty({ id: ID_ARCHIVED, lifecycleStatus: PropertyLifecycleStatus.ARCHIVED }),
+    makeProperty({ id: ID_ADMIN_HIDDEN, lifecycleStatus: PropertyLifecycleStatus.ADMIN_HIDDEN }),
+  ];
+
+  describe('isPubliclyVisible', () => {
+    it('is true only for an approved, owner-visible, non-archived property with a public revision', async () => {
+      const instance = service(docs);
+      await expect(instance.isPubliclyVisible(ID_APPROVED)).resolves.toBe(true);
+    });
+
+    it.each([
+      ['pending', ID_PENDING], ['owner-hidden', ID_OWNER_HIDDEN], ['archived', ID_ARCHIVED], ['admin-hidden', ID_ADMIN_HIDDEN],
+    ])('is false for a %s property', async (_label, id) => {
+      const instance = service(docs);
+      await expect(instance.isPubliclyVisible(id)).resolves.toBe(false);
+    });
+
+    it('is false for a malformed id without querying the database', async () => {
+      const instance = service(docs);
+      await expect(instance.isPubliclyVisible('not-an-object-id')).resolves.toBe(false);
+    });
+
+    it('is false for an id that does not exist at all', async () => {
+      const instance = service(docs);
+      await expect(instance.isPubliclyVisible(ID_NONEXISTENT)).resolves.toBe(false);
+    });
+  });
+
+  describe('getPublicProjectionsByIds', () => {
+    it('returns the safe public projection keyed by id for visible properties only', async () => {
+      const instance = service(docs);
+      const result = await instance.getPublicProjectionsByIds([ID_APPROVED, ID_PENDING, ID_OWNER_HIDDEN, ID_ARCHIVED, ID_ADMIN_HIDDEN]);
+      expect([...result.keys()]).toEqual([ID_APPROVED]);
+      const projected = result.get(ID_APPROVED);
+      expect(projected).toMatchObject({ id: ID_APPROVED });
+      expect(projected).not.toHaveProperty('reviewedBy');
+      expect(projected).not.toHaveProperty('privateEvidence');
+    });
+
+    it('silently drops ids that are hidden/archived/unavailable instead of throwing', async () => {
+      const instance = service(docs);
+      await expect(instance.getPublicProjectionsByIds([ID_ARCHIVED, ID_ADMIN_HIDDEN])).resolves.toEqual(new Map());
+    });
+
+    it('returns an empty map for an empty or malformed input without querying the database', async () => {
+      const instance = service(docs);
+      expect((await instance.getPublicProjectionsByIds([])).size).toBe(0);
+      expect((await instance.getPublicProjectionsByIds(['not-an-object-id'])).size).toBe(0);
+    });
+
+    it('only returns the requested ids, even when other properties are also publicly visible', async () => {
+      const instance = service(docs);
+      const result = await instance.getPublicProjectionsByIds([ID_APPROVED]);
+      expect([...result.keys()]).toEqual([ID_APPROVED]);
+    });
+
+    it('de-duplicates repeated ids', async () => {
+      const instance = service(docs);
+      const result = await instance.getPublicProjectionsByIds([ID_APPROVED, ID_APPROVED]);
+      expect(result.size).toBe(1);
+    });
   });
 });

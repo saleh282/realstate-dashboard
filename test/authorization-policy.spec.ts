@@ -197,4 +197,18 @@ describe('MAZAD-016 authorization policy matrix', () => {
     expect(capabilities).toContain(Capability.PROPERTY_CREATE);
     expect(capabilities).not.toContain(Capability.ADMIN_PROPERTY_REVIEW);
   });
+
+  it('grants FAVORITE_MANAGE_OWN to any authenticated marketplace account, not gated by broker approval (MAZAD-022)', () => {
+    expect(AuthorizationPolicyService.can({}, Capability.FAVORITE_MANAGE_OWN)).toBe(false);
+    expect(AuthorizationPolicyService.can(principal({ accountType: AccountType.USER }), Capability.FAVORITE_MANAGE_OWN)).toBe(true);
+    expect(AuthorizationPolicyService.can(principal({ accountType: AccountType.COMPANY }), Capability.FAVORITE_MANAGE_OWN)).toBe(true);
+    expect(AuthorizationPolicyService.can(
+      principal({ accountType: AccountType.BROKER, brokerStatus: BrokerStatus.NOT_APPLIED }),
+      Capability.FAVORITE_MANAGE_OWN,
+    )).toBe(true);
+    const admin = principal({ userId: id.admin, systemRole: SystemRole.ADMIN, accountType: AccountType.USER });
+    expect(AuthorizationPolicyService.can(admin, Capability.FAVORITE_MANAGE_OWN)).toBe(false);
+    expect(codeOf(() => AuthorizationPolicyService.assert(admin, Capability.FAVORITE_MANAGE_OWN)))
+      .toMatchObject({ code: AuthorizationErrorCode.ADMIN_MARKETPLACE_FORBIDDEN });
+  });
 });

@@ -95,6 +95,17 @@ A filter combination that matches nothing returns a normal `200` with an empty `
 
 Property documents carry a denormalized copy of their current public revision's `operationType`/`purposeCategoryId`/`purposeSubcategoryId`/`governorateCode`/`city`/`district`/`totalPriceMinor`/`currency` (kept in sync in `reviewForAdmin` whenever a revision is approved) so this query can filter and sort on the `properties` collection directly instead of joining `property_revisions` per request. The returned JSON itself is unaffected: it still projects from the populated current revision when one exists, exactly as before.
 
+## Favorites (MAZAD-022)
+
+All `/favorites` routes require authentication (`JwtAuthGuard` + `FAVORITE_MANAGE_OWN`, available to any active marketplace account — not gated by broker approval like the property-creation capabilities). Favorites are private to the authenticated user; there is no way to read another account's favorites.
+
+- `POST /favorites { propertyId }` — add a favorite. Idempotent: favoriting an already-favorited property is a no-op success, not a duplicate or an error. The target property must currently pass the same public-visibility gate as `GET /properties`/`GET /properties/:id` (approved, owner-visible, not archived/admin-hidden, has a published revision); otherwise this returns `404 FAVORITE_PROPERTY_NOT_AVAILABLE`. A malformed `propertyId` returns `400 FAVORITE_PROPERTY_INVALID`.
+- `DELETE /favorites/:propertyId` — remove a favorite. Idempotent: removing a favorite that is already gone (or never existed) is a safe no-op, not a `404`.
+- `GET /favorites/ids` — the full set of the current user's favorited property ids (`{ propertyIds: string[] }`), capped at 2000. Not paginated by design: it exists purely so a client can answer "is this property favorited?" for any card it renders without a request per card, by caching this set once.
+- `GET /favorites?page=&limit=` — the user's favorites with the same safe public property projection `GET /properties` uses, newest-favorited first (bounded pagination, default 20/max 50, same clamping as the search endpoint). `pagination.total` counts favorite records, not currently-visible properties: if a favorited property later becomes hidden/archived/unavailable, its favorite record is left untouched but it is silently omitted from `items` — a page can therefore legitimately contain fewer than `limit` items. A property is never exposed through this endpoint merely because it was once favorited.
+
+The `favorites` collection has a unique `(userId, propertyId)` index, so a genuine concurrent double-add is resolved by MongoDB (one write wins, the other's duplicate-key error is treated as the already-favorited case) rather than by application-level locking.
+
 ## Idempotent property submissions
 
 `POST /properties`, `POST /properties/mine/:id/revisions` and `POST /properties/mine/:id/revisions/submit` accept an optional `Idempotency-Key` header (8-128 characters of `[A-Za-z0-9._:-]`). A mobile client that times out cannot know whether the server finished, so it retries with the same key and the server runs the operation once:

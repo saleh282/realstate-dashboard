@@ -483,13 +483,7 @@ export class PropertiesService {
   }
   async listPublished(query: ListPublishedPropertiesDto = {}) {
     const { filter: dimensionFilter, sort, page, limit } = await this.buildPublicListingQuery(query);
-    const filter = {
-      status: 'approved',
-      isOwnerVisible: { $ne: false },
-      lifecycleStatus: { $nin: [PropertyLifecycleStatus.ARCHIVED, PropertyLifecycleStatus.ADMIN_HIDDEN] },
-      currentPublicRevisionId: { $exists: true },
-      ...dimensionFilter,
-    };
+    const filter = { ...this.publicVisibilityFilter(), ...dimensionFilter };
     const [items, total] = await Promise.all([
       this.properties.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).populate('currentPublicRevisionId').lean().exec(),
       this.properties.countDocuments(filter).exec(),
@@ -589,13 +583,7 @@ export class PropertiesService {
 
   async getPublished(id: string) {
     this.assertId(id);
-    const item = await this.properties.findOne({
-      _id: id,
-      status: 'approved',
-      isOwnerVisible: { $ne: false },
-      lifecycleStatus: { $nin: [PropertyLifecycleStatus.ARCHIVED, PropertyLifecycleStatus.ADMIN_HIDDEN] },
-      currentPublicRevisionId: { $exists: true },
-    }).populate('currentPublicRevisionId').lean().exec();
+    const item = await this.properties.findOne({ _id: id, ...this.publicVisibilityFilter() }).populate('currentPublicRevisionId').lean().exec();
     if (!item || !this.populatedRevision(item.currentPublicRevisionId)) throw new NotFoundException('العقار غير موجود');
     const revision = this.populatedRevision(item.currentPublicRevisionId)!;
     const [purpose, type, governorate, paymentMethods] = await Promise.all([
@@ -611,6 +599,45 @@ export class PropertiesService {
       governorateNameAr: governorate?.nameAr ?? revision.governorateCode,
       paymentMethodNamesAr: paymentMethods.map(item => item.nameAr),
     } };
+  }
+
+  /**
+   * The single gate every public-facing property query shares: approved,
+   * owner-visible, not archived/admin-hidden, and carrying a current public
+   * revision. Centralized so `listPublished`, `getPublished` and the
+   * favorites read paths (MAZAD-022) can never drift apart on what "public"
+   * means — a property that stops meeting this must stop being reachable
+   * through any of them, even if a user had previously favorited it.
+   */
+  private publicVisibilityFilter() {
+    return {
+      status: 'approved',
+      isOwnerVisible: { $ne: false },
+      lifecycleStatus: { $nin: [PropertyLifecycleStatus.ARCHIVED, PropertyLifecycleStatus.ADMIN_HIDDEN] },
+      currentPublicRevisionId: { $exists: true },
+    };
+  }
+
+  /** Cheap existence+visibility check used to validate a favorite target (MAZAD-022). */
+  async isPubliclyVisible(id: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(id)) return false;
+    const exists = await this.properties.exists({ _id: id, ...this.publicVisibilityFilter() }).exec();
+    return Boolean(exists);
+  }
+
+  /**
+   * Safe public projections for a set of property ids (MAZAD-022 favorites
+   * listing), keyed by property id. Ids that no longer pass
+   * `publicVisibilityFilter` (hidden, archived, rejected, deleted, ...) are
+   * simply absent from the result — the caller must not assume every
+   * requested id comes back.
+   */
+  async getPublicProjectionsByIds(ids: string[]): Promise<Map<string, ReturnType<PropertiesService['toMarketplacePublic']>>> {
+    const validIds = [...new Set(ids)].filter((id) => Types.ObjectId.isValid(id));
+    if (!validIds.length) return new Map();
+    const items = await this.properties.find({ _id: { $in: validIds }, ...this.publicVisibilityFilter() }).populate('currentPublicRevisionId').lean().exec();
+    const hydrated = await this.hydratePublicListings(items);
+    return new Map(hydrated.map((item) => [item.id, item]));
   }
 
   async updateOwnerVisibility(ownerId: string, id: string, isVisible: boolean) {
