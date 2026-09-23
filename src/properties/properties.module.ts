@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { PassportModule } from '@nestjs/passport';
 import { Amenity, AmenitySchema } from '../amenities/schemas/amenity.schema';
+import { Auction, AuctionSchema } from '../auctions/schemas/auction.schema';
 import { Governorate, GovernorateSchema } from '../governorates/schemas/governorate.schema';
 import { City, CitySchema } from '../governorates/schemas/city.schema';
 import { PropertyOption, PropertyOptionSchema } from '../property-options/schemas/property-option.schema';
@@ -26,6 +27,10 @@ import { IdempotencyModule } from '../common/idempotency/idempotency.module';
     { name: Amenity.name, schema: AmenitySchema }, { name: PropertyOption.name, schema: PropertyOptionSchema },
     { name: Governorate.name, schema: GovernorateSchema },
     { name: City.name, schema: CitySchema },
+    // Read-only boundary for PropertyAuctionLockService (MAZAD-024): registered
+    // here (not by importing AuctionsModule) so PropertiesModule never depends
+    // on AuctionsModule, which already depends on PropertiesModule.
+    { name: Auction.name, schema: AuctionSchema },
   ])],
   controllers: [PropertiesController, AdminPropertiesController],
   providers: [PropertiesService, RolesGuard, PropertyAuctionLockService],

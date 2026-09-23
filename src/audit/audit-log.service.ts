@@ -134,6 +134,38 @@ export class AuditLogService {
     }
   }
 
+  /**
+   * Best-effort audit entry for an unattended, non-human-initiated lifecycle
+   * event (the auction scheduling/closing worker's activations and
+   * expirations, and the anti-sniping extension primitive — MAZAD-024).
+   * Mirrors `logResourceAction` (fire-and-forget; a logging failure never
+   * breaks the worker) but omits `userId`/`actorUserId` instead of forcing
+   * an invalid actor id onto a system-initiated event — reusing the
+   * schema's existing "actor couldn't be identified" null-actor allowance
+   * that `log()` already relies on, rather than inventing a fake system
+   * account.
+   */
+  async logSystemAction(
+    action: AuditAction,
+    targetResourceId: string,
+    reason: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.auditModel.create({
+        action,
+        userId: null,
+        targetResourceId,
+        reason,
+        ip: 'system',
+        metadata,
+        requestId: auditRequestId(),
+      });
+    } catch {
+      this.logger.warn(`Failed to write system audit log (${action})`);
+    }
+  }
+
   async listForAdmin(options: {
     page?: number;
     limit?: number;

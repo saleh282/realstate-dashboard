@@ -94,6 +94,10 @@ export function validateEnvironment(config: Environment): Environment {
   validateInteger(config, 'CLEANUP_BATCH_SIZE', errors, { min: 1, max: 100 });
   validateInteger(config, 'CLEANUP_ALERT_AGE_SECONDS', errors, { min: 60 });
 
+  validateBoolean(config, 'AUCTION_LIFECYCLE_WORKER_ENABLED', errors);
+  validateInteger(config, 'AUCTION_LIFECYCLE_INTERVAL_SECONDS', errors, { min: 5, max: 86_400 });
+  validateInteger(config, 'AUCTION_LIFECYCLE_BATCH_SIZE', errors, { min: 1, max: 200 });
+
   const resetSecret = valueOf(config, 'JWT_RESET_SECRET');
   if (resetSecret) {
     if (nodeEnv === 'production' && resetSecret.length < 32) {

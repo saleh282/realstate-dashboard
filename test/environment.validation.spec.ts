@@ -96,5 +96,12 @@ describe('environment validation', () => {
       expect(invalid({ CLEANUP_INTERVAL_SECONDS: '5' })).toThrow('CLEANUP_INTERVAL_SECONDS');
       expect(invalid({ CLEANUP_BATCH_SIZE: '1000' })).toThrow('CLEANUP_BATCH_SIZE');
     });
+
+    it('validates the auction lifecycle worker settings (MAZAD-024)', () => {
+      expect(invalid({ AUCTION_LIFECYCLE_WORKER_ENABLED: 'true', AUCTION_LIFECYCLE_INTERVAL_SECONDS: '30', AUCTION_LIFECYCLE_BATCH_SIZE: '50' })).not.toThrow();
+      expect(invalid({ AUCTION_LIFECYCLE_WORKER_ENABLED: 'yes' })).toThrow('AUCTION_LIFECYCLE_WORKER_ENABLED');
+      expect(invalid({ AUCTION_LIFECYCLE_INTERVAL_SECONDS: '1' })).toThrow('AUCTION_LIFECYCLE_INTERVAL_SECONDS');
+      expect(invalid({ AUCTION_LIFECYCLE_BATCH_SIZE: '1000' })).toThrow('AUCTION_LIFECYCLE_BATCH_SIZE');
+    });
   });
 });

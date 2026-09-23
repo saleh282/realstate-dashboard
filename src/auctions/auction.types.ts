@@ -2,10 +2,12 @@
  * Auction lifecycle vocabulary (MAZAD-023 foundation).
  *
  * Only the statuses required to represent the frozen V1 outcomes are
- * defined here; the *transitions* between them (starting a scheduled
- * auction, closing an ended one, cancelling, finalizing a winner) are
- * explicitly deferred to MAZAD-024's scheduling/closing workers. A status
- * is "terminal" once bids can never be accepted again.
+ * defined here. The *transitions* between them (starting a scheduled
+ * auction, expiring an ended one, cancelling) are implemented by
+ * `AuctionLifecycleService` against the matrix in `auction-transitions.ts`
+ * (MAZAD-024); finalizing a winner (ENDED_PENDING_CLOSE -> COMPLETED) is
+ * still deferred to a later closing worker (MAZAD-025+). A status is
+ * "terminal" once bids can never be accepted again.
  */
 export enum AuctionStatus {
   /** Created, waiting for `scheduledStartAt`. Bids are not yet accepted. */
