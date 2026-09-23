@@ -174,7 +174,7 @@ describe('production geocoder requirements', () => {
 
   it('validates provider name and tuning values', () => {
     const dev = { NODE_ENV: 'development', MONGO_URI: 'mongodb://x', JWT_ACCESS_SECRET: 'a', JWT_REFRESH_SECRET: 'b', JWT_ACCESS_EXPIRES_IN: '15m', JWT_REFRESH_EXPIRES_IN: '7d' };
-    expect(() => validateEnvironment({ ...dev, GEOCODING_PROVIDER: 'google' })).toThrow('GEOCODING_PROVIDER must be');
+    expect(() => validateEnvironment({ ...dev, GEOCODING_PROVIDER: 'mapbox' })).toThrow('GEOCODING_PROVIDER must be');
     expect(() => validateEnvironment({ ...dev, GEOCODING_MAX_QUEUE: '0' })).toThrow('GEOCODING_MAX_QUEUE');
     expect(() => validateEnvironment({ ...dev, GEOCODING_MAX_CONCURRENCY: '4', GEOCODING_CACHE_MAX_ENTRIES: '100' })).not.toThrow();
   });

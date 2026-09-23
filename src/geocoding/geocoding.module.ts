@@ -5,11 +5,13 @@ import { GEOCODING_OPTIONS, isPublicOsmNominatim, readGeocodingOptions } from '.
 import { GeocodingService } from './geocoding.service';
 import { GEOCODING_PROVIDER, GeocodingProvider } from './geocoding.types';
 import { DisabledGeocodingProvider } from './disabled-geocoding.provider';
+import { GoogleGeocodingProvider } from './google-geocoding.provider';
 import { NominatimGeocodingProvider } from './nominatim-geocoding.provider';
 
 // Add a new backend by registering it here; the service and API never change.
-const PROVIDERS: Record<string, 'nominatim' | 'disabled'> = {
+const PROVIDERS: Record<string, 'nominatim' | 'google' | 'disabled'> = {
   nominatim: 'nominatim',
+  google: 'google',
   disabled: 'disabled',
 };
 
@@ -18,6 +20,7 @@ const PROVIDERS: Record<string, 'nominatim' | 'disabled'> = {
   providers: [
     GeocodingService,
     NominatimGeocodingProvider,
+    GoogleGeocodingProvider,
     DisabledGeocodingProvider,
     {
       provide: GEOCODING_OPTIONS,
@@ -26,10 +29,11 @@ const PROVIDERS: Record<string, 'nominatim' | 'disabled'> = {
     },
     {
       provide: GEOCODING_PROVIDER,
-      inject: [ConfigService, NominatimGeocodingProvider, DisabledGeocodingProvider],
+      inject: [ConfigService, NominatimGeocodingProvider, GoogleGeocodingProvider, DisabledGeocodingProvider],
       useFactory: (
         config: ConfigService,
         nominatim: NominatimGeocodingProvider,
+        google: GoogleGeocodingProvider,
         disabled: DisabledGeocodingProvider,
       ): GeocodingProvider => {
         const name = PROVIDERS[(config.get<string>('GEOCODING_PROVIDER') ?? 'nominatim').trim().toLowerCase()] ?? 'nominatim';
@@ -38,6 +42,7 @@ const PROVIDERS: Record<string, 'nominatim' | 'disabled'> = {
             'Using the public OpenStreetMap Nominatim service. Its usage policy forbids production-scale use; configure GEOCODING_PROVIDER_BASE_URL for a self-hosted or commercial endpoint.',
           );
         }
+        if (name === 'google') return google;
         return name === 'disabled' ? disabled : nominatim;
       },
     },

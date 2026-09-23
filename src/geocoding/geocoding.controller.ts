@@ -19,8 +19,10 @@ export class GeocodingController {
     return this.service.reverse(query.latitude, query.longitude, query.language);
   }
 
+  // The map picker searches as the user types (debounced), so allow a few
+  // more calls than an explicit search button would need.
   @Get('search')
-  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
   search(@Query() query: SearchGeocodingQueryDto) {
     return this.service.search(query.query, query.language);
   }

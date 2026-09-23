@@ -33,10 +33,12 @@ function integer(raw: string | undefined, fallback: number, min = 0): number {
 /**
  * The public OpenStreetMap service allows about one request per second with no
  * parallelism, so it keeps the strict serial defaults. A self-hosted or
- * commercial endpoint gets parallelism instead; every value is overridable.
+ * commercial endpoint (including Google) gets parallelism instead; every value
+ * is overridable.
  */
 export function readGeocodingOptions(get: (key: string) => string | undefined): GeocodingOptions {
-  const publicOsm = isPublicOsmNominatim(get('GEOCODING_PROVIDER_BASE_URL'));
+  const provider = (get('GEOCODING_PROVIDER') ?? 'nominatim').trim().toLowerCase() || 'nominatim';
+  const publicOsm = provider === 'nominatim' && isPublicOsmNominatim(get('GEOCODING_PROVIDER_BASE_URL'));
   return {
     minIntervalMs: integer(get('GEOCODING_MIN_INTERVAL_MS'), publicOsm ? 1_100 : 0),
     maxConcurrency: integer(get('GEOCODING_MAX_CONCURRENCY'), publicOsm ? 1 : 4, 1),
