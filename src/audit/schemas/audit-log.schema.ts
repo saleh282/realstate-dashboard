@@ -75,6 +75,7 @@ export enum AuditAction {
   MANAGED_MARKETING_REQUEST_CREATED = 'managed_marketing_request_created',
   MANAGED_MARKETING_REQUEST_CANCELLED = 'managed_marketing_request_cancelled',
   ADMIN_MANAGED_MARKETING_REQUEST_REVIEWED = 'admin_managed_marketing_request_reviewed',
+  AUCTION_CREATED = 'auction_created',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false }, collection: 'audit_logs' })

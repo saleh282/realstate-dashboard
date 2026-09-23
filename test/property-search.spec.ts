@@ -50,6 +50,15 @@ function matchesFilter(doc: Record<string, unknown>, filter: Record<string, unkn
 
 function fakeCollection(docs: Record<string, any>[]) {
   return {
+    findOne: jest.fn((filter: Record<string, unknown> = {}) => {
+      const result = docs.find((doc) => matchesFilter(doc, filter)) ?? null;
+      const chain: any = {
+        populate: () => chain,
+        lean: () => chain,
+        exec: async () => result,
+      };
+      return chain;
+    }),
     find: jest.fn((filter: Record<string, unknown> = {}) => {
       let results = docs.filter((doc) => matchesFilter(doc, filter));
       const chain: any = {
@@ -538,5 +547,77 @@ describe('PropertiesService favorite-support helpers (MAZAD-022)', () => {
       const result = await instance.getPublicProjectionsByIds([ID_APPROVED, ID_APPROVED]);
       expect(result.size).toBe(1);
     });
+  });
+});
+
+/**
+ * MAZAD-023 reuses the exact same public-visibility gate to decide which
+ * property an auction may be anchored to, via one more small read helper on
+ * PropertiesService (mirroring the MAZAD-022 favorites helpers above).
+ */
+describe('PropertiesService auction-anchor helper (MAZAD-023)', () => {
+  const ADVERTISER = '64b000000000000000000201';
+  const REVISION_ID = '64b000000000000000000301';
+  const ID_APPROVED = '64b000000000000000000111';
+  const ID_PENDING = '64b000000000000000000112';
+  const ID_OWNER_HIDDEN = '64b000000000000000000113';
+  const ID_ARCHIVED = '64b000000000000000000114';
+  const ID_ADMIN_HIDDEN = '64b000000000000000000115';
+  const ID_NO_ADVERTISER = '64b000000000000000000116';
+  const ID_NONEXISTENT = '64b0000000000000000000fe';
+
+  const docs = [
+    makeProperty({ id: ID_APPROVED, advertiserAccountId: ADVERTISER, advertiserAccountTypeSnapshot: 'BROKER', currentPublicRevisionId: REVISION_ID }),
+    makeProperty({ id: ID_PENDING, status: 'pending_review', currentPublicRevisionId: undefined, advertiserAccountId: ADVERTISER }),
+    makeProperty({ id: ID_OWNER_HIDDEN, isOwnerVisible: false, advertiserAccountId: ADVERTISER, currentPublicRevisionId: REVISION_ID }),
+    makeProperty({ id: ID_ARCHIVED, lifecycleStatus: PropertyLifecycleStatus.ARCHIVED, advertiserAccountId: ADVERTISER, currentPublicRevisionId: REVISION_ID }),
+    makeProperty({ id: ID_ADMIN_HIDDEN, lifecycleStatus: PropertyLifecycleStatus.ADMIN_HIDDEN, advertiserAccountId: ADVERTISER, currentPublicRevisionId: REVISION_ID }),
+    makeProperty({ id: ID_NO_ADVERTISER, currentPublicRevisionId: REVISION_ID }), // neither advertiserAccountId nor legacy ownerId set
+  ];
+
+  it('returns the attribution + current revision anchor for an eligible property', async () => {
+    const instance = service(docs);
+    await expect(instance.getEligibleForAuctionAnchor(ID_APPROVED)).resolves.toMatchObject({
+      propertyId: ID_APPROVED,
+      advertiserAccountId: ADVERTISER,
+      advertiserAccountTypeSnapshot: 'BROKER',
+      currentPublicRevisionId: REVISION_ID,
+    });
+  });
+
+  it.each([
+    ['pending review', ID_PENDING], ['owner-hidden', ID_OWNER_HIDDEN], ['archived', ID_ARCHIVED], ['admin-hidden', ID_ADMIN_HIDDEN],
+  ])('returns null for a %s property, just like isPubliclyVisible (an auction can never be anchored to it)', async (_label, id) => {
+    const instance = service(docs);
+    await expect(instance.getEligibleForAuctionAnchor(id)).resolves.toBeNull();
+  });
+
+  it('returns null for a malformed id without querying the database', async () => {
+    const instance = service(docs);
+    await expect(instance.getEligibleForAuctionAnchor('not-an-object-id')).resolves.toBeNull();
+  });
+
+  it('returns null for an id that does not exist at all', async () => {
+    const instance = service(docs);
+    await expect(instance.getEligibleForAuctionAnchor(ID_NONEXISTENT)).resolves.toBeNull();
+  });
+
+  it('returns null instead of throwing when neither advertiserAccountId nor legacy ownerId is present', async () => {
+    const instance = service(docs);
+    await expect(instance.getEligibleForAuctionAnchor(ID_NO_ADVERTISER)).resolves.toBeNull();
+  });
+
+  it('falls back to the legacy ownerId when advertiserAccountId is absent', async () => {
+    const instance = service([
+      makeProperty({ id: ID_APPROVED, ownerId: ADVERTISER, advertiserAccountId: undefined, currentPublicRevisionId: REVISION_ID }),
+    ]);
+    await expect(instance.getEligibleForAuctionAnchor(ID_APPROVED)).resolves.toMatchObject({ advertiserAccountId: ADVERTISER });
+  });
+
+  it('defaults advertiserAccountTypeSnapshot to USER when the property predates that field', async () => {
+    const instance = service([
+      makeProperty({ id: ID_APPROVED, advertiserAccountId: ADVERTISER, advertiserAccountTypeSnapshot: undefined, currentPublicRevisionId: REVISION_ID }),
+    ]);
+    await expect(instance.getEligibleForAuctionAnchor(ID_APPROVED)).resolves.toMatchObject({ advertiserAccountTypeSnapshot: 'USER' });
   });
 });

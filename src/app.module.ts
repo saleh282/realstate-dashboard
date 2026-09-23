@@ -24,6 +24,7 @@ import { AuthorizationModule } from './authorization/authorization.module';
 import { AccountDeletionModule } from './account-deletion/account-deletion.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
 import { FavoritesModule } from './favorites/favorites.module';
+import { AuctionsModule } from './auctions/auctions.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { FavoritesModule } from './favorites/favorites.module';
     AccountDeletionModule,
     GeocodingModule,
     FavoritesModule,
+    AuctionsModule,
     HealthModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }],

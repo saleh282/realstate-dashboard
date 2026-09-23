@@ -640,6 +640,33 @@ export class PropertiesService {
     return new Map(hydrated.map((item) => [item.id, item]));
   }
 
+  /**
+   * Property attribution + current public revision needed to anchor a new
+   * auction (MAZAD-023). Reuses the exact same public-visibility gate as
+   * search/favorites, so an auction can never be created on — or silently
+   * remain anchored to a stale understanding of — a property that isn't
+   * actually live in the marketplace. Returns null when the property
+   * doesn't exist, isn't currently public, or has no approved revision yet.
+   */
+  async getEligibleForAuctionAnchor(id: string): Promise<{
+    propertyId: Types.ObjectId;
+    advertiserAccountId: Types.ObjectId;
+    advertiserAccountTypeSnapshot: AccountType;
+    currentPublicRevisionId: Types.ObjectId;
+  } | null> {
+    if (!Types.ObjectId.isValid(id)) return null;
+    const item = await this.properties.findOne({ _id: id, ...this.publicVisibilityFilter() }).lean().exec();
+    if (!item?.currentPublicRevisionId) return null;
+    const advertiserAccountId = (item.advertiserAccountId ?? item.ownerId) as Types.ObjectId | undefined;
+    if (!advertiserAccountId) return null;
+    return {
+      propertyId: item._id as Types.ObjectId,
+      advertiserAccountId,
+      advertiserAccountTypeSnapshot: item.advertiserAccountTypeSnapshot ?? AccountType.USER,
+      currentPublicRevisionId: item.currentPublicRevisionId as Types.ObjectId,
+    };
+  }
+
   async updateOwnerVisibility(ownerId: string, id: string, isVisible: boolean) {
     this.assertId(id);
     await this.auctionLock.assertUnlocked(id);

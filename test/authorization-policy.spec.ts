@@ -211,4 +211,30 @@ describe('MAZAD-016 authorization policy matrix', () => {
     expect(codeOf(() => AuthorizationPolicyService.assert(admin, Capability.FAVORITE_MANAGE_OWN)))
       .toMatchObject({ code: AuthorizationErrorCode.ADMIN_MARKETPLACE_FORBIDDEN });
   });
+
+  it('gates AUCTION_CREATE_OWN like PROPERTY_CREATE: broker approval required, admins forbidden (MAZAD-023)', () => {
+    expect(AuthorizationPolicyService.can(principal({ accountType: AccountType.USER }), Capability.AUCTION_CREATE_OWN)).toBe(true);
+    expect(AuthorizationPolicyService.can(principal({ accountType: AccountType.COMPANY }), Capability.AUCTION_CREATE_OWN)).toBe(true);
+    expect(AuthorizationPolicyService.can(
+      principal({ accountType: AccountType.BROKER, brokerStatus: BrokerStatus.APPROVED }),
+      Capability.AUCTION_CREATE_OWN,
+    )).toBe(true);
+    expect(AuthorizationPolicyService.can(
+      principal({ accountType: AccountType.BROKER, brokerStatus: BrokerStatus.PENDING }),
+      Capability.AUCTION_CREATE_OWN,
+    )).toBe(false);
+    const admin = principal({ userId: id.admin, systemRole: SystemRole.ADMIN, accountType: AccountType.USER });
+    expect(AuthorizationPolicyService.can(admin, Capability.AUCTION_CREATE_OWN)).toBe(false);
+    expect(codeOf(() => AuthorizationPolicyService.assert(admin, Capability.AUCTION_CREATE_OWN)))
+      .toMatchObject({ code: AuthorizationErrorCode.ADMIN_MARKETPLACE_FORBIDDEN });
+  });
+
+  it('confirms the frozen V1 bid-eligibility rules the auction foundation relies on: admins cannot bid, an advertiser cannot bid on their own listing (MAZAD-023)', () => {
+    const admin = principal({ userId: id.admin, systemRole: SystemRole.ADMIN, accountType: AccountType.USER });
+    expect(AuthorizationPolicyService.can(admin, Capability.BID_PLACE)).toBe(false);
+    expect(codeOf(() => AuthorizationPolicyService.assertBid(admin, id.other)))
+      .toMatchObject({ code: AuthorizationErrorCode.ADMIN_MARKETPLACE_FORBIDDEN });
+    expect(codeOf(() => AuthorizationPolicyService.assertBid(principal(), id.user)))
+      .toMatchObject({ code: AuthorizationErrorCode.SELF_BID_FORBIDDEN });
+  });
 });
