@@ -47,6 +47,14 @@ export class Property {
   @Prop({ trim: true }) propertyContractMigrationRunId?: string;
   @Prop({ required: true, enum: ['sale', 'rent'], index: true }) operationType: string;
   @Prop({ required: true, trim: true, maxlength: 50, index: true }) propertyTypeCode: string;
+  /**
+   * Denormalized copy of the current public revision's catalog references, kept
+   * in sync on approval (see `reviewForAdmin`) so the public listing/search
+   * query can filter and sort on the `properties` collection directly instead
+   * of joining `property_revisions` for every request.
+   */
+  @Prop({ type: Types.ObjectId, ref: 'PropertyPurposeCategory', index: true }) purposeCategoryId?: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'PropertyType', index: true }) purposeSubcategoryId?: Types.ObjectId;
   @Prop({ required: true, trim: true, maxlength: 150 }) title: string;
   @Prop({ required: true, trim: true, maxlength: 3000 }) description: string;
   @Prop({ required: true, trim: true, maxlength: 50, index: true }) governorateCode: string;
@@ -101,3 +109,31 @@ export class Property {
 export const PropertySchema = SchemaFactory.createForClass(Property);
 PropertySchema.index({ createdAt: -1 });
 PropertySchema.index({ advertiserAccountId: 1, createdAt: -1 }, { name: 'property_advertiser_created' });
+
+// Public marketplace search/discovery (MAZAD-021). `status`/`isOwnerVisible`/
+// `lifecycleStatus` gate every public query, so they lead each compound index;
+// the trailing field is whichever dimension most narrows that particular query
+// shape. Mongo can also use a leading prefix of any of these (e.g. just the
+// three visibility fields) when a request has no extra filters.
+PropertySchema.index(
+  { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, createdAt: -1 },
+  { name: 'property_public_listing_newest' },
+);
+PropertySchema.index(
+  { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, operationType: 1, createdAt: -1 },
+  { name: 'property_public_listing_operation_type' },
+);
+PropertySchema.index(
+  { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, governorateCode: 1, createdAt: -1 },
+  { name: 'property_public_listing_governorate' },
+);
+PropertySchema.index(
+  { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, purposeCategoryId: 1, purposeSubcategoryId: 1, createdAt: -1 },
+  { name: 'property_public_listing_purpose' },
+);
+// Ascending on price; MongoDB can walk this index in reverse to satisfy a
+// descending price sort too, so one index covers both `price_asc`/`price_desc`.
+PropertySchema.index(
+  { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, totalPriceMinor: 1 },
+  { name: 'property_public_listing_price' },
+);

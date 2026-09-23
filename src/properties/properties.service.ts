@@ -8,6 +8,7 @@ import { City, CityDocument } from '../governorates/schemas/city.schema';
 import { PropertyOption, PropertyOptionDocument } from '../property-options/schemas/property-option.schema';
 import { PropertyType, PropertyTypeDocument } from '../property-types/schemas/property-type.schema';
 import { CreatePropertyDto } from './dto/create-property.dto';
+import { ListPublishedPropertiesDto } from './dto/list-published-properties.dto';
 import { Property, PropertyAsset, PropertyDocument } from './schemas/property.schema';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
@@ -296,6 +297,8 @@ export class PropertiesService {
         lifecycleVersion: 0,
         propertyContractVersion: 1,
         operationType: dto.operationType,
+        purposeCategoryId: purpose._id,
+        purposeSubcategoryId: type._id,
         propertyTypeCode: type.code,
         title: dto.title,
         description: dto.description,
@@ -478,14 +481,85 @@ export class PropertiesService {
     const draftRevision = revisions.find(revision => [PropertyRevisionModerationStatus.DRAFT, PropertyRevisionModerationStatus.REJECTED].includes(revision.moderationStatus));
     return { property: { ...this.toOwner({ ...item, draftRevision }), revisions: revisions.map(revision => this.revisionSummary(revision)) } };
   }
-  async listPublished(options: { page?: number; limit?: number }) {
-    const page = Number.isFinite(options.page) ? Math.max(options.page!, 1) : 1;
-    const limit = Number.isFinite(options.limit) ? Math.min(Math.max(options.limit!, 1), 50) : 20;
-    const filter = { status: 'approved', isOwnerVisible: { $ne: false }, lifecycleStatus: { $nin: [PropertyLifecycleStatus.ARCHIVED, PropertyLifecycleStatus.ADMIN_HIDDEN] }, currentPublicRevisionId: { $exists: true } };
+  async listPublished(query: ListPublishedPropertiesDto = {}) {
+    const { filter: dimensionFilter, sort, page, limit } = await this.buildPublicListingQuery(query);
+    const filter = {
+      status: 'approved',
+      isOwnerVisible: { $ne: false },
+      lifecycleStatus: { $nin: [PropertyLifecycleStatus.ARCHIVED, PropertyLifecycleStatus.ADMIN_HIDDEN] },
+      currentPublicRevisionId: { $exists: true },
+      ...dimensionFilter,
+    };
     const [items, total] = await Promise.all([
-      this.properties.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).populate('currentPublicRevisionId').lean().exec(),
+      this.properties.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).populate('currentPublicRevisionId').lean().exec(),
       this.properties.countDocuments(filter).exec(),
     ]);
+    return {
+      items: await this.hydratePublicListings(items),
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  /**
+   * Parses and validates the public search/filter query (MAZAD-021) into a
+   * Mongo filter fragment, sort spec and clamped pagination. Kept separate
+   * from `listPublished` so the pure parts (bounds clamping, price-range and
+   * sort resolution) are trivially unit-testable, while the catalog-hierarchy
+   * checks that need a DB round trip stay async.
+   */
+  private async buildPublicListingQuery(query: ListPublishedPropertiesDto) {
+    const page = Number.isFinite(query.page) ? Math.max(query.page!, 1) : 1;
+    const limit = Number.isFinite(query.limit) ? Math.min(Math.max(query.limit!, 1), 50) : 20;
+    const filter: Record<string, unknown> = {};
+
+    if (query.operationType) filter.operationType = query.operationType;
+
+    if (query.purposeSubcategoryId) {
+      const subcategory = await this.propertyTypes.findById(query.purposeSubcategoryId).lean().exec();
+      if (!subcategory) throw new BadRequestException({ message: 'نوع العقار الفرعي غير موجود', code: PropertyErrorCode.PURPOSE_SUBCATEGORY_INVALID });
+      if (query.purposeCategoryId && (!subcategory.purposeCategoryId || subcategory.purposeCategoryId.toString() !== query.purposeCategoryId)) {
+        throw new BadRequestException({ message: 'نوع العقار الفرعي لا يتبع غرض العقار المحدد', code: PropertyErrorCode.PURPOSE_HIERARCHY_MISMATCH });
+      }
+      filter.purposeSubcategoryId = subcategory._id;
+      if (!query.purposeCategoryId && subcategory.purposeCategoryId) filter.purposeCategoryId = subcategory.purposeCategoryId;
+    } else if (query.purposeCategoryId) {
+      const exists = await this.purposeCategories.exists({ _id: query.purposeCategoryId }).exec();
+      if (!exists) throw new BadRequestException({ message: 'غرض العقار غير موجود', code: PropertyErrorCode.PURPOSE_CATEGORY_INVALID });
+      filter.purposeCategoryId = new Types.ObjectId(query.purposeCategoryId);
+    }
+
+    if (query.governorateCode) filter.governorateCode = query.governorateCode;
+    if (query.city) filter.city = { $regex: `^${this.escapeRegExp(query.city)}$`, $options: 'i' };
+
+    if (query.minPriceMinor !== undefined || query.maxPriceMinor !== undefined) {
+      if (query.minPriceMinor !== undefined && query.maxPriceMinor !== undefined && query.minPriceMinor > query.maxPriceMinor) {
+        throw new BadRequestException({ message: 'الحد الأدنى للسعر أكبر من الحد الأقصى المحدد', code: PropertyErrorCode.PRICE_RANGE_INVALID });
+      }
+      filter.totalPriceMinor = {
+        ...(query.minPriceMinor !== undefined ? { $gte: query.minPriceMinor } : {}),
+        ...(query.maxPriceMinor !== undefined ? { $lte: query.maxPriceMinor } : {}),
+      };
+    }
+
+    if (query.q) {
+      const escaped = this.escapeRegExp(query.q);
+      filter.$or = ['title', 'city', 'district'].map(field => ({ [field]: { $regex: escaped, $options: 'i' } }));
+    }
+
+    const sort: Record<string, 1 | -1> =
+      query.sort === 'price_asc' ? { totalPriceMinor: 1, _id: 1 }
+      : query.sort === 'price_desc' ? { totalPriceMinor: -1, _id: -1 }
+      : { createdAt: -1, _id: -1 };
+
+    return { filter, sort, page, limit };
+  }
+
+  private escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private async hydratePublicListings(items: any[]) {
+    if (!items.length) return [];
     const currentRevisions = items.map(item => this.populatedRevision(item.currentPublicRevisionId));
     const purposeIds = currentRevisions.map(revision => revision?.purposeCategoryId).filter(Boolean);
     const subcategoryIds = currentRevisions.map(revision => revision?.purposeSubcategoryId).filter(Boolean);
@@ -501,19 +575,16 @@ export class PropertiesService {
     const propertyTypeNamesById = new Map(propertyTypes.map(item => [item._id.toString(), item.nameAr]));
     const purposeNames = new Map(purposes.map(item => [item._id.toString(), item.nameAr]));
     const paymentNames = new Map(paymentMethods.map(item => [item.code, item.nameAr]));
-    return {
-      items: items.map(item => {
-        const revision = this.populatedRevision(item.currentPublicRevisionId);
-        return {
-          ...this.toMarketplacePublic(item),
-          governorateNameAr: governorateNames.get(revision?.governorateCode ?? item.governorateCode) ?? (revision?.governorateCode ?? item.governorateCode),
-          purposeCategoryNameAr: revision?.purposeCategoryId ? purposeNames.get(revision.purposeCategoryId.toString()) : undefined,
-          propertyTypeNameAr: revision?.purposeSubcategoryId ? propertyTypeNamesById.get(revision.purposeSubcategoryId.toString()) : (propertyTypeNames.get(item.propertyTypeCode) ?? item.propertyTypeCode),
-          paymentMethodNamesAr: (revision?.paymentMethodCodes ?? []).map((code: string) => paymentNames.get(code)).filter(Boolean),
-        };
-      }),
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
-    };
+    return items.map(item => {
+      const revision = this.populatedRevision(item.currentPublicRevisionId);
+      return {
+        ...this.toMarketplacePublic(item),
+        governorateNameAr: governorateNames.get(revision?.governorateCode ?? item.governorateCode) ?? (revision?.governorateCode ?? item.governorateCode),
+        purposeCategoryNameAr: revision?.purposeCategoryId ? purposeNames.get(revision.purposeCategoryId.toString()) : undefined,
+        propertyTypeNameAr: revision?.purposeSubcategoryId ? propertyTypeNamesById.get(revision.purposeSubcategoryId.toString()) : (propertyTypeNames.get(item.propertyTypeCode) ?? item.propertyTypeCode),
+        paymentMethodNamesAr: (revision?.paymentMethodCodes ?? []).map((code: string) => paymentNames.get(code)).filter(Boolean),
+      };
+    });
   }
 
   async getPublished(id: string) {
@@ -849,7 +920,7 @@ export class PropertiesService {
       else filter.status = options.status;
     }
     if (options.search?.trim()) {
-      const escaped = options.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escaped = this.escapeRegExp(options.search.trim());
       filter.$or = ['title', 'city', 'district'].map(field => ({ [field]: { $regex: escaped, $options: 'i' } }));
     }
     const [items, total] = await Promise.all([
@@ -912,6 +983,20 @@ export class PropertiesService {
           aggregateUpdate.$set.status = 'approved';
           aggregateUpdate.$set.isOwnerVisible = true;
           if (!property.publishedAt) aggregateUpdate.$set.publishedAt = now;
+          // Keep the property-level search/filter fields in sync with the
+          // revision that just became the public one: reads already prefer the
+          // populated revision over these (see `projectProperty`), but the
+          // public listing query (MAZAD-021) filters/sorts on the `properties`
+          // collection directly for performance, so it needs a fresh copy.
+          aggregateUpdate.$set.operationType = revision.operationType;
+          aggregateUpdate.$set.purposeCategoryId = revision.purposeCategoryId;
+          aggregateUpdate.$set.purposeSubcategoryId = revision.purposeSubcategoryId;
+          aggregateUpdate.$set.propertyTypeCode = revision.legacyPropertyTypeCode;
+          aggregateUpdate.$set.governorateCode = revision.governorateCode;
+          aggregateUpdate.$set.city = revision.city;
+          aggregateUpdate.$set.district = revision.district;
+          aggregateUpdate.$set.totalPriceMinor = revision.totalPriceMinor;
+          aggregateUpdate.$set.currency = revision.currency;
         } else if (property.currentPublicRevisionId) aggregateUpdate.$set.status = 'approved';
         const aggregate = await this.properties.updateOne({ _id: property._id, pendingRevisionId: revision._id }, aggregateUpdate, { session }).exec();
         if (aggregate.modifiedCount !== 1) throw new ConflictException({ message: 'تغيرت حالة العقار أثناء المراجعة', code: PropertyErrorCode.STATE_CONFLICT });

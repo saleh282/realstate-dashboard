@@ -79,6 +79,22 @@ Observability (structured JSON log lines): `evidence_cleanup_run` (info/warn) af
 
 `GET /api/v1/geocoding/reverse` and `/search` require authentication and the `GEOCODING_USE` capability (active users who may create listings, approved brokers, active staff). Per-IP throttling still applies. The endpoints call a provider behind the `GeocodingProvider` interface; today `GEOCODING_PROVIDER=nominatim` (a Nominatim-compatible HTTP API: self-hosted Nominatim or a hosted service exposing `/search` and `/reverse`) or `disabled`. Configuration: `GEOCODING_PROVIDER_BASE_URL`, `GEOCODING_USER_AGENT`, optional `GEOCODING_API_KEY` (sent as query parameter `GEOCODING_API_KEY_PARAM`, default `key`; never logged). **In production the public `nominatim.openstreetmap.org` service is refused at startup** (its usage policy forbids production-scale use); `GEOCODING_ALLOW_PUBLIC_PROVIDER=true` is an explicit, temporary override. Resource bounds, per process: an LRU cache of `GEOCODING_CACHE_MAX_ENTRIES` (2000), at most `GEOCODING_MAX_QUEUE` (25) requests waiting for a provider slot (further requests get 503 `GEOCODING_BUSY`), a wait limit of `GEOCODING_QUEUE_TIMEOUT_MS` (10 s), `GEOCODING_MAX_CONCURRENCY` and `GEOCODING_MIN_INTERVAL_MS` (defaults 1 and 1100 ms for the public service, 4 and 0 for a private endpoint).
 
+## Public property search (MAZAD-021)
+
+`GET /properties` is the public marketplace discovery endpoint. It only ever returns properties that are `approved`, owner-visible, not archived/admin-hidden, and have a published revision — draft, pending, rejected and private-evidence data are never reachable through it. All query parameters are optional:
+
+- `page` (default 1), `limit` (default 20, max 50).
+- `operationType`: `sale` or `rent`. There is no `auction` value yet — auctions are a later, separate feature and the schema has no auction operation type to filter on.
+- `purposeCategoryId`, `purposeSubcategoryId`: catalog `_id`s from `GET /property-purpose-categories` / `GET /property-types` (or the combined `GET /property-form-options`). Passing a subcategory that does not belong to the given category returns `400 PROPERTY_PURPOSE_HIERARCHY_MISMATCH`; an unknown id returns `400 PROPERTY_PURPOSE_CATEGORY_INVALID` / `PROPERTY_PURPOSE_SUBCATEGORY_INVALID`.
+- `governorateCode`, `city`: exact match (city is case-insensitive) against the property's address, sourced from the same catalogs used by the property-creation form (`GET /property-form-options`).
+- `minPriceMinor`, `maxPriceMinor`: inclusive bounds in EGP minor units. `minPriceMinor > maxPriceMinor` returns `400 PROPERTY_PRICE_RANGE_INVALID`.
+- `q`: free-text keyword matched against title/city/district (same case-insensitive pattern as the admin property search).
+- `sort`: `newest` (default), `price_asc` or `price_desc`.
+
+A filter combination that matches nothing returns a normal `200` with an empty `items` array and `pagination.total: 0` — that is a valid answer, not an error; only a malformed or catalog-inconsistent filter is rejected with `400`.
+
+Property documents carry a denormalized copy of their current public revision's `operationType`/`purposeCategoryId`/`purposeSubcategoryId`/`governorateCode`/`city`/`district`/`totalPriceMinor`/`currency` (kept in sync in `reviewForAdmin` whenever a revision is approved) so this query can filter and sort on the `properties` collection directly instead of joining `property_revisions` per request. The returned JSON itself is unaffected: it still projects from the populated current revision when one exists, exactly as before.
+
 ## Idempotent property submissions
 
 `POST /properties`, `POST /properties/mine/:id/revisions` and `POST /properties/mine/:id/revisions/submit` accept an optional `Idempotency-Key` header (8-128 characters of `[A-Za-z0-9._:-]`). A mobile client that times out cannot know whether the server finished, so it retries with the same key and the server runs the operation once:

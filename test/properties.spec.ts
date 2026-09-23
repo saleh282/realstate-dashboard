@@ -259,6 +259,12 @@ describe('property publishing validation', () => {
       advertiserType: 'owner',
       revisionSequence: 1,
     })], expect.objectContaining({ session }));
+    // MAZAD-021: the property-level catalog references must be denormalized at
+    // creation time too, so an admin-only query (or a property never resubmitted
+    // after approval) still has a usable purpose/type reference for search.
+    const [createdLegacyProperty] = propertyCreate.mock.calls.at(-1)![0];
+    expect(createdLegacyProperty.purposeCategoryId?.toString()).toBe(categoryId);
+    expect(createdLegacyProperty.purposeSubcategoryId?.toString()).toBe(subcategoryId);
     expect(revisionCreate).toHaveBeenCalledWith([expect.objectContaining({
       revisionNumber: 1,
       moderationStatus: 'draft',

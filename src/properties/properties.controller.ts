@@ -4,6 +4,7 @@ import { UPLOAD_REQUEST_LIMITS } from '../common/uploads/upload-policies';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreatePropertyDto } from './dto/create-property.dto';
+import { ListPublishedPropertiesDto } from './dto/list-published-properties.dto';
 import { PropertiesService } from './properties.service';
 import { UpdatePropertyVisibilityDto } from './dto/update-property-visibility.dto';
 import { SubmitPropertyRevisionDto } from './dto/review-property.dto';
@@ -55,8 +56,8 @@ export class PropertiesController {
   }
 
   @Get()
-  listPublished(@Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.service.listPublished({ page: Number(page), limit: Number(limit) });
+  listPublished(@Query() query: ListPublishedPropertiesDto) {
+    return this.service.listPublished(query);
   }
 
   @Get('mine')
