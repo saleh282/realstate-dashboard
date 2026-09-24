@@ -280,6 +280,11 @@ export class AuctionLifecycleService {
     if (!updated) {
       return { extended: false, currentEndAt: observedEndAt };
     }
+    // Inside a caller's transaction (MAZAD-027 bid acceptance) the caller
+    // audits transactionally, once, as part of its own event; this
+    // best-effort helper would otherwise log for an extension that a later
+    // rollback or retry could still discard.
+    if (context.session) return { extended: true, currentEndAt: updated.currentEndAt };
     await this.audit.logSystemAction(
       AuditAction.AUCTION_END_TIME_EXTENDED,
       auctionId,

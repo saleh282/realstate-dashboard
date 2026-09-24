@@ -81,6 +81,7 @@ export enum AuditAction {
   AUCTION_ENDED_NO_BIDS = 'auction_ended_no_bids',
   AUCTION_ENDED_PENDING_CLOSE = 'auction_ended_pending_close',
   AUCTION_END_TIME_EXTENDED = 'auction_end_time_extended',
+  AUCTION_BID_ACCEPTED = 'auction_bid_accepted',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false }, collection: 'audit_logs' })

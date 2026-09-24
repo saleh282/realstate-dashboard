@@ -761,3 +761,14 @@ describe('lifecycle expiry with the Bid-ledger-backed port (MAZAD-026)', () => {
     expect(audit.logSystemAction).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('extendIfWithinAntiSnipingWindow inside a caller transaction (MAZAD-027)', () => {
+  it('extends but leaves auditing to the caller: no best-effort audit for an extension a rollback could still discard', async () => {
+    const { instance, store, audit } = lifecycleService({ docs: [auctionDoc({ status: AuctionStatus.ACTIVE })] });
+    const bidAt = new Date(auctionDoc().currentEndAt.getTime() - 60_000);
+    const result = await instance.extendIfWithinAntiSnipingWindow(AUCTION_ID, bidAt, { session: { id: 'txn' } as any });
+    expect(result.extended).toBe(true);
+    expect(store.docs[0].currentEndAt.getTime()).toBe(auctionDoc().currentEndAt.getTime() + 300_000);
+    expect(audit.logSystemAction).not.toHaveBeenCalled();
+  });
+});

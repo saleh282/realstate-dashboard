@@ -108,6 +108,18 @@ export class Auction {
   // --- Immutable rule snapshot ---
   @Prop({ type: AuctionRuleSnapshotSchema, required: true, immutable: true }) ruleSnapshot: AuctionRuleSnapshot;
 
+  // --- Bidding state (MAZAD-027) ---
+  /**
+   * Number of bids accepted so far. Mutable, and written ONLY by the atomic
+   * bid-acceptance transaction (`$inc: 1`). It exists so acceptance can
+   * *write* the Auction document first: a real data change on the aggregate
+   * is what makes two concurrent acceptance transactions conflict (a no-op
+   * update would not), and the post-increment value is cross-checked against
+   * the ledger's next sequence. Absent on pre-existing documents, which read
+   * as 0 (`$inc` treats a missing field as 0), so no migration is needed.
+   */
+  @Prop({ type: Number, default: 0, min: 0 }) acceptedBidCount: number;
+
   // --- Cancellation (schema only; the cancellation service itself is MAZAD-024+) ---
   @Prop({ type: Types.ObjectId, ref: 'User' }) cancelledByActorId?: Types.ObjectId;
   @Prop() cancelledAt?: Date;

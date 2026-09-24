@@ -8,6 +8,8 @@ import { BidsModule } from '../bids/bids.module';
 import { PropertiesModule } from '../properties/properties.module';
 import { UsersModule } from '../users/users.module';
 import { AUCTION_BID_EXISTENCE_PORT, BidLedgerAuctionBidExistencePort } from './auction-bid-existence.port';
+import { AUCTION_BID_ENTITLEMENT_PORT, FailClosedBidEntitlementPort } from './auction-bid-entitlement.port';
+import { AuctionBidAcceptanceService } from './auction-bid-acceptance.service';
 import { AuctionLifecycleService } from './auction-lifecycle.service';
 import { AuctionLifecycleWorker } from './auction-lifecycle.worker';
 import { AdminAuctionsController } from './admin-auctions.controller';
@@ -26,6 +28,9 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
  *    and expiry (MAZAD-024);
  *  - `AUCTION_BID_EXISTENCE_PORT` — bound to the Bid-ledger-backed
  *    implementation (MAZAD-026).
+ *  - `AuctionBidAcceptanceService` — the atomic bid-acceptance transaction
+ *    (MAZAD-027); internal only, no controller, and fail-closed on
+ *    `AUCTION_BID_ENTITLEMENT_PORT` until MAZAD-028.
  *  - `AuctionsQueryService` + `AuctionsController` / `AdminAuctionsController`
  *    — the HTTP contract (MAZAD-025): public discovery, own auctions, create,
  *    cancel, and a read-only staff view. Mutations still go exclusively
@@ -46,10 +51,12 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
     AuctionsQueryService,
     RolesGuard,
     AuctionLifecycleService,
+    AuctionBidAcceptanceService,
     AuctionLifecycleWorker,
     ClockService,
+    { provide: AUCTION_BID_ENTITLEMENT_PORT, useClass: FailClosedBidEntitlementPort },
     { provide: AUCTION_BID_EXISTENCE_PORT, useClass: BidLedgerAuctionBidExistencePort },
   ],
-  exports: [AuctionsService, AuctionLifecycleService],
+  exports: [AuctionsService, AuctionLifecycleService, AuctionBidAcceptanceService],
 })
 export class AuctionsModule {}
