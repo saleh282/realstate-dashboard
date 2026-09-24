@@ -696,3 +696,32 @@ describe('AuctionLifecycleWorker dependency wiring', () => {
     await app.close(); // runs onModuleDestroy
   });
 });
+
+describe('AuctionLifecycleService.cancel optimistic expectedStatus (MAZAD-025)', () => {
+  it('cancels normally when expectedStatus matches the current status', async () => {
+    const { instance, store } = lifecycleService({ docs: [auctionDoc({ status: AuctionStatus.SCHEDULED })] });
+    await instance.cancel(ADVERTISER_ID, AUCTION_ID, undefined, undefined, AuctionStatus.SCHEDULED);
+    expect(store.docs[0].status).toBe(AuctionStatus.CANCELLED);
+  });
+
+  it('fails with AUCTION_STATE_CONFLICT — and changes/audits nothing — when the auction moved past the status the client saw', async () => {
+    const { instance, store, audit, session } = lifecycleService({ docs: [auctionDoc({ status: AuctionStatus.ACTIVE })] });
+    expect(await errorCode(() => instance.cancel(ADVERTISER_ID, AUCTION_ID, undefined, undefined, AuctionStatus.SCHEDULED)))
+      .toBe(AuctionErrorCode.STATE_CONFLICT);
+    expect(store.docs[0].status).toBe(AuctionStatus.ACTIVE);
+    expect(audit.logRequired).not.toHaveBeenCalled();
+    expect(session.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('still enforces ownership before the optimistic check', async () => {
+    const { instance } = lifecycleService({ docs: [auctionDoc({ advertiserAccountId: OTHER_ADVERTISER_ID })] });
+    expect(await errorCode(() => instance.cancel(ADVERTISER_ID, AUCTION_ID, undefined, undefined, AuctionStatus.ACTIVE)))
+      .toBe(AuthorizationErrorCode.RESOURCE_ACCESS_FORBIDDEN);
+  });
+
+  it('a terminal auction stays terminal even when the client\'s expectedStatus is right', async () => {
+    const { instance } = lifecycleService({ docs: [auctionDoc({ status: AuctionStatus.CANCELLED })] });
+    expect(await errorCode(() => instance.cancel(ADVERTISER_ID, AUCTION_ID, 'x', undefined, AuctionStatus.CANCELLED)))
+      .toBe(AuctionErrorCode.TRANSITION_INVALID);
+  });
+});

@@ -141,4 +141,33 @@ describe('PropertiesService lifecycle operations respect the real auction lock (
       expect(properties.findOneAndUpdate).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('forceLifecycleForAdmin (Admin hide/restore) — MAZAD-025 closure', () => {
+    const ADMIN_ID = '64b000000000000000000503';
+    const fixture = { _id: PROPERTY_ID, propertyContractVersion: 1, totalPriceMinor: 100_000, currency: 'EGP', toObject: () => ({ _id: PROPERTY_ID }) };
+
+    it.each([AuctionStatus.SCHEDULED, AuctionStatus.ACTIVE])(
+      'cannot hide a property while its auction is %s, so the auction can never silently drop out of public discovery',
+      async (status) => {
+        const { instance, properties } = propertiesService([{ propertyId: PROPERTY_ID, status }], fixture);
+        await expect(instance.forceLifecycleForAdmin(PROPERTY_ID, PropertyLifecycleStatus.ADMIN_HIDDEN, 0, 'مخالفة', ADMIN_ID))
+          .rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.AUCTION_LOCKED }) });
+        expect(properties.findOneAndUpdate).not.toHaveBeenCalled();
+      },
+    );
+
+    it('can hide once the auction is CANCELLED or ended with no bids (lock released)', async () => {
+      for (const status of [AuctionStatus.CANCELLED, AuctionStatus.ENDED_NO_BIDS]) {
+        const { instance, properties } = propertiesService([{ propertyId: PROPERTY_ID, status }], fixture);
+        await expect(instance.forceLifecycleForAdmin(PROPERTY_ID, PropertyLifecycleStatus.ADMIN_HIDDEN, 0, 'مخالفة', ADMIN_ID)).resolves.toBeDefined();
+        expect(properties.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      }
+    });
+
+    it('still requires a reason to hide (rule order unchanged)', async () => {
+      const { instance } = propertiesService([], fixture);
+      await expect(instance.forceLifecycleForAdmin(PROPERTY_ID, PropertyLifecycleStatus.ADMIN_HIDDEN, 0, '  ', ADMIN_ID))
+        .rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.REVIEW_REASON_REQUIRED }) });
+    });
+  });
 });

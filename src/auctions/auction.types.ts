@@ -35,3 +35,20 @@ export const AUCTION_TERMINAL_STATUSES: ReadonlySet<AuctionStatus> = new Set([
   AuctionStatus.COMPLETED,
   AuctionStatus.CANCELLED,
 ]);
+
+/**
+ * Statuses intended for public discovery (MAZAD-025). Cancelled auctions,
+ * ended-with-no-bids auctions and (later) completed ones are deliberately
+ * not browsable; whether a finished auction should stay visible as a
+ * "sold" listing is a later product decision, not one this task invents.
+ * ENDED_PENDING_CLOSE stays visible so a client following an auction that
+ * just ended sees "closing" rather than a sudden 404.
+ */
+export const PUBLIC_AUCTION_STATUSES: readonly AuctionStatus[] = [
+  AuctionStatus.SCHEDULED,
+  AuctionStatus.ACTIVE,
+  AuctionStatus.ENDED_PENDING_CLOSE,
+];
+
+/** What `GET /auctions` shows when no `status` filter is given: auctions still open to browsing or bidding. */
+export const DEFAULT_PUBLIC_LIST_STATUSES: readonly AuctionStatus[] = [AuctionStatus.SCHEDULED, AuctionStatus.ACTIVE];

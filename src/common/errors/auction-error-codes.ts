@@ -12,4 +12,12 @@ export enum AuctionErrorCode {
   /** The auction's status changed between validation and the atomic write (a genuine race an actor-facing call must surface, unlike a worker's silent no-op). */
   STATE_CONFLICT = 'AUCTION_STATE_CONFLICT',
   CANCELLATION_REASON_REQUIRED = 'AUCTION_CANCELLATION_REASON_REQUIRED',
+  // --- MAZAD-025 HTTP contract ---
+  ID_INVALID = 'AUCTION_ID_INVALID',
+  /** Malformed/unknown query string filter or pagination value. */
+  QUERY_INVALID = 'AUCTION_QUERY_INVALID',
+  /** Malformed request body (unknown/missing/invalid field). */
+  REQUEST_INVALID = 'AUCTION_REQUEST_INVALID',
+  /** The auction exists but is not (or no longer) publicly discoverable: wrong status, or its property is no longer public. */
+  PUBLIC_UNAVAILABLE = 'AUCTION_PUBLIC_UNAVAILABLE',
 }

@@ -667,6 +667,57 @@ export class PropertiesService {
     };
   }
 
+  /**
+   * Mongo match for "properties an auction may be publicly listed under"
+   * (MAZAD-025): the shared public-visibility gate plus the same catalog
+   * dimension filters public search already validates (governorate, city,
+   * purpose category/subcategory). Reused verbatim so auction discovery can
+   * never disagree with property search about what is public or how a
+   * dimension filter is validated (unknown/mismatched catalog ids throw the
+   * same stable property error codes).
+   */
+  async buildPublicPropertyMatchForAuctions(
+    filters: Pick<ListPublishedPropertiesDto, 'governorateCode' | 'city' | 'purposeCategoryId' | 'purposeSubcategoryId'> = {},
+  ): Promise<Record<string, unknown>> {
+    const { filter } = await this.buildPublicListingQuery(filters as ListPublishedPropertiesDto);
+    return { ...this.publicVisibilityFilter(), ...filter };
+  }
+
+  /**
+   * Safe public projections of the *frozen* revisions auctions are anchored
+   * to (MAZAD-025), keyed by `${propertyId}:${revisionId}` (a property can be re-auctioned
+   * under a newer revision). Unlike `getPublicProjectionsByIds`
+   * (which shows a property's current public revision), this renders exactly
+   * the revision each auction promised bidders, so a later property edit
+   * never changes what an auction page shows. Properties that no longer pass
+   * the public-visibility gate, and pairs whose revision does not belong to
+   * the property, are simply absent from the result.
+   */
+  async getAnchoredPublicProjections(pairs: Array<{ propertyId: string; revisionId: string }>): Promise<Map<string, any>> {
+    const valid = pairs.filter((pair) => Types.ObjectId.isValid(pair.propertyId) && Types.ObjectId.isValid(pair.revisionId));
+    if (!valid.length) return new Map();
+    const [properties, revisions] = await Promise.all([
+      this.properties.find({ _id: { $in: [...new Set(valid.map((pair) => pair.propertyId))] }, ...this.publicVisibilityFilter() }).lean().exec(),
+      this.revisions.find({ _id: { $in: [...new Set(valid.map((pair) => pair.revisionId))] } }).lean().exec(),
+    ]);
+    const propertyById = new Map(properties.map((item) => [item._id.toString(), item]));
+    const revisionById = new Map(revisions.map((revision) => [revision._id.toString(), revision]));
+    const anchored: any[] = [];
+    const keys: string[] = [];
+    for (const pair of valid) {
+      const property = propertyById.get(pair.propertyId);
+      const revision = revisionById.get(pair.revisionId);
+      if (!property || !revision || revision.propertyId?.toString() !== pair.propertyId) continue;
+      const key = `${pair.propertyId}:${pair.revisionId}`;
+      if (keys.includes(key)) continue;
+      keys.push(key);
+      anchored.push({ ...property, currentPublicRevisionId: revision });
+    }
+    // hydratePublicListings preserves input order, so results pair up with `keys`.
+    const hydrated = await this.hydratePublicListings(anchored);
+    return new Map(hydrated.map((item, index) => [keys[index], item]));
+  }
+
   async updateOwnerVisibility(ownerId: string, id: string, isVisible: boolean) {
     this.assertId(id);
     await this.auctionLock.assertUnlocked(id);

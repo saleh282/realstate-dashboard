@@ -156,7 +156,7 @@ export class AuctionLifecycleService {
    * invent a new marketplace actor model", this remains self-service only
    * until an authoritative admin operational contract exists.
    */
-  async cancel(actorId: string, auctionId: string, reason: string | undefined, ip?: string) {
+  async cancel(actorId: string, auctionId: string, reason: string | undefined, ip?: string, expectedStatus?: AuctionStatus) {
     if (!Types.ObjectId.isValid(auctionId)) {
       throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
     }
@@ -168,6 +168,12 @@ export class AuctionLifecycleService {
     if (!auction) throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
 
     AuthorizationPolicyService.assertOwnResource(actor, auction.advertiserAccountId.toString());
+    // Optimistic guard (MAZAD-025): the caller states the status it last saw;
+    // if the auction has moved on, fail rather than cancel under stale
+    // assumptions (e.g. SCHEDULED -> ACTIVE changes the reason requirement).
+    if (expectedStatus && auction.status !== expectedStatus) {
+      throw new ConflictException({ message: 'تغيرت حالة المزاد؛ أعد التحميل', code: AuctionErrorCode.STATE_CONFLICT });
+    }
     assertValidAuctionTransition(auction.status, AuctionStatus.CANCELLED);
 
     const trimmedReason = reason?.trim();

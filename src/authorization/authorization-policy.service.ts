@@ -26,6 +26,7 @@ const ADMIN_CAPABILITIES = new Set<Capability>([
   Capability.ADMIN_BROKER_REVIEW,
   Capability.ADMIN_CATALOG_MANAGE,
   Capability.ADMIN_MANAGED_MARKETING_MANAGE,
+  Capability.ADMIN_AUCTION_READ,
 ]);
 
 const MARKETPLACE_MUTATIONS = new Set<Capability>([
@@ -35,6 +36,7 @@ const MARKETPLACE_MUTATIONS = new Set<Capability>([
   Capability.BROKER_APPLICATION_SUBMIT,
   Capability.BROKER_INTEREST_MANAGE,
   Capability.AUCTION_CREATE_OWN,
+  Capability.AUCTION_MANAGE_OWN,
   Capability.BID_PLACE,
   Capability.PAYMENT_ENTRY_INITIATE,
 ]);
@@ -51,6 +53,8 @@ const MARKETPLACE_CAPABILITIES = new Set<Capability>([
   Capability.BROKER_APPLICATION_SUBMIT,
   Capability.BROKER_INTEREST_MANAGE,
   Capability.AUCTION_CREATE_OWN,
+  Capability.AUCTION_READ_OWN,
+  Capability.AUCTION_MANAGE_OWN,
   Capability.BID_PLACE,
   Capability.PAYMENT_ENTRY_INITIATE,
 ]);
@@ -107,6 +111,7 @@ export class AuthorizationPolicyService {
       capability === Capability.KYC_SELF_READ ||
       capability === Capability.KYC_SELF_SUBMIT ||
       capability === Capability.PROPERTY_READ_OWN ||
+      capability === Capability.AUCTION_READ_OWN ||
       capability === Capability.BROKER_APPLICATION_READ_OWN ||
       capability === Capability.FAVORITE_MANAGE_OWN
     ) {
@@ -135,6 +140,7 @@ export class AuthorizationPolicyService {
       capability === Capability.PROPERTY_CREATE ||
       capability === Capability.PROPERTY_MANAGE_OWN ||
       capability === Capability.AUCTION_CREATE_OWN ||
+      capability === Capability.AUCTION_MANAGE_OWN ||
       capability === Capability.BID_PLACE ||
       capability === Capability.PAYMENT_ENTRY_INITIATE
     ) {

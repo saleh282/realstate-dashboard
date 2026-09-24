@@ -1,12 +1,17 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { PassportModule } from '@nestjs/passport';
 import { AuditModule } from '../audit/audit.module';
+import { RolesGuard } from '../auth/roles.guard';
 import { ClockService } from '../common/time/clock.service';
 import { PropertiesModule } from '../properties/properties.module';
 import { UsersModule } from '../users/users.module';
 import { AUCTION_BID_EXISTENCE_PORT, NoBidsYetAuctionBidExistencePort } from './auction-bid-existence.port';
 import { AuctionLifecycleService } from './auction-lifecycle.service';
 import { AuctionLifecycleWorker } from './auction-lifecycle.worker';
+import { AdminAuctionsController } from './admin-auctions.controller';
+import { AuctionsController } from './auctions.controller';
+import { AuctionsQueryService } from './auctions-query.service';
 import { AuctionsService } from './auctions.service';
 import { Auction, AuctionSchema } from './schemas/auction.schema';
 
@@ -20,18 +25,24 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
  *    and expiry (MAZAD-024);
  *  - `AUCTION_BID_EXISTENCE_PORT` — bound to the safe "no bids yet" default
  *    until MAZAD-026 supplies the real Bid-backed implementation.
- * Intentionally has no controller yet — the auction API is a later task;
- * see `AuctionsService`'s doc comment.
+ *  - `AuctionsQueryService` + `AuctionsController` / `AdminAuctionsController`
+ *    — the HTTP contract (MAZAD-025): public discovery, own auctions, create,
+ *    cancel, and a read-only staff view. Mutations still go exclusively
+ *    through `AuctionsService.create` and `AuctionLifecycleService`.
  */
 @Module({
   imports: [
+    PassportModule,
     AuditModule,
     UsersModule,
     PropertiesModule,
     MongooseModule.forFeature([{ name: Auction.name, schema: AuctionSchema }]),
   ],
+  controllers: [AuctionsController, AdminAuctionsController],
   providers: [
     AuctionsService,
+    AuctionsQueryService,
+    RolesGuard,
     AuctionLifecycleService,
     AuctionLifecycleWorker,
     ClockService,
