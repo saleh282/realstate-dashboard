@@ -18,4 +18,7 @@ export enum BidErrorCode {
   RETRY_EXHAUSTED = 'BID_RETRY_EXHAUSTED',
   /** The ledger and the auction's counter disagree; never expected, never retried. */
   LEDGER_INCONSISTENT = 'BID_LEDGER_INCONSISTENT',
+  // --- MAZAD-029 HTTP / idempotency ---
+  /** POST /auctions/:id/bids requires an Idempotency-Key header. */
+  IDEMPOTENCY_KEY_REQUIRED = 'BID_IDEMPOTENCY_KEY_REQUIRED',
 }

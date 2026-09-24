@@ -5,7 +5,9 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
 import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
 import { BidLedgerService } from '../bids/bid-ledger.service';
+import { BidRequest, BidRequestDocument } from '../bids/schemas/bid-request.schema';
 import { Bid, BidDocument } from '../bids/schemas/bid.schema';
+import { IdempotencyErrorCode, sha256 } from '../common/idempotency/idempotency.service';
 import { AuctionErrorCode } from '../common/errors/auction-error-codes';
 import { BidErrorCode } from '../common/errors/bid-error-codes';
 import { EGP_CURRENCY, MONEY_MINOR_MAX, isMoneyMinorAmount } from '../common/money/money';
@@ -54,7 +56,12 @@ export type AcceptedBidResult = {
   };
   /** The smallest amount the next bid must reach (this amount + step), or null if that would exceed the money ceiling. */
   nextMinimumBidMinor: number | null;
+  /** True when this is the recorded result of an earlier identical request (MAZAD-029); nothing was written. */
+  replayed: boolean;
 };
+
+/** Client idempotency context for one logical bid request (MAZAD-029). The raw key is hashed before it is stored. */
+export type BidIdempotency = { key: string };
 
 /**
  * MAZAD-027 — the authoritative atomic bid-acceptance path. Internal domain
@@ -110,6 +117,7 @@ export class AuctionBidAcceptanceService {
     @InjectModel(Auction.name) private readonly auctions: Model<AuctionDocument>,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     @InjectModel(Bid.name) private readonly bids: Model<BidDocument>,
+    @InjectModel(BidRequest.name) private readonly bidRequests: Model<BidRequestDocument>,
     private readonly ledger: BidLedgerService,
     private readonly lifecycle: AuctionLifecycleService,
     private readonly audit: AuditLogService,
@@ -119,7 +127,7 @@ export class AuctionBidAcceptanceService {
   ) {}
 
   /** `actorId` MUST be the authenticated principal's id; it is the only source of bidder identity. */
-  async acceptBid(actorId: string, auctionId: string, amountMinor: unknown, ip?: string): Promise<AcceptedBidResult> {
+  async acceptBid(actorId: string, auctionId: string, amountMinor: unknown, ip?: string, idempotency?: BidIdempotency): Promise<AcceptedBidResult> {
     const amount = this.validateAmountShape(amountMinor);
     if (!Types.ObjectId.isValid(auctionId)) {
       throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
@@ -134,7 +142,7 @@ export class AuctionBidAcceptanceService {
         session.startTransaction({ readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' } });
         let result: AcceptedBidResult;
         try {
-          result = await this.acceptWithinTransaction(session, actorId, auctionId, amount, ip);
+          result = await this.acceptWithinTransaction(session, actorId, auctionId, amount, ip, idempotency);
         } catch (error) {
           await this.abortQuietly(session);
           if (this.isRetryable(error)) { await this.pause(attempt); continue; }
@@ -155,6 +163,9 @@ export class AuctionBidAcceptanceService {
     throw new ConflictException({
       message: 'المزايدة على هذا المزاد نشطة حالياً؛ أعد المحاولة',
       code: BidErrorCode.RETRY_EXHAUSTED,
+      // A retryable conflict: nothing was written; the same request (same Idempotency-Key) may be retried.
+      retryAfterSeconds: 1,
+      details: { retryable: true },
     });
   }
 
@@ -164,8 +175,25 @@ export class AuctionBidAcceptanceService {
     auctionId: string,
     amount: number,
     ip: string | undefined,
+    idempotency?: BidIdempotency,
   ): Promise<AcceptedBidResult> {
     const now = this.clock.now(); // the single authoritative instant for this attempt
+
+    // (0) Request-level idempotency (MAZAD-029): a recorded request is replayed verbatim, before any decision is re-made.
+    const idem = idempotency ? { keyHash: sha256(idempotency.key), fingerprint: sha256(`bid:v1:${amount}`) } : undefined;
+    if (idem) {
+      const recorded: any = await this.bidRequests
+        .findOne({ bidderAccountId: new Types.ObjectId(actorId), auctionId: new Types.ObjectId(auctionId), keyHash: idem.keyHash })
+        .session(session)
+        .lean()
+        .exec();
+      if (recorded) {
+        if (recorded.fingerprint !== idem.fingerprint) {
+          throw new ConflictException({ message: 'تم استخدام مفتاح منع التكرار مع بيانات مختلفة', code: IdempotencyErrorCode.KEY_REUSED });
+        }
+        return { ...(recorded.result as Omit<AcceptedBidResult, 'replayed'>), replayed: true };
+      }
+    }
 
     // Sequential on purpose: operations on one transaction's session must not be issued concurrently.
     const auction = await this.auctions.findById(auctionId).session(session).exec();
@@ -251,7 +279,7 @@ export class AuctionBidAcceptanceService {
       session,
     );
 
-    return {
+    const result: AcceptedBidResult = {
       bid: {
         id: bid._id.toString(),
         auctionId,
@@ -271,7 +299,19 @@ export class AuctionBidAcceptanceService {
         acceptedBidCount: acquired.acceptedBidCount,
       },
       nextMinimumBidMinor: this.safeAdd(amount, auction.minimumBidStepMinor),
+      replayed: false,
     };
+
+    // (10) Record the logical request in the SAME transaction as the Bid: both commit, or neither does.
+    if (idem) {
+      const { replayed: _replayed, ...stored } = result;
+      void _replayed;
+      await this.bidRequests.create(
+        [{ bidderAccountId: new Types.ObjectId(actorId), auctionId: auction._id, keyHash: idem.keyHash, fingerprint: idem.fingerprint, bidId: bid._id, result: stored }],
+        { session },
+      );
+    }
+    return result;
   }
 
   /** Overflow-safe: never adds past the money ceiling. */
@@ -311,7 +351,8 @@ export class AuctionBidAcceptanceService {
     if (e?.code === 11000) {
       // Duplicate (auctionId, sequence): a racing acceptance took this position.
       const keys = Object.keys(e.keyPattern ?? {});
-      return (keys.includes('auctionId') && keys.includes('sequence')) || String(e.message ?? '').includes('bid_auction_sequence');
+      const text = String(e.message ?? '');
+      return (keys.includes('auctionId') && keys.includes('sequence')) || text.includes('bid_auction_sequence') || text.includes('bid_request_actor_auction_key') || keys.includes('keyHash');
     }
     return false;
   }

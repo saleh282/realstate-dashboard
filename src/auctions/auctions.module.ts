@@ -11,6 +11,8 @@ import { AUCTION_BID_EXISTENCE_PORT, BidLedgerAuctionBidExistencePort } from './
 import { PaymentsModule } from '../payments/payments.module';
 import { PersistentBidEntitlementPort } from '../payments/persistent-bid-entitlement.port';
 import { AUCTION_BID_ENTITLEMENT_PORT } from './auction-bid-entitlement.port';
+import { AuctionBiddingReadService } from './auction-bidding-read.service';
+import { AuctionBidsController } from './auction-bids.controller';
 import { AuctionBidAcceptanceService } from './auction-bid-acceptance.service';
 import { AuctionLifecycleService } from './auction-lifecycle.service';
 import { AuctionLifecycleWorker } from './auction-lifecycle.worker';
@@ -34,6 +36,9 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
  *    (MAZAD-027); internal only, no controller; its
  *    `AUCTION_BID_ENTITLEMENT_PORT` is bound to the persisted, server-confirmed
  *    entitlement of `PaymentsModule` (MAZAD-028).
+ *  - `AuctionBidsController` + `AuctionBiddingReadService` — the bid HTTP API
+ *    (MAZAD-029): placement (a thin adapter over the acceptance service, with
+ *    durable request idempotency), current bid state and anonymised history.
  *  - `AuctionsQueryService` + `AuctionsController` / `AdminAuctionsController`
  *    — the HTTP contract (MAZAD-025): public discovery, own auctions, create,
  *    cancel, and a read-only staff view. Mutations still go exclusively
@@ -49,13 +54,14 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
     PaymentsModule,
     MongooseModule.forFeature([{ name: Auction.name, schema: AuctionSchema }]),
   ],
-  controllers: [AuctionsController, AdminAuctionsController],
+  controllers: [AuctionsController, AuctionBidsController, AdminAuctionsController],
   providers: [
     AuctionsService,
     AuctionsQueryService,
     RolesGuard,
     AuctionLifecycleService,
     AuctionBidAcceptanceService,
+    AuctionBiddingReadService,
     AuctionLifecycleWorker,
     ClockService,
     { provide: AUCTION_BID_ENTITLEMENT_PORT, useExisting: PersistentBidEntitlementPort },

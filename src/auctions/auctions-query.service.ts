@@ -108,7 +108,13 @@ export class AuctionsQueryService {
     return { items, pagination: pagination(page, limit, total), serverTime: this.clock.now() };
   }
 
-  async getPublic(id: string) {
+  /**
+   * The single public-visibility gate for one auction: exists, status is
+   * publicly browsable, and its anchored property revision is still public.
+   * Used by `getPublic` and by the bid-state/bid-history reads (MAZAD-029) so
+   * nothing can be revealed through them that `GET /auctions/:id` hides.
+   */
+  async getPubliclyVisible(id: string) {
     assertId(id);
     const doc = await this.auctions.findById(id).lean().exec();
     if (!doc) throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
@@ -119,6 +125,11 @@ export class AuctionsQueryService {
     ]);
     const property = projections.get(`${doc.propertyId}:${doc.propertyRevisionId}`);
     if (!property) throw unavailable();
+    return { doc, property };
+  }
+
+  async getPublic(id: string) {
+    const { doc, property } = await this.getPubliclyVisible(id);
     return { auction: toPublicAuction(doc, property), serverTime: this.clock.now() };
   }
 

@@ -55,11 +55,14 @@ function deferred<T = void>() {
 const transient = (message: string) => Object.assign(new Error(message), { code: 112, hasErrorLabel: (l: string) => l === 'TransientTransactionError' });
 const dupKey = () => Object.assign(new Error('E11000 duplicate key bid_auction_sequence'), { code: 11000, keyPattern: { auctionId: 1, sequence: 1 } });
 
-type Txn = { id: number; active: boolean; snapAuctions: Map<string, { doc: any; version: number }>; snapBids: any[]; writes: Map<string, any>; bids: any[]; audits: any[] };
+const same = (a: any, b: any) => String(a.bidderAccountId) === String(b.bidderAccountId) && String(a.auctionId) === String(b.auctionId) && a.keyHash === b.keyHash;
+
+type Txn = { id: number; active: boolean; snapAuctions: Map<string, { doc: any; version: number }>; snapBids: any[]; writes: Map<string, any>; bids: any[]; audits: any[]; reqs: any[] };
 
 class FakeMongo {
   auctions = new Map<string, { doc: any; version: number }>();
   bids: any[] = [];
+  bidRequests: any[] = [];
   audits: any[] = [];
   users = new Map<string, any>();
   locks = new Map<string, number>();
@@ -101,7 +104,7 @@ class FakeMongo {
         startTransaction() {
           mongo.transactionsStarted++;
           txn = {
-            id: mongo.nextTxn++, active: true, writes: new Map(), bids: [], audits: [], snapBids: [...mongo.bids],
+            id: mongo.nextTxn++, active: true, writes: new Map(), bids: [], audits: [], reqs: [], snapBids: [...mongo.bids],
             snapAuctions: new Map([...mongo.auctions].map(([k, v]) => [k, { doc: { ...v.doc }, version: v.version }])),
           };
         },
@@ -118,7 +121,11 @@ class FakeMongo {
             if (mongo.bids.some((b) => b.auctionId.toString() === bid.auctionId.toString() && b.sequence === bid.sequence)) { mongo.release(t); t.active = false; throw dupKey(); }
           }
           for (const [id, doc] of t.writes) { const rec = mongo.auctions.get(id)!; rec.doc = doc; rec.version += 1; }
+          for (const r of t.reqs) {
+            if (mongo.bidRequests.some((x) => same(x, r))) { mongo.release(t); t.active = false; throw Object.assign(new Error('E11000 duplicate key bid_request_actor_auction_key'), { code: 11000, keyPattern: { bidderAccountId: 1, auctionId: 1, keyHash: 1 } }); }
+          }
           mongo.bids.push(...t.bids);
+          mongo.bidRequests.push(...t.reqs);
           mongo.audits.push(...t.audits);
           mongo.release(t);
           t.active = false;
@@ -244,6 +251,28 @@ class FakeMongo {
     return chain;
   }
 
+  bidRequestModel = {
+    findOne: (filter: any) => {
+      let txn: Txn | undefined;
+      const chain: any = {
+        session: (sess: any) => { txn = sess?.txn; return chain; }, lean: () => chain,
+        exec: async () => { await tick(); const rows = txn ? [...this.bidRequests, ...txn.reqs] : this.bidRequests; return rows.find((r) => same(r, filter)) ?? null; },
+      };
+      return chain;
+    },
+    create: async (docs: any[], options: any) => {
+      await tick();
+      const txn: Txn = options.session.txn;
+      const out = [];
+      for (const d of docs) {
+        const row = { _id: new Types.ObjectId(), ...d };
+        if ([...this.bidRequests, ...txn.reqs].some((x) => same(x, row))) throw Object.assign(new Error('E11000 duplicate key bid_request_actor_auction_key'), { code: 11000, keyPattern: { bidderAccountId: 1, auctionId: 1, keyHash: 1 } });
+        txn.reqs.push(row); out.push(row);
+      }
+      return out;
+    },
+  };
+
   audit = {
     logRequired: jest.fn(async (options: any, session: any) => {
       await tick();
@@ -273,7 +302,7 @@ function build(entitled: AuctionBidEntitlementPort | 'default' = { assertEntitle
     auctions: mongo.auctionModel, users: mongo.userModel, audit: mongo.audit, clock, bidExistence: port, connection: mongo.connection,
   }) as AuctionLifecycleService;
   const service = Object.assign(Object.create(AuctionBidAcceptanceService.prototype), {
-    auctions: mongo.auctionModel, users: mongo.userModel, bids: mongo.bidModel, ledger, lifecycle, audit: mongo.audit, clock,
+    auctions: mongo.auctionModel, users: mongo.userModel, bids: mongo.bidModel, bidRequests: mongo.bidRequestModel, ledger, lifecycle, audit: mongo.audit, clock,
     entitlement: entitled === 'default' ? new FailClosedBidEntitlementPort() : entitled, connection: mongo.connection,
   }) as AuctionBidAcceptanceService;
   return { mongo, service, lifecycle, ledger };
@@ -357,7 +386,8 @@ describe('AuctionBidAcceptanceService — amount rules (MAZAD-027)', () => {
   });
 
   it('never trusts a client-supplied minimum/price: acceptBid has no such parameter', () => {
-    expect(AuctionBidAcceptanceService.prototype.acceptBid.length).toBeLessThanOrEqual(4); // (actorId, auctionId, amount, ip?)
+    expect(AuctionBidAcceptanceService.prototype.acceptBid.length).toBeLessThanOrEqual(5); // (actorId, auctionId, amount, ip?, idempotency?) — the 5th is MAZAD-029's idempotency key, not a price
+    expect(AuctionBidAcceptanceService.prototype.acceptBid.toString().split('{')[0]).not.toMatch(/minimum|price|time|endAt|sequence|bidder/i);
   });
 });
 
@@ -442,7 +472,8 @@ describe('AuctionBidAcceptanceService — auction state and the end boundary (MA
     const result = await service.acceptBid(ALICE, AUCTION, 100_000);
     expect(result.bid.acceptedAt).toEqual(OPEN_NOW);
     expect(mongo.bids[0].acceptedAt).toEqual(OPEN_NOW);
-    expect(AuctionBidAcceptanceService.prototype.acceptBid.length).toBeLessThanOrEqual(4);
+    expect(AuctionBidAcceptanceService.prototype.acceptBid.length).toBeLessThanOrEqual(5); // idempotency key is the only addition
+    expect(AuctionBidAcceptanceService.prototype.acceptBid.toString().split('{')[0]).not.toMatch(/time|endAt|sequence|acceptedAt/i);
   });
 });
 
@@ -854,5 +885,141 @@ describe('AuctionBidAcceptanceService with the persistent entitlement port (MAZA
     mongo.committedAuction().status = AuctionStatus.ENDED_PENDING_CLOSE;
     expect(await codeOf(() => service.acceptBid(ALICE, AUCTION, 100_000))).toBe(BidErrorCode.AUCTION_NOT_ACTIVE);
     expect(mongo.bids).toHaveLength(0);
+  });
+});
+
+
+describe('AuctionBidAcceptanceService — request-level idempotency (MAZAD-029)', () => {
+  const KEY = 'idem-key-0001';
+  const bidOnce = (service: AuctionBidAcceptanceService, actor: string, amount: number, key = KEY, auction = AUCTION) =>
+    service.acceptBid(actor, auction, amount, undefined, { key });
+
+  it('same actor + auction + key + payload replays the ORIGINAL result and creates no second Bid', async () => {
+    const { service, mongo } = build();
+    const first = await bidOnce(service, ALICE, 100_000);
+    expect(first.replayed).toBe(false);
+    const second = await bidOnce(service, ALICE, 100_000);
+    expect(second.replayed).toBe(true);
+    expect(second.bid).toEqual(first.bid);
+    expect(second.auction).toEqual(first.auction);
+    expect(second.nextMinimumBidMinor).toBe(first.nextMinimumBidMinor);
+    expect(mongo.bids).toHaveLength(1);
+    expect(mongo.bidRequests).toHaveLength(1);
+    expect(mongo.committedAuction().acceptedBidCount).toBe(1);
+    expect(mongo.audits.filter((a) => a.action === AuditAction.AUCTION_BID_ACCEPTED)).toHaveLength(1);
+  });
+
+  it('a replay returns the original result even after the auction moved on (later bids, end, cancellation)', async () => {
+    const { service, mongo } = build();
+    const first = await bidOnce(service, ALICE, 100_000);
+    await service.acceptBid(BOB, AUCTION, 105_000);
+    mongo.committedAuction().status = AuctionStatus.CANCELLED;
+    const replay = await bidOnce(service, ALICE, 100_000);
+    expect(replay).toMatchObject({ replayed: true, bid: first.bid });
+    expect(mongo.bids).toHaveLength(2);
+  });
+
+  it('same key with a different amount is a deterministic idempotency conflict and writes nothing', async () => {
+    const { service, mongo } = build();
+    await bidOnce(service, ALICE, 100_000);
+    expect(await codeOf(() => bidOnce(service, ALICE, 200_000))).toBe('IDEMPOTENCY_KEY_REUSED');
+    expect(await codeOf(() => bidOnce(service, ALICE, 200_000))).toBe('IDEMPOTENCY_KEY_REUSED');
+    expect(mongo.bids).toHaveLength(1);
+  });
+
+  it('the same key is independent for another actor (no shared scope, no information leak)', async () => {
+    const { service, mongo } = build();
+    const a = await bidOnce(service, ALICE, 100_000);
+    const b = await bidOnce(service, BOB, 105_000);
+    expect([a.replayed, b.replayed]).toEqual([false, false]);
+    expect(b.bid.sequence).toBe(2);
+    expect(mongo.bids).toHaveLength(2);
+  });
+
+  it('the same key on a different auction does not collide', async () => {
+    const OTHER = '64b000000000000000000f02';
+    const { service, mongo } = build();
+    mongo.seedAuction({ _id: oid(OTHER) });
+    const a = await bidOnce(service, ALICE, 100_000, KEY, AUCTION);
+    const b = await bidOnce(service, ALICE, 100_000, KEY, OTHER);
+    expect([a.replayed, b.replayed]).toEqual([false, false]);
+    expect(mongo.bids).toHaveLength(2);
+  });
+
+  it('a business rejection records nothing, so the same key can be retried and re-decided', async () => {
+    const { service, mongo } = build();
+    expect(await codeOf(() => bidOnce(service, ALICE, 99_999))).toBe(BidErrorCode.BELOW_MINIMUM);
+    expect(mongo.bidRequests).toHaveLength(0);
+    const ok = await bidOnce(service, ALICE, 99_999 + 1); // different payload, same key: no record exists, so no conflict
+    expect(ok).toMatchObject({ replayed: false });
+    expect(mongo.bids).toHaveLength(1);
+  });
+
+  it('entitlement failure records nothing; once entitled the same key proceeds', async () => {
+    let entitled = false;
+    const { service, mongo } = build({ assertEntitled: async () => { if (!entitled) throw new ForbiddenException({ code: BidErrorCode.ENTITLEMENT_REQUIRED }); } });
+    expect(await codeOf(() => bidOnce(service, ALICE, 100_000))).toBe(BidErrorCode.ENTITLEMENT_REQUIRED);
+    expect(mongo.bidRequests).toHaveLength(0);
+    entitled = true;
+    expect((await bidOnce(service, ALICE, 100_000)).replayed).toBe(false);
+  });
+
+  it('concurrent requests with the same key converge on ONE bid and one result', async () => {
+    const { service, mongo } = build();
+    const results = await Promise.all([1, 2, 3, 4, 5].map(() => bidOnce(service, ALICE, 100_000)));
+    expect(mongo.bids).toHaveLength(1);
+    expect(mongo.bidRequests).toHaveLength(1);
+    expect(results.filter((r) => !r.replayed)).toHaveLength(1);
+    expect(new Set(results.map((r) => r.bid.id)).size).toBe(1);
+  });
+
+  it('retry after a lost HTTP response (bid committed, result discarded) returns the original and places no second bid', async () => {
+    const { service, mongo } = build();
+    await bidOnce(service, ALICE, 100_000); // the client never sees this response
+    const afterNetworkLoss = await bidOnce(service, ALICE, 100_000);
+    expect(afterNetworkLoss).toMatchObject({ replayed: true });
+    expect(afterNetworkLoss.bid).toMatchObject({ sequence: 1, amountMinor: 100_000, bidderAccountId: ALICE });
+    expect(mongo.bids).toHaveLength(1);
+  });
+
+  it('a commit that fails (transient) leaves neither Bid nor request record; the retry then succeeds exactly once', async () => {
+    const { service, mongo } = build();
+    let fail = true;
+    mongo.hooks.commitError = () => (fail ? ((fail = false), transient('commit failed')) : undefined);
+    const result = await bidOnce(service, ALICE, 100_000);
+    expect(result.replayed).toBe(false);
+    expect(mongo.bids).toHaveLength(1);
+    expect(mongo.bidRequests).toHaveLength(1);
+  });
+
+  it('the Bid and its request record are written in the same transaction (no bid without a record)', async () => {
+    const { service, mongo } = build();
+    mongo.hooks.auditError = () => new Error('audit down');
+    await expect(bidOnce(service, ALICE, 100_000)).rejects.toThrow('audit down');
+    expect(mongo.bids).toHaveLength(0);
+    expect(mongo.bidRequests).toHaveLength(0);
+  });
+
+  it('idempotency is optional at the service level and never persists a record without a key', async () => {
+    const { service, mongo } = build();
+    await service.acceptBid(ALICE, AUCTION, 100_000);
+    expect(mongo.bidRequests).toHaveLength(0);
+  });
+
+  it('BID_RETRY_EXHAUSTED is a retryable conflict carrying retryAfterSeconds', async () => {
+    const { service, mongo } = build();
+    mongo.hooks.commitError = () => transient('always conflicts');
+    const error: any = await bidOnce(service, ALICE, 100_000).catch((e) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect(error.getResponse()).toMatchObject({ code: BidErrorCode.RETRY_EXHAUSTED, retryAfterSeconds: 1, details: { retryable: true } });
+    expect(mongo.bids).toHaveLength(0);
+  });
+
+  it('uses no process-local state: a second service instance over the same store still replays', async () => {
+    const one = build();
+    await bidOnce(one.service, ALICE, 100_000);
+    const twin = Object.assign(Object.create(AuctionBidAcceptanceService.prototype), (one.service as any));
+    expect((await bidOnce(twin, ALICE, 100_000)).replayed).toBe(true);
+    expect(one.mongo.bids).toHaveLength(1);
   });
 });
