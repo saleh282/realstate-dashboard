@@ -5,7 +5,16 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
 import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
 import { AuctionErrorCode } from '../common/errors/auction-error-codes';
+import { retryConflict, runTransactionWithRetry } from '../common/mongo/transaction-runner';
 import { ClockService } from '../common/time/clock.service';
+import {
+  auctionActivatedEvent,
+  auctionCancelledEvent,
+  auctionEndExtendedEvent,
+  auctionEndedNoBidsEvent,
+  auctionEndedPendingCloseEvent,
+} from '../outbox/outbox-events';
+import { OutboxService } from '../outbox/outbox.service';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { AUCTION_BID_EXISTENCE_PORT, AuctionBidExistencePort } from './auction-bid-existence.port';
 import { assertValidAuctionTransition } from './auction-transitions';
@@ -51,6 +60,7 @@ export class AuctionLifecycleService {
     private readonly clock: ClockService,
     @Inject(AUCTION_BID_EXISTENCE_PORT) private readonly bidExistence: AuctionBidExistencePort,
     @InjectConnection() private readonly connection: Connection,
+    private readonly outbox: OutboxService,
   ) {}
 
   // -----------------------------------------------------------------------
@@ -66,26 +76,42 @@ export class AuctionLifecycleService {
    * can never both activate it — whichever wins the Mongo-level race
    * succeeds, the loser's filter simply no longer matches and it moves on.
    * Re-running finds nothing left to claim (idempotent).
+   *
+   * MAZAD-031: each claim runs in its own transaction together with its
+   * `AUCTION_ACTIVATED` outbox event, so the transition and its event commit
+   * or abort as one. The best-effort audit telemetry stays after the commit.
    */
   async activateDueAuctions(limit = DEFAULT_BATCH_SIZE): Promise<{ activated: number }> {
     const batchSize = clampBatch(limit);
     let activated = 0;
     for (let i = 0; i < batchSize; i++) {
-      const now = this.clock.now();
-      const doc = await this.auctions
-        .findOneAndUpdate(
-          { status: AuctionStatus.SCHEDULED, scheduledStartAt: { $lte: now } },
-          { $set: { status: AuctionStatus.ACTIVE } },
-          { sort: { scheduledStartAt: 1 }, new: true },
-        )
-        .exec();
-      if (!doc) break;
+      // One transaction per auction (MAZAD-031): the SCHEDULED → ACTIVE claim and its AUCTION_ACTIVATED
+      // outbox event commit together or not at all.
+      const claimed = await runTransactionWithRetry(
+        this.connection,
+        async (session) => {
+          const now = this.clock.now();
+          const doc = await this.auctions
+            .findOneAndUpdate(
+              { status: AuctionStatus.SCHEDULED, scheduledStartAt: { $lte: now } },
+              { $set: { status: AuctionStatus.ACTIVE } },
+              { sort: { scheduledStartAt: 1 }, new: true, session },
+            )
+            .exec();
+          if (!doc) return null;
+          await this.outbox.recordRequired(auctionActivatedEvent({ auctionId: doc._id.toString(), occurredAt: now, currentEndAt: doc.currentEndAt }), session);
+          return { doc, now };
+        },
+        { retryExhausted: retryConflict('تحديث حالة المزاد قيد المعالجة؛ أعد المحاولة', AuctionErrorCode.STATE_CONFLICT) },
+      );
+      if (!claimed) break;
       activated += 1;
+      // Best-effort telemetry, unchanged from MAZAD-024: only after the transition and its event committed.
       await this.audit.logSystemAction(
         AuditAction.AUCTION_ACTIVATED,
-        doc._id.toString(),
+        claimed.doc._id.toString(),
         'auction activated at scheduled start',
-        { scheduledStartAt: doc.scheduledStartAt, activatedAt: now },
+        { scheduledStartAt: claimed.doc.scheduledStartAt, activatedAt: claimed.now },
       );
     }
     return { activated };
@@ -101,37 +127,63 @@ export class AuctionLifecycleService {
    * concurrent cancellation landing between the read and the write safely
    * loses the race (the `continue` below) instead of both operations
    * applying to the same document.
+   *
+   * MAZAD-031: the read, the conditional write and the
+   * `AUCTION_ENDED_NO_BIDS` / `AUCTION_ENDED_PENDING_CLOSE` outbox event are
+   * one transaction per auction. The bid-existence read is deliberately not
+   * session-bound: it is safe because any bid that commits after this
+   * transaction's snapshot has modified the Auction document, so the
+   * conditional write conflicts and the whole attempt is retried against
+   * fresh state.
    */
   async expireDueAuctions(limit = DEFAULT_BATCH_SIZE): Promise<{ endedNoBids: number; endedPendingClose: number }> {
     const batchSize = clampBatch(limit);
     let endedNoBids = 0;
     let endedPendingClose = 0;
     for (let i = 0; i < batchSize; i++) {
-      const now = this.clock.now();
-      const candidate = await this.auctions
-        .findOne({ status: AuctionStatus.ACTIVE, currentEndAt: { $lte: now } })
-        .sort({ currentEndAt: 1 })
-        .select('_id')
-        .lean()
-        .exec();
-      if (!candidate) break;
-      const auctionId = (candidate._id as Types.ObjectId).toString();
-      const hasBids = await this.bidExistence.hasValidBids(auctionId);
-      const to = hasBids ? AuctionStatus.ENDED_PENDING_CLOSE : AuctionStatus.ENDED_NO_BIDS;
-      const doc = await this.auctions
-        .findOneAndUpdate(
-          { _id: candidate._id, status: AuctionStatus.ACTIVE, currentEndAt: { $lte: now } },
-          { $set: { status: to } },
-          { new: true },
-        )
-        .exec();
-      if (!doc) continue; // raced with a concurrent cancellation/worker instance — no error, just skip; the next iteration re-scans.
-      if (to === AuctionStatus.ENDED_NO_BIDS) {
+      // One transaction per auction (MAZAD-031): the ACTIVE → ENDED_* write and its outbox event commit together.
+      const outcome = await runTransactionWithRetry(
+        this.connection,
+        async (session) => {
+          const now = this.clock.now();
+          const candidate = await this.auctions
+            .findOne({ status: AuctionStatus.ACTIVE, currentEndAt: { $lte: now } })
+            .sort({ currentEndAt: 1 })
+            .select('_id')
+            .session(session)
+            .lean()
+            .exec();
+          if (!candidate) return { kind: 'NONE' as const };
+          const auctionId = (candidate._id as Types.ObjectId).toString();
+          const hasBids = await this.bidExistence.hasValidBids(auctionId);
+          const to = hasBids ? AuctionStatus.ENDED_PENDING_CLOSE : AuctionStatus.ENDED_NO_BIDS;
+          const doc = await this.auctions
+            .findOneAndUpdate(
+              { _id: candidate._id, status: AuctionStatus.ACTIVE, currentEndAt: { $lte: now } },
+              { $set: { status: to } },
+              { new: true, session },
+            )
+            .exec();
+          if (!doc) return { kind: 'RACED' as const }; // raced with a concurrent cancellation/worker instance — nothing written; the next iteration re-scans.
+          await this.outbox.recordRequired(
+            to === AuctionStatus.ENDED_NO_BIDS
+              ? auctionEndedNoBidsEvent({ auctionId, occurredAt: now, currentEndAt: doc.currentEndAt })
+              : auctionEndedPendingCloseEvent({ auctionId, occurredAt: now, currentEndAt: doc.currentEndAt, acceptedBidCount: doc.acceptedBidCount ?? 0 }),
+            session,
+          );
+          return { kind: 'ENDED' as const, to, doc, auctionId };
+        },
+        { retryExhausted: retryConflict('تحديث حالة المزاد قيد المعالجة؛ أعد المحاولة', AuctionErrorCode.STATE_CONFLICT) },
+      );
+      if (outcome.kind === 'NONE') break;
+      if (outcome.kind === 'RACED') continue;
+      // Best-effort telemetry, unchanged from MAZAD-024: only after the transition and its event committed.
+      if (outcome.to === AuctionStatus.ENDED_NO_BIDS) {
         endedNoBids += 1;
-        await this.audit.logSystemAction(AuditAction.AUCTION_ENDED_NO_BIDS, auctionId, 'auction ended with no bids', { currentEndAt: doc.currentEndAt });
+        await this.audit.logSystemAction(AuditAction.AUCTION_ENDED_NO_BIDS, outcome.auctionId, 'auction ended with no bids', { currentEndAt: outcome.doc.currentEndAt });
       } else {
         endedPendingClose += 1;
-        await this.audit.logSystemAction(AuditAction.AUCTION_ENDED_PENDING_CLOSE, auctionId, 'auction ended, pending automatic winner determination', { currentEndAt: doc.currentEndAt });
+        await this.audit.logSystemAction(AuditAction.AUCTION_ENDED_PENDING_CLOSE, outcome.auctionId, 'auction ended, pending automatic winner determination', { currentEndAt: outcome.doc.currentEndAt });
       }
     }
     return { endedNoBids, endedPendingClose };
@@ -186,6 +238,7 @@ export class AuctionLifecycleService {
     try {
       let updated: AuctionDocument | null = null;
       await session.withTransaction(async () => {
+        const cancelledAt = this.clock.now();
         updated = await this.auctions
           .findOneAndUpdate(
             { _id: auctionId, status: fromStatus },
@@ -193,7 +246,7 @@ export class AuctionLifecycleService {
               $set: {
                 status: AuctionStatus.CANCELLED,
                 cancelledByActorId: new Types.ObjectId(actorId),
-                cancelledAt: this.clock.now(),
+                cancelledAt,
                 ...(trimmedReason ? { cancellationReason: trimmedReason } : {}),
               },
             },
@@ -217,6 +270,8 @@ export class AuctionLifecycleService {
           },
           session,
         );
+        // MAZAD-031: the domain event commits with the cancellation and its audit row (the reason is not in it).
+        await this.outbox.recordRequired(auctionCancelledEvent({ auctionId: updated!._id.toString(), occurredAt: cancelledAt, previousStatus: fromStatus }), session);
       });
       return { message: 'تم إلغاء المزاد بنجاح', auction: this.toSummary(updated!.toObject()) };
     } finally {
@@ -255,17 +310,47 @@ export class AuctionLifecycleService {
     if (!Types.ObjectId.isValid(auctionId)) {
       throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
     }
-    const auction = await this.auctions.findById(auctionId).session(context.session ?? null).exec();
+    // Inside a caller's transaction (MAZAD-027 bid acceptance) the caller audits transactionally, once, as part
+    // of its own event; a best-effort audit here could log an extension a later rollback or retry still discards.
+    // The AUCTION_END_EXTENDED outbox event, by contrast, is written in EVERY case in the transaction that moves
+    // `currentEndAt` (MAZAD-031), so it commits or rolls back with the extension itself.
+    if (context.session) {
+      const { extended, currentEndAt } = await this.extendWithinTransaction(auctionId, bidAt, context.session);
+      return { extended, currentEndAt };
+    }
+    // Standalone use: the extension and its event are their own transaction.
+    const result = await runTransactionWithRetry(
+      this.connection,
+      (session) => this.extendWithinTransaction(auctionId, bidAt, session),
+      { retryExhausted: retryConflict('تحديث وقت انتهاء المزاد قيد المعالجة؛ أعد المحاولة', AuctionErrorCode.STATE_CONFLICT) },
+    );
+    if (result.extended) {
+      await this.audit.logSystemAction(
+        AuditAction.AUCTION_END_TIME_EXTENDED,
+        auctionId,
+        'auction end time extended (anti-sniping)',
+        { from: result.previousEndAt, to: result.currentEndAt },
+      );
+    }
+    return { extended: result.extended, currentEndAt: result.currentEndAt };
+  }
+
+  private async extendWithinTransaction(
+    auctionId: string,
+    bidAt: Date,
+    session: ClientSession,
+  ): Promise<{ extended: boolean; currentEndAt: Date; previousEndAt: Date }> {
+    const auction = await this.auctions.findById(auctionId).session(session).exec();
     if (!auction) throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
     if (auction.status !== AuctionStatus.ACTIVE) {
-      return { extended: false, currentEndAt: auction.currentEndAt };
+      return { extended: false, currentEndAt: auction.currentEndAt, previousEndAt: auction.currentEndAt };
     }
 
     const observedEndAt = auction.currentEndAt;
     const windowMs = auction.ruleSnapshot.antiSnipingWindowSeconds * 1000;
     const remainingMs = observedEndAt.getTime() - bidAt.getTime();
     if (remainingMs > windowMs) {
-      return { extended: false, currentEndAt: observedEndAt };
+      return { extended: false, currentEndAt: observedEndAt, previousEndAt: observedEndAt };
     }
 
     const extensionMs = auction.ruleSnapshot.antiSnipingExtensionSeconds * 1000;
@@ -274,24 +359,18 @@ export class AuctionLifecycleService {
       .findOneAndUpdate(
         { _id: auctionId, status: AuctionStatus.ACTIVE, currentEndAt: observedEndAt },
         { $set: { currentEndAt: newEndAt } },
-        { new: true, session: context.session },
+        { new: true, session },
       )
       .exec();
     if (!updated) {
-      return { extended: false, currentEndAt: observedEndAt };
+      return { extended: false, currentEndAt: observedEndAt, previousEndAt: observedEndAt };
     }
-    // Inside a caller's transaction (MAZAD-027 bid acceptance) the caller
-    // audits transactionally, once, as part of its own event; this
-    // best-effort helper would otherwise log for an extension that a later
-    // rollback or retry could still discard.
-    if (context.session) return { extended: true, currentEndAt: updated.currentEndAt };
-    await this.audit.logSystemAction(
-      AuditAction.AUCTION_END_TIME_EXTENDED,
-      auctionId,
-      'auction end time extended (anti-sniping)',
-      { from: observedEndAt, to: updated.currentEndAt },
+    // After the auction write (the aggregate's serialisation point), in the same transaction.
+    await this.outbox.recordRequired(
+      auctionEndExtendedEvent({ auctionId: updated._id.toString(), occurredAt: bidAt, previousEndAt: observedEndAt, currentEndAt: updated.currentEndAt }),
+      session,
     );
-    return { extended: true, currentEndAt: updated.currentEndAt };
+    return { extended: true, currentEndAt: updated.currentEndAt, previousEndAt: observedEndAt };
   }
 
   private toSummary(item: any) {

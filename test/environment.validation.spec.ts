@@ -110,5 +110,24 @@ describe('environment validation', () => {
       expect(invalid({ AUCTION_FINALIZATION_INTERVAL_SECONDS: '1' })).toThrow('AUCTION_FINALIZATION_INTERVAL_SECONDS');
       expect(invalid({ AUCTION_FINALIZATION_BATCH_SIZE: '1000' })).toThrow('AUCTION_FINALIZATION_BATCH_SIZE');
     });
+
+    it('validates the outbox dispatcher settings (MAZAD-031)', () => {
+      expect(invalid({
+        OUTBOX_DISPATCHER_ENABLED: 'true', OUTBOX_DISPATCHER_INTERVAL_SECONDS: '5', OUTBOX_DISPATCHER_BATCH_SIZE: '100', OUTBOX_LEASE_SECONDS: '60',
+        OUTBOX_CONSUMER_TIMEOUT_SECONDS: '15', OUTBOX_MAX_ATTEMPTS: '12', OUTBOX_RETRY_BASE_SECONDS: '2', OUTBOX_RETRY_MAX_SECONDS: '600',
+      })).not.toThrow();
+      expect(invalid({ OUTBOX_DISPATCHER_ENABLED: 'yes' })).toThrow('OUTBOX_DISPATCHER_ENABLED');
+      expect(invalid({ OUTBOX_DISPATCHER_INTERVAL_SECONDS: '0' })).toThrow('OUTBOX_DISPATCHER_INTERVAL_SECONDS');
+      expect(invalid({ OUTBOX_DISPATCHER_BATCH_SIZE: '501' })).toThrow('OUTBOX_DISPATCHER_BATCH_SIZE');
+      expect(invalid({ OUTBOX_LEASE_SECONDS: '9' })).toThrow('OUTBOX_LEASE_SECONDS');
+      expect(invalid({ OUTBOX_MAX_ATTEMPTS: '0' })).toThrow('OUTBOX_MAX_ATTEMPTS');
+      expect(invalid({ OUTBOX_RETRY_MAX_SECONDS: '100000' })).toThrow('OUTBOX_RETRY_MAX_SECONDS');
+    });
+
+    it('rejects an outbox delivery timeout that could outlive its own lease, and a retry base above its cap (MAZAD-031)', () => {
+      expect(invalid({ OUTBOX_LEASE_SECONDS: '60', OUTBOX_CONSUMER_TIMEOUT_SECONDS: '31' })).toThrow('OUTBOX_CONSUMER_TIMEOUT_SECONDS must be at most half');
+      expect(invalid({ OUTBOX_LEASE_SECONDS: '60', OUTBOX_CONSUMER_TIMEOUT_SECONDS: '30' })).not.toThrow();
+      expect(invalid({ OUTBOX_RETRY_BASE_SECONDS: '30', OUTBOX_RETRY_MAX_SECONDS: '10' })).toThrow('OUTBOX_RETRY_BASE_SECONDS must not exceed');
+    });
   });
 });

@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AuditModule } from '../audit/audit.module';
 import { Auction, AuctionSchema } from '../auctions/schemas/auction.schema';
 import { ClockService } from '../common/time/clock.service';
+import { OutboxModule } from '../outbox/outbox.module';
 import { ManagedMarketingRequest, ManagedMarketingRequestSchema } from '../managed-marketing/schemas/managed-marketing-request.schema';
 import { UsersModule } from '../users/users.module';
 import { AuctionEntryFeeService } from './auction-entry-fee.service';
@@ -29,6 +30,7 @@ import { AuctionEntryPayment, AuctionEntryPaymentSchema } from './schemas/auctio
   imports: [
     AuditModule,
     UsersModule,
+    OutboxModule, // MAZAD-031: verified-success confirmations write their domain event in the same transaction
     MongooseModule.forFeature([
       { name: Auction.name, schema: AuctionSchema },
       { name: AuctionEntryPayment.name, schema: AuctionEntryPaymentSchema },

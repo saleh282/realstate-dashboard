@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import { AuctionStatus } from '../../src/auctions/auction.types';
 import { SystemRole } from '../../src/auth/roles.enum';
 import { AccountStatus, AccountType, BrokerStatus } from '../../src/users/identity.types';
+import { FakeOutboxStore } from './fake-outbox';
 
 /**
  * Shared in-memory MongoDB model for the MAZAD-028 payment suites: snapshot
@@ -31,6 +32,8 @@ export class FakeMongo {
   sessionsSeenByPort: any[] = [];
   auctionWrites = 0;
   clockNow = new Date('2026-05-02T10:00:00Z');
+  /** MAZAD-031: the outbox collection model. Its rows follow every session's commit/abort (see `FakeOutboxStore`). */
+  outbox = new FakeOutboxStore();
 
   seedAuction(overrides: Record<string, unknown> = {}) {
     const doc = { _id: oid(AUCTION), advertiserAccountId: oid(ADVERTISER), status: AuctionStatus.SCHEDULED, ...overrides };
@@ -88,6 +91,7 @@ export class FakeMongo {
         async endSession() { if (txn?.active) { mongo.release(txn); txn.active = false; } },
         async withTransaction(fn: () => Promise<void>) { this.startTransaction(); await fn(); await this.commitTransaction(); },
       };
+      mongo.outbox.attach(session);
       return session;
     },
   };
@@ -98,6 +102,11 @@ export class FakeMongo {
       if (expected && typeof expected === 'object' && !(expected instanceof Types.ObjectId) && !(expected instanceof Date)) {
         if ('$exists' in expected) return expected.$exists ? actual !== undefined : actual === undefined;
         if ('$in' in expected) return expected.$in.includes(actual);
+        const ms = (v: any) => (v instanceof Date ? v.getTime() : v);
+        if ('$lte' in expected) return actual !== undefined && ms(actual) <= ms(expected.$lte);
+        if ('$lt' in expected) return actual !== undefined && ms(actual) < ms(expected.$lt);
+        if ('$gte' in expected) return actual !== undefined && ms(actual) >= ms(expected.$gte);
+        if ('$gt' in expected) return actual !== undefined && ms(actual) > ms(expected.$gt);
       }
       return actual !== undefined && String(actual) === String(expected);
     });
@@ -112,12 +121,14 @@ export class FakeMongo {
     const next = { ...doc };
     for (const [k, v] of Object.entries(update.$set ?? {})) next[k] = v;
     for (const k of Object.keys(update.$unset ?? {})) delete next[k];
+    for (const [k, v] of Object.entries(update.$inc ?? {})) next[k] = (next[k] ?? 0) + (v as number);
     return next;
   }
-  private write(c: string, filter: any, update: any, txn: Txn | undefined) {
+  private write(c: string, filter: any, update: any, txn: Txn | undefined, sort?: Record<string, 1 | -1>) {
+    const ordered = (rows: any[]) => (sort ? [...rows].sort((a, b) => { for (const [k, d] of Object.entries(sort)) { const x = a[k] instanceof Date ? a[k].getTime() : a[k]; const y = b[k] instanceof Date ? b[k].getTime() : b[k]; if (x < y) return -d; if (x > y) return d; } return 0; }) : rows);
     if (c === 'auctions') this.auctionWrites++;
     if (txn) {
-      const current = this.view(c, txn).find((d) => this.match(d, filter));
+      const current = ordered(this.view(c, txn)).find((d) => this.match(d, filter));
       if (!current) return null;
       const id = current._id.toString();
       if (this.data[c].get(id)!.version !== txn.snap[c].get(id)!.version) throw transient('write conflict: changed since snapshot');
@@ -127,7 +138,7 @@ export class FakeMongo {
       txn.writes[c].set(id, next); this.locks.set(`${c}:${id}`, txn.id);
       return next;
     }
-    const rec = [...this.data[c].values()].find((r) => this.match(r.doc, filter));
+    const rec = ordered([...this.data[c].values()].map((r) => r.doc)).map((d) => this.data[c].get(d._id.toString())!).find((r) => this.match(r.doc, filter));
     if (!rec) return null;
     rec.doc = this.apply(rec.doc, update); rec.version += 1;
     return rec.doc;
@@ -136,7 +147,17 @@ export class FakeMongo {
   model(c: (typeof COLLS)[number]) {
     const read = (compute: (rows: any[]) => any) => {
       let txn: Txn | undefined;
-      const chain: any = { session: (s: any) => { txn = s?.txn; if (c === 'entitlements') this.sessionsSeenByPort.push(s); return chain; }, lean: () => chain, select: () => chain, exec: async () => { await tick(); return compute(this.view(c, txn)); } };
+      let sortSpec: Record<string, 1 | -1> | undefined;
+      const chain: any = {
+        session: (s: any) => { txn = s?.txn; if (c === 'entitlements') this.sessionsSeenByPort.push(s); return chain; }, lean: () => chain, select: () => chain,
+        sort: (spec: Record<string, 1 | -1>) => { sortSpec = spec; return chain; },
+        exec: async () => {
+          await tick();
+          const rows = this.view(c, txn);
+          const ordered = sortSpec ? [...rows].sort((a, b) => { for (const [k, d] of Object.entries(sortSpec!)) { const x = a[k] instanceof Date ? a[k].getTime() : a[k]; const y = b[k] instanceof Date ? b[k].getTime() : b[k]; if (x < y) return -d; if (x > y) return d; } return 0; }) : rows;
+          return compute(ordered);
+        },
+      };
       return chain;
     };
     return {
@@ -153,8 +174,8 @@ export class FakeMongo {
         }
         return out;
       },
-      findOneAndUpdate: (f: any, u: any, o: any = {}) => { const chain: any = { lean: () => chain, exec: async () => { await tick(); const r = this.write(c, f, u, o.session?.txn); return r ? { ...r } : null; } }; return chain; },
-      updateOne: (f: any, u: any, o: any = {}) => ({ exec: async () => { await tick(); this.write(c, f, u, o.session?.txn); return { modifiedCount: 1 }; } }),
+      findOneAndUpdate: (f: any, u: any, o: any = {}) => { const chain: any = { lean: () => chain, exec: async () => { await tick(); const r = this.write(c, f, u, o.session?.txn, o.sort); return r ? Object.defineProperty({ ...r }, 'toObject', { value: () => ({ ...r }), enumerable: false }) : null; } }; return chain; },
+      updateOne: (f: any, u: any, o: any = {}) => ({ exec: async () => { await tick(); const r = this.write(c, f, u, o.session?.txn); return { matchedCount: r ? 1 : 0, modifiedCount: r ? 1 : 0 }; } }),
     };
   }
   auditSvc = {

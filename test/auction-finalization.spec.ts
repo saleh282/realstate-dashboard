@@ -82,7 +82,7 @@ function build(seed: { auctions?: Array<{ id?: string; status?: AuctionStatus; c
   };
   const ledger = new BidLedgerService(bidsModel);
   const clock = { now: jest.fn(() => NOW) };
-  const service = new AuctionFinalizationService(auctionsModel, ledger, mongo.auditSvc as any, clock as any, mongo.connection as any);
+  const service = new AuctionFinalizationService(auctionsModel, ledger, mongo.auditSvc as any, clock as any, mongo.connection as any, mongo.outbox.service);
   return { mongo, service, rows, clock };
 }
 const auction = (mongo: FakeMongo, id = AUCTION) => mongo.data.auctions.get(id)!.doc;
@@ -421,10 +421,129 @@ describe('projections and privacy (MAZAD-030)', () => {
     for (const n of admin) expect(Reflect.getMetadata('method', (AdminAuctionsController.prototype as any)[n])).toBe(0); // RequestMethod.GET
   });
 
-  it('the finalization code is bid-read-only and adds no payment, outbox, realtime or promotion behaviour', () => {
+  it('the finalization code is bid-read-only and adds no payment, realtime or promotion behaviour; its ONLY outbox use is the in-transaction OutboxService (MAZAD-031)', () => {
     const fs = require('node:fs'); const path = require('node:path');
     const text = ['auction-finalization.service.ts', 'auction-finalization.worker.ts'].map((f) => fs.readFileSync(path.join(__dirname, '..', 'src', 'auctions', f), 'utf8')).join('\n');
     expect(text).not.toMatch(/ledger\.(create|append)|bids\.(create|update|delete|insert)|Model<Bid/);
-    expect(text).not.toMatch(/from '\.\.\/payments|@nestjs\/websockets|@Sse|outbox|EventEmitter/i);
+    expect(text).not.toMatch(/from '\.\.\/payments|@nestjs\/websockets|@Sse|EventEmitter/i);
+    // MAZAD-030 forbade any outbox reference; MAZAD-031 permits exactly the transactional writer, never the collection or the dispatcher.
+    expect(text).not.toMatch(/OutboxEvent\b|OutboxDispatcher|OutboxConsumerRegistry|outbox_events/);
+    expect(text.match(/this\.outbox\.\w+/g)).toEqual(['this.outbox.recordRequired']);
+  });
+});
+
+describe('AUCTION_FINALIZED domain event — transactional outbox (MAZAD-031)', () => {
+  const finalizedEvents = (mongo: FakeMongo) => mongo.outbox.events('AUCTION_FINALIZED');
+  const bids = () => [bidRow(AUCTION, 1, ALICE, 100_000), bidRow(AUCTION, 2, BOB, 105_000), bidRow(AUCTION, 3, CAROL, 250_000)];
+
+  it('a completed auction commits exactly ONE event with the winning facts; the winner id is private routing only', async () => {
+    const { service, mongo } = build({ auctions: [{ bids: bids() }] });
+    await service.finalize(AUCTION);
+    expect(finalizedEvents(mongo)).toHaveLength(1);
+    expect(mongo.outbox.events()[0]).toMatchObject({
+      type: 'AUCTION_FINALIZED', schemaVersion: 1, aggregateType: 'AUCTION', aggregateId: AUCTION, aggregateVersion: 1, audience: 'PUBLIC', occurredAt: NOW,
+      privateRouting: { winnerAccountId: CAROL },
+      payload: { auctionId: AUCTION, status: AuctionStatus.COMPLETED, winningBidSequence: 3, winningBidAmountMinor: 250_000, currency: 'EGP', acceptedBidCount: 3, finalizedAt: NOW.toISOString() },
+    });
+    expect(JSON.stringify(finalizedEvents(mongo)[0].payload)).not.toMatch(new RegExp(`${ALICE}|${BOB}|${CAROL}`));
+    expect(auction(mongo).status).toBe(AuctionStatus.COMPLETED);
+    expect(finalizedAudits(mongo)).toHaveLength(1); // the audit row is preserved alongside the event
+  });
+
+  it('continues the auction stream after earlier events (dense version)', async () => {
+    const { service, mongo } = build({ auctions: [{ bids: bids() }] });
+    for (const version of [1, 2, 3, 4]) mongo.outbox.seed({ aggregateType: 'AUCTION', aggregateId: AUCTION, aggregateVersion: version, status: 'PROCESSED' });
+    await service.finalize(AUCTION);
+    expect(finalizedEvents(mongo)[0].aggregateVersion).toBe(5);
+  });
+
+  it('repeated finalization returns ALREADY_FINALIZED and never adds a second event', async () => {
+    const { service, mongo } = build({ auctions: [{ bids: bids() }] });
+    await service.finalize(AUCTION);
+    const attempts = mongo.outbox.insertAttempts;
+    expect((await service.finalize(AUCTION)).outcome).toBe('ALREADY_FINALIZED');
+    await service.finalize(AUCTION);
+    expect(finalizedEvents(mongo)).toHaveLength(1);
+    expect(mongo.outbox.insertAttempts).toBe(attempts);
+  });
+
+  it('concurrent finalizers converge on one winner and ONE event', async () => {
+    const { service, mongo } = build({ auctions: [{ bids: bids() }] });
+    const results = await Promise.all([1, 2, 3, 4].map(() => service.finalize(AUCTION)));
+    expect(results.filter((r) => r.outcome === 'FINALIZED')).toHaveLength(1);
+    expect(new Set(results.map((r) => r.winningBidSequence)).size).toBe(1);
+    expect(finalizedEvents(mongo)).toHaveLength(1);
+  });
+
+  it('repeated worker passes produce one event per auction', async () => {
+    const { service, mongo } = build({ auctions: [{ bids: bids() }, { id: AUCTION_2, bids: [bidRow(AUCTION_2, 1, BOB, 120_000)] }] });
+    await service.finalizeDueAuctions();
+    await service.finalizeDueAuctions();
+    await service.finalizeDueAuctions();
+    expect(finalizedEvents(mongo).map((e) => e.aggregateId).sort()).toEqual([AUCTION, AUCTION_2].sort());
+  });
+
+  it('a failed ledger consistency check creates no event and leaves the auction ENDED_PENDING_CLOSE', async () => {
+    const mismatch = build({ auctions: [{ bids: bids(), counter: 5 }] });
+    expect(await codeOf(() => mismatch.service.finalize(AUCTION))).toBe(BidErrorCode.LEDGER_INCONSISTENT);
+    expect(mismatch.mongo.outbox.events()).toHaveLength(0);
+    expect(auction(mismatch.mongo).status).toBe(AuctionStatus.ENDED_PENDING_CLOSE);
+
+    const noBids = build({ auctions: [{ bids: [] }] });
+    expect(await codeOf(() => noBids.service.finalize(AUCTION))).toBe(BidErrorCode.LEDGER_INCONSISTENT);
+    expect(noBids.mongo.outbox.events()).toHaveLength(0);
+
+    const gap = build({ auctions: [{ bids: [bidRow(AUCTION, 1, ALICE, 100_000), bidRow(AUCTION, 3, BOB, 110_000)], counter: 2 }] });
+    expect(await codeOf(() => gap.service.finalize(AUCTION))).toBe(BidErrorCode.LEDGER_INCONSISTENT);
+    expect(gap.mongo.outbox.events()).toHaveLength(0);
+  });
+
+  it.each([AuctionStatus.ACTIVE, AuctionStatus.SCHEDULED, AuctionStatus.CANCELLED, AuctionStatus.ENDED_NO_BIDS])('a %s auction is not finalized and emits nothing', async (status) => {
+    const { service, mongo } = build({ auctions: [{ status, bids: bids() }] });
+    await expect(service.finalize(AUCTION)).rejects.toBeDefined();
+    expect(mongo.outbox.events()).toHaveLength(0);
+    expect(auction(mongo).status).toBe(status);
+  });
+
+  it('an outbox failure aborts the finalization: no winner, no COMPLETED, no audit row', async () => {
+    const { service, mongo } = build({ auctions: [{ bids: bids() }] });
+    mongo.outbox.insertError = () => new Error('outbox unavailable');
+    await expect(service.finalize(AUCTION)).rejects.toThrow('outbox unavailable');
+    expect(auction(mongo)).toMatchObject({ status: AuctionStatus.ENDED_PENDING_CLOSE });
+    expect(auction(mongo).winningBidId).toBeUndefined();
+    expect(finalizedAudits(mongo)).toHaveLength(0);
+    mongo.outbox.insertError = undefined; // recovers: the retry finalizes once, with one event
+    await service.finalize(AUCTION);
+    expect(finalizedEvents(mongo)).toHaveLength(1);
+  });
+
+  it('an audit failure aborts the finalization and leaves no event behind', async () => {
+    const { service, mongo } = build({ auctions: [{ bids: bids() }] });
+    mongo.auditSvc.logSystemRequired.mockRejectedValueOnce(new Error('audit down'));
+    await expect(service.finalize(AUCTION)).rejects.toThrow('audit down');
+    expect(mongo.outbox.events()).toHaveLength(0);
+    expect(auction(mongo).status).toBe(AuctionStatus.ENDED_PENDING_CLOSE);
+  });
+
+  it('a lost commit is retried whole and still yields one event and one winner', async () => {
+    const { service, mongo } = build({ auctions: [{ bids: bids() }] });
+    let lost = 1;
+    const start = mongo.connection.startSession;
+    mongo.connection.startSession = async () => {
+      const session: any = await start();
+      const commit = session.commitTransaction;
+      session.commitTransaction = async () => { if (lost-- > 0) throw transient('commit lost'); return commit.call(session); };
+      return session;
+    };
+    await service.finalize(AUCTION);
+    expect(finalizedEvents(mongo)).toHaveLength(1);
+    expect(auction(mongo).status).toBe(AuctionStatus.COMPLETED);
+  });
+
+  it('does not change winner determination: same winner and fields as before the outbox existed', async () => {
+    const { service, mongo } = build({ auctions: [{ bids: bids() }] });
+    await service.finalize(AUCTION);
+    expect(auction(mongo)).toMatchObject({ status: AuctionStatus.COMPLETED, winningBidSequence: 3, winningBidAmountMinor: 250_000, completedAt: NOW });
+    expect(String(auction(mongo).winnerAccountId)).toBe(CAROL);
   });
 });

@@ -15,6 +15,7 @@ import { AuctionErrorCode } from '../src/common/errors/auction-error-codes';
 import { BidErrorCode } from '../src/common/errors/bid-error-codes';
 import { MONEY_MINOR_MAX } from '../src/common/money/money';
 import { AccountStatus, AccountType, BrokerStatus } from '../src/users/identity.types';
+import { FakeOutboxStore, outboxDuplicateVersion } from './support/fake-outbox';
 
 /**
  * MAZAD-027 — atomic bid acceptance, tested against `FakeMongo`: an
@@ -71,6 +72,8 @@ class FakeMongo {
   hooks: { beforeAuctionWrite?: () => Promise<void>; beforeBidInsert?: () => Promise<void>; bidInsertError?: () => Error | undefined; auditError?: () => Error | undefined; commitError?: () => Error | undefined } = {};
   transactionsStarted = 0;
   commits = 0;
+  /** MAZAD-031: outbox rows follow this fake's session commit/abort. */
+  outbox = new FakeOutboxStore();
 
   seedAuction(overrides: Record<string, unknown> = {}) {
     const doc = {
@@ -134,6 +137,7 @@ class FakeMongo {
         async abortTransaction() { if (txn?.active) { mongo.release(txn); txn.active = false; } },
         async endSession() { if (txn?.active) { mongo.release(txn); txn.active = false; } },
       };
+      mongo.outbox.attach(session);
       return session;
     },
   };
@@ -152,7 +156,7 @@ class FakeMongo {
     findOne: (filter: any) => {
       let sorted = false; void sorted;
       const chain: any = {
-        sort: () => chain, select: () => chain, lean: () => chain,
+        sort: () => chain, select: () => chain, lean: () => chain, session: () => chain,
         exec: async () => {
           await tick();
           const all = [...this.auctions.values()].map((r) => r.doc).filter((d) => this.matches(d, filter));
@@ -299,11 +303,11 @@ function build(entitled: AuctionBidEntitlementPort | 'default' = { assertEntitle
   const ledger = Object.assign(Object.create(BidLedgerService.prototype), { bids: mongo.bidModel }) as BidLedgerService;
   const port = new BidLedgerAuctionBidExistencePort(ledger);
   const lifecycle = Object.assign(Object.create(AuctionLifecycleService.prototype), {
-    auctions: mongo.auctionModel, users: mongo.userModel, audit: mongo.audit, clock, bidExistence: port, connection: mongo.connection,
+    auctions: mongo.auctionModel, users: mongo.userModel, audit: mongo.audit, clock, bidExistence: port, connection: mongo.connection, outbox: mongo.outbox.service,
   }) as AuctionLifecycleService;
   const service = Object.assign(Object.create(AuctionBidAcceptanceService.prototype), {
     auctions: mongo.auctionModel, users: mongo.userModel, bids: mongo.bidModel, bidRequests: mongo.bidRequestModel, ledger, lifecycle, audit: mongo.audit, clock,
-    entitlement: entitled === 'default' ? new FailClosedBidEntitlementPort() : entitled, connection: mongo.connection,
+    entitlement: entitled === 'default' ? new FailClosedBidEntitlementPort() : entitled, connection: mongo.connection, outbox: mongo.outbox.service,
   }) as AuctionBidAcceptanceService;
   return { mongo, service, lifecycle, ledger };
 }
@@ -1021,5 +1025,180 @@ describe('AuctionBidAcceptanceService — request-level idempotency (MAZAD-029)'
     const twin = Object.assign(Object.create(AuctionBidAcceptanceService.prototype), (one.service as any));
     expect((await bidOnce(twin, ALICE, 100_000)).replayed).toBe(true);
     expect(one.mongo.bids).toHaveLength(1);
+  });
+});
+
+describe('BID_ACCEPTED domain event — transactional outbox (MAZAD-031)', () => {
+  const KEY = 'idem-key-0031';
+  const NEAR_END = new Date(END.getTime() - 1_000);
+  const bidEvents = (mongo: FakeMongo) => mongo.outbox.events('BID_ACCEPTED');
+  const versions = (mongo: FakeMongo) => mongo.outbox.events().map((e) => e.aggregateVersion).sort((a, b) => a - b);
+
+  it('an accepted bid commits exactly ONE BID_ACCEPTED event holding the authoritative committed result', async () => {
+    const { service, mongo } = build();
+    const result = await service.acceptBid(ALICE, AUCTION, 100_000);
+    expect(bidEvents(mongo)).toHaveLength(1);
+    expect(mongo.outbox.events()).toHaveLength(1);
+    const [event] = bidEvents(mongo);
+    expect(event).toMatchObject({
+      type: 'BID_ACCEPTED', schemaVersion: 1, aggregateType: 'AUCTION', aggregateId: AUCTION, aggregateVersion: 1, audience: 'PUBLIC', occurredAt: OPEN_NOW,
+      privateRouting: { bidderAccountId: ALICE },
+      payload: {
+        auctionId: AUCTION, sequence: 1, amountMinor: 100_000, currency: 'EGP', acceptedAt: OPEN_NOW.toISOString(), acceptedBidCount: 1,
+        currentEndAt: END.toISOString(), previousEndAt: END.toISOString(), extended: false, nextMinimumBidMinor: 105_000,
+      },
+    });
+    // The event is the committed fact: it equals the result, the Bid row and the Auction row.
+    expect(event.payload.sequence).toBe(result.bid.sequence);
+    expect(event.payload.currentEndAt).toBe(mongo.committedAuction().currentEndAt.toISOString());
+    expect(event.payload.acceptedBidCount).toBe(mongo.committedAuction().acceptedBidCount);
+    expect(event.payload.amountMinor).toBe(mongo.bids[0].amountMinor);
+  });
+
+  it('exposes no bidder identity in the payload — only in the separate private routing field', async () => {
+    const { service, mongo } = build();
+    await service.acceptBid(ALICE, AUCTION, 100_000);
+    const [event] = bidEvents(mongo);
+    expect(JSON.stringify(event.payload)).not.toContain(ALICE);
+    expect(Object.keys(event.payload)).not.toEqual(expect.arrayContaining(['bidderAccountId', 'bidderAccountTypeSnapshot', 'bidId']));
+    expect(event.privateRouting).toEqual({ bidderAccountId: ALICE });
+  });
+
+  it('successive bids each produce one event with dense, increasing versions and matching sequences', async () => {
+    const { service, mongo } = build();
+    await service.acceptBid(ALICE, AUCTION, 100_000);
+    await service.acceptBid(BOB, AUCTION, 105_000);
+    await service.acceptBid(ALICE, AUCTION, 110_000);
+    expect(bidEvents(mongo).map((e) => [e.aggregateVersion, e.payload.sequence, e.payload.amountMinor])).toEqual([[1, 1, 100_000], [2, 2, 105_000], [3, 3, 110_000]]);
+    expect(bidEvents(mongo).map((e) => e.payload.nextMinimumBidMinor)).toEqual([105_000, 110_000, 115_000]);
+  });
+
+  it('anti-sniping data is authoritative: the extension is reported with the SAME end time the auction committed', async () => {
+    const { service, mongo } = build();
+    mongo.clockNow = NEAR_END;
+    const result = await service.acceptBid(ALICE, AUCTION, 100_000);
+    const extendedTo = new Date(END.getTime() + 5 * MIN);
+    expect(result.auction.extended).toBe(true);
+    const [bid] = bidEvents(mongo);
+    expect(bid.payload).toMatchObject({ extended: true, previousEndAt: END.toISOString(), currentEndAt: extendedTo.toISOString() });
+    expect(mongo.committedAuction().currentEndAt).toEqual(extendedTo);
+    // …and the extension itself is its own event, in the same transaction, immediately before the bid it belongs to.
+    const extension = mongo.outbox.events('AUCTION_END_EXTENDED');
+    expect(extension).toHaveLength(1);
+    expect(extension[0].payload).toMatchObject({ previousEndAt: END.toISOString(), currentEndAt: extendedTo.toISOString() });
+    expect(mongo.outbox.events().map((e) => [e.aggregateVersion, e.type])).toEqual([[1, 'AUCTION_END_EXTENDED'], [2, 'BID_ACCEPTED']]);
+  });
+
+  it('a bid outside the window reports extended:false and emits no extension event', async () => {
+    const { service, mongo } = build();
+    await service.acceptBid(ALICE, AUCTION, 100_000);
+    expect(bidEvents(mongo)[0].payload.extended).toBe(false);
+    expect(mongo.outbox.events('AUCTION_END_EXTENDED')).toHaveLength(0);
+  });
+
+  it('rejected bids leave no event: below minimum, ended, wrong status, forbidden bidder, invalid amount, missing entitlement', async () => {
+    const attempt = async (setup: (m: FakeMongo) => void, run: (s: AuctionBidAcceptanceService) => Promise<unknown>, entitled: 'default' | undefined = undefined) => {
+      const ctx = entitled ? build('default') : build();
+      setup(ctx.mongo);
+      await run(ctx.service).catch(() => undefined);
+      expect(ctx.mongo.outbox.events()).toHaveLength(0);
+      expect(ctx.mongo.outbox.insertAttempts).toBe(0);
+      expect(ctx.mongo.bids).toHaveLength(0);
+    };
+    await attempt(() => undefined, (s) => s.acceptBid(ALICE, AUCTION, 1));                              // below the starting price
+    await attempt((m) => { m.clockNow = END; }, (s) => s.acceptBid(ALICE, AUCTION, 100_000));           // at/after the end
+    await attempt((m) => { m.committedAuction().status = AuctionStatus.ENDED_PENDING_CLOSE; }, (s) => s.acceptBid(ALICE, AUCTION, 100_000));
+    await attempt(() => undefined, (s) => s.acceptBid(ADVERTISER, AUCTION, 100_000));                   // self-bid
+    await attempt(() => undefined, (s) => s.acceptBid(SUSPENDED, AUCTION, 100_000));
+    await attempt(() => undefined, (s) => s.acceptBid(ADMIN, AUCTION, 100_000));
+    await attempt(() => undefined, (s) => s.acceptBid(ALICE, AUCTION, 1.5));                            // not an integer
+    await attempt(() => undefined, (s) => s.acceptBid(ALICE, AUCTION, 100_000), 'default');             // fail-closed entitlement
+  });
+
+  it('a below-minimum bid after an accepted one still leaves exactly the first event', async () => {
+    const { service, mongo } = build();
+    await service.acceptBid(ALICE, AUCTION, 100_000);
+    await service.acceptBid(BOB, AUCTION, 100_001).catch(() => undefined);
+    expect(bidEvents(mongo)).toHaveLength(1);
+  });
+
+  it('an idempotent replay creates NO second event and performs no outbox write', async () => {
+    const { service, mongo } = build();
+    const first = await service.acceptBid(ALICE, AUCTION, 100_000, undefined, { key: KEY });
+    const attempts = mongo.outbox.insertAttempts;
+    const replay = await service.acceptBid(ALICE, AUCTION, 100_000, undefined, { key: KEY });
+    await service.acceptBid(ALICE, AUCTION, 100_000, undefined, { key: KEY });
+    expect(replay.replayed).toBe(true);
+    expect(bidEvents(mongo)).toHaveLength(1);
+    expect(mongo.outbox.insertAttempts).toBe(attempts);
+    expect(bidEvents(mongo)[0].payload.sequence).toBe(first.bid.sequence);
+  });
+
+  it('a reused key with a different amount is a conflict and emits nothing new', async () => {
+    const { service, mongo } = build();
+    await service.acceptBid(ALICE, AUCTION, 100_000, undefined, { key: KEY });
+    expect(await codeOf(() => service.acceptBid(ALICE, AUCTION, 200_000, undefined, { key: KEY }))).toBeDefined();
+    expect(bidEvents(mongo)).toHaveLength(1);
+  });
+
+  it('a whole-transaction retry (lost commit) still leaves exactly one event', async () => {
+    const { service, mongo } = build();
+    mongo.hooks.commitError = () => { mongo.hooks.commitError = undefined; return transient('commit lost the race'); };
+    await service.acceptBid(ALICE, AUCTION, 100_000);
+    expect(mongo.transactionsStarted).toBe(2);
+    expect(bidEvents(mongo)).toHaveLength(1);
+    expect(mongo.bids).toHaveLength(1);
+  });
+
+  it('a lost race on the outbox version index is retried like any write conflict', async () => {
+    const { service, mongo } = build();
+    let once = 1;
+    mongo.outbox.insertError = () => (once-- > 0 ? outboxDuplicateVersion() : undefined);
+    await service.acceptBid(ALICE, AUCTION, 100_000);
+    expect(mongo.transactionsStarted).toBe(2);
+    expect(bidEvents(mongo)).toHaveLength(1);
+  });
+
+  it('an outbox failure aborts the bid: no Bid, no counter change, no request record, no audit row', async () => {
+    const { service, mongo } = build();
+    mongo.outbox.insertError = () => new Error('outbox unavailable');
+    await expect(service.acceptBid(ALICE, AUCTION, 100_000, undefined, { key: KEY })).rejects.toThrow('outbox unavailable');
+    expect(mongo.bids).toHaveLength(0);
+    expect(mongo.committedAuction().acceptedBidCount).toBe(0);
+    expect(mongo.bidRequests).toHaveLength(0);
+    expect(mongo.audits).toHaveLength(0);
+    expect(mongo.outbox.events()).toHaveLength(0);
+    mongo.outbox.insertError = undefined; // the same key is usable again once the outbox recovers
+    expect((await service.acceptBid(ALICE, AUCTION, 100_000, undefined, { key: KEY })).replayed).toBe(false);
+    expect(bidEvents(mongo)).toHaveLength(1);
+  });
+
+  it('an audit failure aborts the bid AND discards the already-buffered extension/bid events (no phantom event)', async () => {
+    const { service, mongo } = build();
+    mongo.clockNow = NEAR_END; // so the extension event is buffered before the audit runs
+    mongo.hooks.auditError = () => new Error('audit down');
+    await expect(service.acceptBid(ALICE, AUCTION, 100_000)).rejects.toThrow('audit down');
+    expect(mongo.outbox.events()).toHaveLength(0);
+    expect(mongo.bids).toHaveLength(0);
+    expect(mongo.committedAuction().currentEndAt).toEqual(END);
+  });
+
+  it('two bidders racing in the final window: every committed bid has exactly one event, versions stay dense and unique', async () => {
+    const { service, mongo } = build();
+    mongo.clockNow = NEAR_END;
+    await Promise.allSettled([service.acceptBid(ALICE, AUCTION, 150_000), service.acceptBid(BOB, AUCTION, 300_000), service.acceptBid(CAROL, AUCTION, 500_000)]);
+    expect(mongo.bids.length).toBeGreaterThanOrEqual(1);
+    expect(bidEvents(mongo)).toHaveLength(mongo.bids.length);
+    expect(bidEvents(mongo).map((e) => e.payload.sequence).sort()).toEqual(mongo.bids.map((b) => b.sequence).sort());
+    const all = versions(mongo);
+    expect(all).toEqual(all.map((_, i) => i + 1)); // 1..N with no gap and no duplicate across bid + extension events
+  });
+
+  it('changes no bid behaviour: the same acceptance result, Bid row and Auction counters as before the outbox', async () => {
+    const { service, mongo } = build();
+    const result = await service.acceptBid(ALICE, AUCTION, 100_000);
+    expect(result).toMatchObject({ bid: { sequence: 1, amountMinor: 100_000, currency: 'EGP' }, auction: { acceptedBidCount: 1, extended: false }, nextMinimumBidMinor: 105_000, replayed: false });
+    expect(mongo.bids).toHaveLength(1);
+    expect(mongo.committedAuction().acceptedBidCount).toBe(1);
   });
 });

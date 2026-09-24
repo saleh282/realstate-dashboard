@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { ClientSession, Connection } from 'mongoose';
+import { OUTBOX_AGGREGATE_VERSION_INDEX } from '../../outbox/outbox.constants';
 
 /** Internal: this attempt decided from stale state and lost a race; a fresh attempt re-reads and decides again. */
 export class TransactionAttemptConflict extends Error {}
@@ -20,8 +21,10 @@ function isRetryable(error: unknown, uniqueIndexNames: readonly string[]): boole
   if (e?.code === 112) return true; // WriteConflict
   if (e?.code === 11000) {
     // A duplicate on a known unique index is a lost race with a concurrent identical operation.
+    // The outbox's per-aggregate version index qualifies for every transaction: it only collides when a
+    // concurrent transaction on the same aggregate took the version, and a fresh attempt re-reads it.
     const text = `${e.message ?? ''} ${JSON.stringify(e.keyPattern ?? {})}`;
-    return uniqueIndexNames.some((name) => text.includes(name));
+    return text.includes(OUTBOX_AGGREGATE_VERSION_INDEX) || uniqueIndexNames.some((name) => text.includes(name));
   }
   return false;
 }

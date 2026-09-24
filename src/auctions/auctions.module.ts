@@ -5,6 +5,7 @@ import { AuditModule } from '../audit/audit.module';
 import { RolesGuard } from '../auth/roles.guard';
 import { ClockService } from '../common/time/clock.service';
 import { BidsModule } from '../bids/bids.module';
+import { OutboxModule } from '../outbox/outbox.module';
 import { PropertiesModule } from '../properties/properties.module';
 import { UsersModule } from '../users/users.module';
 import { AUCTION_BID_EXISTENCE_PORT, BidLedgerAuctionBidExistencePort } from './auction-bid-existence.port';
@@ -44,6 +45,8 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
  *  - `AuctionBidsController` + `AuctionBiddingReadService` — the bid HTTP API
  *    (MAZAD-029): placement (a thin adapter over the acceptance service, with
  *    durable request idempotency), current bid state and anonymised history.
+ *  - `OutboxModule` (MAZAD-031): lifecycle, bid acceptance and finalization write their domain
+ *    events to the transactional outbox inside their own transactions.
  *  - `AuctionsQueryService` + `AuctionsController` / `AdminAuctionsController`
  *    — the HTTP contract (MAZAD-025): public discovery, own auctions, create,
  *    cancel, and a read-only staff view. Mutations still go exclusively
@@ -57,6 +60,7 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
     PropertiesModule,
     BidsModule,
     PaymentsModule,
+    OutboxModule,
     MongooseModule.forFeature([{ name: Auction.name, schema: AuctionSchema }]),
   ],
   controllers: [AuctionsController, AuctionBidsController, AdminAuctionsController],

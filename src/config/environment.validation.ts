@@ -102,6 +102,26 @@ export function validateEnvironment(config: Environment): Environment {
   validateInteger(config, 'AUCTION_FINALIZATION_INTERVAL_SECONDS', errors, { min: 5, max: 86_400 });
   validateInteger(config, 'AUCTION_FINALIZATION_BATCH_SIZE', errors, { min: 1, max: 200 });
 
+  validateBoolean(config, 'OUTBOX_DISPATCHER_ENABLED', errors);
+  validateInteger(config, 'OUTBOX_DISPATCHER_INTERVAL_SECONDS', errors, { min: 1, max: 3_600 });
+  validateInteger(config, 'OUTBOX_DISPATCHER_BATCH_SIZE', errors, { min: 1, max: 500 });
+  validateInteger(config, 'OUTBOX_LEASE_SECONDS', errors, { min: 10, max: 3_600 });
+  validateInteger(config, 'OUTBOX_CONSUMER_TIMEOUT_SECONDS', errors, { min: 1, max: 300 });
+  validateInteger(config, 'OUTBOX_MAX_ATTEMPTS', errors, { min: 1, max: 100 });
+  validateInteger(config, 'OUTBOX_RETRY_BASE_SECONDS', errors, { min: 1, max: 3_600 });
+  validateInteger(config, 'OUTBOX_RETRY_MAX_SECONDS', errors, { min: 1, max: 86_400 });
+  // A live delivery must never outlive its own claim, or a second instance could deliver the same event concurrently.
+  const outboxLease = valueOf(config, 'OUTBOX_LEASE_SECONDS');
+  const outboxTimeout = valueOf(config, 'OUTBOX_CONSUMER_TIMEOUT_SECONDS');
+  if (outboxLease && outboxTimeout && /^\d+$/.test(outboxLease) && /^\d+$/.test(outboxTimeout) && Number(outboxTimeout) * 2 > Number(outboxLease)) {
+    errors.push('OUTBOX_CONSUMER_TIMEOUT_SECONDS must be at most half of OUTBOX_LEASE_SECONDS');
+  }
+  const outboxRetryBase = valueOf(config, 'OUTBOX_RETRY_BASE_SECONDS');
+  const outboxRetryMax = valueOf(config, 'OUTBOX_RETRY_MAX_SECONDS');
+  if (outboxRetryBase && outboxRetryMax && /^\d+$/.test(outboxRetryBase) && /^\d+$/.test(outboxRetryMax) && Number(outboxRetryBase) > Number(outboxRetryMax)) {
+    errors.push('OUTBOX_RETRY_BASE_SECONDS must not exceed OUTBOX_RETRY_MAX_SECONDS');
+  }
+
   const resetSecret = valueOf(config, 'JWT_RESET_SECRET');
   if (resetSecret) {
     if (nodeEnv === 'production' && resetSecret.length < 32) {

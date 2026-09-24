@@ -67,7 +67,7 @@ function build(requestOverrides: Record<string, unknown> = {}, providerOverrides
   const clock = { now: () => mongo.clockNow };
   const deps = {
     auctions: mongo.model('auctions'), users: mongo.model('users'), payments: mongo.model('payments'), entitlements: mongo.model('entitlements'),
-    requests: mongo.model('requests'), audit: mongo.auditSvc, clock, provider, connection: mongo.connection,
+    requests: mongo.model('requests'), audit: mongo.auditSvc, clock, provider, connection: mongo.connection, outbox: mongo.outbox.service,
   };
   // The managed-marketing payments model is the 'mmPayments' collection.
   const mmDeps = { ...deps, payments: mongo.model('mmPayments') };
@@ -365,5 +365,106 @@ describe('Admin auction-fee capability and existing auctions (MAZAD-028)', () =>
     const closed = new UnconfiguredPaymentProvider();
     expect(closed.configured).toBe(false);
     await expect(closed.verify()).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+});
+
+describe('MANAGED_MARKETING payment domain event — transactional outbox (MAZAD-031)', () => {
+  async function pending() { const ctx = build(); const a = await ctx.initiation.initiate(OWNER, REQUEST); return { ...ctx, paymentId: a.paymentId }; }
+  const mmEvents = (mongo: FakeMongo) => mongo.outbox.events('MANAGED_MARKETING_PAYMENT_CONFIRMED');
+
+  it('a verified success writes exactly ONE private event on the REQUEST aggregate, in the same commit as PAID', async () => {
+    const ctx = await pending(); ctx.succeed();
+    await ctx.confirmation.confirm(ctx.paymentId);
+    expect(mmEvents(ctx.mongo)).toHaveLength(1);
+    expect(ctx.mongo.outbox.events()).toHaveLength(1);
+    expect(ctx.mongo.outbox.events()[0]).toMatchObject({
+      type: 'MANAGED_MARKETING_PAYMENT_CONFIRMED', schemaVersion: 1, aggregateType: 'MANAGED_MARKETING_REQUEST', aggregateId: REQUEST, aggregateVersion: 1,
+      audience: 'PRIVATE', occurredAt: ctx.mongo.clockNow, privateRouting: { advertiserAccountId: OWNER },
+      payload: { requestId: REQUEST, paymentId: ctx.paymentId, amountMinor: PRICE, currency: 'EGP', paidAt: ctx.mongo.clockNow.toISOString(), requestStatus: ManagedMarketingRequestStatus.PAID },
+    });
+    expect(request(ctx.mongo).status).toBe(ManagedMarketingRequestStatus.PAID);
+  });
+
+  it('carries no auction, entitlement, bid, provider or schedule/SLA meaning', async () => {
+    const ctx = await pending(); ctx.succeed();
+    await ctx.confirmation.confirm(ctx.paymentId);
+    const text = JSON.stringify(mmEvents(ctx.mongo)[0].payload);
+    expect(text).not.toMatch(/auction|entitlement|bid|inspection|photography|deadline|schedule|sla|fake-test-provider|ref-1|evt-mm/i);
+  });
+
+  it('repeated and concurrent confirmations never duplicate the event', async () => {
+    const ctx = await pending(); ctx.succeed();
+    await Promise.all([1, 2, 3, 4, 5].map(() => ctx.confirmation.confirm(ctx.paymentId)));
+    await ctx.confirmation.confirm(ctx.paymentId);
+    expect(mmEvents(ctx.mongo)).toHaveLength(1);
+  });
+
+  it('pending, failed, mismatched and reconciliation-required payments create NO event', async () => {
+    const pendingCtx = await pending();
+    await pendingCtx.confirmation.confirm(pendingCtx.paymentId);
+    expect(pendingCtx.mongo.outbox.events()).toHaveLength(0);
+
+    const failed = await pending();
+    failed.state.outcome = (ref) => ({ status: 'FAILED', providerReference: ref, amountMinor: PRICE, currency: 'EGP', failureCode: 'DECLINED' });
+    await failed.confirmation.confirm(failed.paymentId);
+    expect(failed.mongo.outbox.events()).toHaveLength(0);
+
+    for (const [amount, currency] of [[PRICE - 1, 'EGP'], [PRICE, 'USD']] as const) {
+      const mismatch = await pending(); mismatch.succeed(amount, currency);
+      await codeOf(() => mismatch.confirmation.confirm(mismatch.paymentId));
+      expect(request(mismatch.mongo).paymentStatus).toBe(ManagedMarketingPaymentStatus.RECONCILIATION_REQUIRED);
+      expect(mismatch.mongo.outbox.events()).toHaveLength(0);
+    }
+
+    const afterFailure = await pending();
+    afterFailure.state.outcome = (ref) => ({ status: 'FAILED', providerReference: ref, amountMinor: PRICE, currency: 'EGP' });
+    await afterFailure.confirmation.confirm(afterFailure.paymentId);
+    afterFailure.succeed();
+    await codeOf(() => afterFailure.confirmation.confirm(afterFailure.paymentId));
+    expect(afterFailure.mongo.outbox.events()).toHaveLength(0);
+  });
+
+  it('an unexpected request state aborts the whole confirmation: no PAID, no event', async () => {
+    const ctx = await pending(); ctx.succeed();
+    request(ctx.mongo).status = ManagedMarketingRequestStatus.CANCELLED;
+    await codeOf(() => ctx.confirmation.confirm(ctx.paymentId));
+    expect(ctx.mongo.outbox.events()).toHaveLength(0);
+  });
+
+  it('an outbox failure aborts the confirmation: not PAID, payment still INITIATED, no audit row', async () => {
+    const ctx = await pending(); ctx.succeed();
+    ctx.mongo.outbox.insertError = () => new Error('outbox unavailable');
+    const auditsBefore = ctx.mongo.audits.length;
+    await expect(ctx.confirmation.confirm(ctx.paymentId)).rejects.toThrow('outbox unavailable');
+    expect(request(ctx.mongo)).toMatchObject({ status: ManagedMarketingRequestStatus.APPROVED, paymentStatus: ManagedMarketingPaymentStatus.PENDING });
+    expect(request(ctx.mongo).paidAt).toBeUndefined();
+    expect(ctx.mongo.rows('mmPayments')[0].status).toBe(EntryPaymentStatus.INITIATED);
+    expect(ctx.mongo.audits).toHaveLength(auditsBefore);
+  });
+
+  it('an audit failure aborts the confirmation and leaves no event', async () => {
+    const ctx = await pending(); ctx.succeed();
+    ctx.mongo.auditSvc.logSystemRequired.mockRejectedValueOnce(new Error('audit down'));
+    await expect(ctx.confirmation.confirm(ctx.paymentId)).rejects.toThrow('audit down');
+    expect(ctx.mongo.outbox.events()).toHaveLength(0);
+    expect(request(ctx.mongo).status).toBe(ManagedMarketingRequestStatus.APPROVED);
+  });
+
+  it('PURPOSE ISOLATION: each purpose emits only its own event type on its own aggregate, and neither touches the other\'s state', async () => {
+    const ctx = build();
+    const entry = await ctx.auctionInitiation.initiate(OTHER, AUCTION);
+    const marketing = await ctx.initiation.initiate(OWNER, REQUEST);
+    ctx.succeed(AUCTION_FEE);
+    await ctx.auctionConfirmation.confirm(entry.paymentId);
+    expect(ctx.mongo.outbox.events().map((e) => e.type)).toEqual(['AUCTION_ENTRY_PAYMENT_CONFIRMED']);
+    expect(request(ctx.mongo).status).toBe(ManagedMarketingRequestStatus.APPROVED); // an auction-entry success never pays a request
+    ctx.succeed(PRICE);
+    await ctx.confirmation.confirm(marketing.paymentId);
+    expect(ctx.mongo.outbox.events().map((e) => [e.type, e.aggregateType]).sort()).toEqual([
+      ['AUCTION_ENTRY_PAYMENT_CONFIRMED', 'AUCTION_ENTRY_PAYMENT'], ['MANAGED_MARKETING_PAYMENT_CONFIRMED', 'MANAGED_MARKETING_REQUEST'],
+    ]);
+    expect(ctx.mongo.rows('entitlements')).toHaveLength(1); // only the auction-entry purpose granted an entitlement
+    expect(ctx.mongo.outbox.events('MANAGED_MARKETING_PAYMENT_CONFIRMED')[0].payload).not.toHaveProperty('auctionId');
+    expect(ctx.mongo.outbox.events('AUCTION_ENTRY_PAYMENT_CONFIRMED')[0].payload).not.toHaveProperty('requestId');
   });
 });

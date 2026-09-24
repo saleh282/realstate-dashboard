@@ -9,6 +9,8 @@ import { BidErrorCode } from '../common/errors/bid-error-codes';
 import { isMoneyMinorAmount } from '../common/money/money';
 import { TransactionAttemptConflict, retryConflict, runTransactionWithRetry } from '../common/mongo/transaction-runner';
 import { ClockService } from '../common/time/clock.service';
+import { auctionFinalizedEvent } from '../outbox/outbox-events';
+import { OutboxService } from '../outbox/outbox.service';
 import { assertValidAuctionTransition } from './auction-transitions';
 import { AuctionStatus } from './auction.types';
 import { Auction, AuctionDocument } from './schemas/auction.schema';
@@ -53,7 +55,8 @@ export type AuctionFinalizationRunSummary = { finalized: number; alreadyFinalize
  *  4. ONE conditional write `{_id, status: ENDED_PENDING_CLOSE, winningBidId
  *     absent, acceptedBidCount: <verified>}` → COMPLETED + winner fields,
  *     `completedAt` from the server clock;
- *  5. the `AUCTION_FINALIZED` audit event in the same transaction; commit.
+ *  5. the `AUCTION_FINALIZED` audit event and (MAZAD-031) the `AUCTION_FINALIZED`
+ *     outbox event in the same transaction; commit.
  *
  * Why two finalizers cannot both win: both write the Auction document, so
  * MongoDB conflicts one of them (retried by `runTransactionWithRetry`); on
@@ -79,6 +82,7 @@ export class AuctionFinalizationService {
     private readonly audit: AuditLogService,
     private readonly clock: ClockService,
     @InjectConnection() private readonly connection: Connection,
+    private readonly outbox: OutboxService,
   ) {}
 
   async finalize(auctionId: string): Promise<AuctionFinalizationResult> {
@@ -173,6 +177,22 @@ export class AuctionFinalizationService {
         // Identifiers and amounts only — no bidder or profile data.
         metadata: { winningBidId: winner._id.toString(), winningBidSequence: winner.sequence, winningBidAmountMinor: winner.amountMinor, currency: winner.currency, acceptedBidCount: auction.acceptedBidCount ?? 0, finalizedAt: now },
       },
+      session,
+    );
+    // MAZAD-031: the AUCTION_FINALIZED domain event commits with the winner write and its audit row. It sits on
+    // the FINALIZED path only: the ALREADY_FINALIZED replay above returned before any write, so repeated or
+    // concurrent finalization can never emit a second one, and a failed consistency check (thrown before the
+    // CAS) leaves none. The winner's account id is private routing, not payload.
+    await this.outbox.recordRequired(
+      auctionFinalizedEvent({
+        auctionId: auction._id.toString(),
+        occurredAt: now,
+        winningBidSequence: winner.sequence,
+        winningBidAmountMinor: winner.amountMinor,
+        currency: winner.currency,
+        acceptedBidCount: auction.acceptedBidCount ?? 0,
+        winnerAccountId: winner.bidderAccountId.toString(),
+      }),
       session,
     );
     return this.toResult(auctionId, 'FINALIZED', won);

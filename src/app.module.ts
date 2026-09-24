@@ -25,6 +25,7 @@ import { AccountDeletionModule } from './account-deletion/account-deletion.modul
 import { GeocodingModule } from './geocoding/geocoding.module';
 import { FavoritesModule } from './favorites/favorites.module';
 import { AuctionsModule } from './auctions/auctions.module';
+import { OutboxModule } from './outbox/outbox.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { AuctionsModule } from './auctions/auctions.module';
     GeocodingModule,
     FavoritesModule,
     AuctionsModule,
+    OutboxModule,
     HealthModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }],

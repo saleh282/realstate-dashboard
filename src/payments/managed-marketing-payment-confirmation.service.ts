@@ -6,6 +6,8 @@ import { AuditAction } from '../audit/schemas/audit-log.schema';
 import { PaymentErrorCode } from '../common/errors/payment-error-codes';
 import { TransactionAttemptConflict, retryConflict, runTransactionWithRetry } from '../common/mongo/transaction-runner';
 import { ClockService } from '../common/time/clock.service';
+import { managedMarketingPaymentConfirmedEvent } from '../outbox/outbox-events';
+import { OutboxService } from '../outbox/outbox.service';
 import { ManagedMarketingPaymentStatus, ManagedMarketingRequestStatus } from '../managed-marketing/managed-marketing.types';
 import { ManagedMarketingRequest, ManagedMarketingRequestDocument } from '../managed-marketing/schemas/managed-marketing-request.schema';
 import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from './auction-payment-provider.port';
@@ -49,6 +51,7 @@ export class ManagedMarketingPaymentConfirmationService {
     private readonly clock: ClockService,
     @Inject(AUCTION_PAYMENT_PROVIDER_PORT) private readonly provider: AuctionPaymentProviderPort,
     @InjectConnection() private readonly connection: Connection,
+    private readonly outbox: OutboxService,
   ) {}
 
   async confirm(paymentId: string): Promise<ManagedMarketingPaymentConfirmationResult> {
@@ -150,6 +153,20 @@ export class ManagedMarketingPaymentConfirmationService {
     }
     await this.audit.logSystemRequired(
       { action: AuditAction.MANAGED_MARKETING_PAYMENT_CONFIRMED, targetResourceId: requestId, targetUserId: payment.advertiserAccountId.toString(), reason: 'managed-marketing payment confirmed', metadata: { paymentId, provider: payment.provider, amountMinor: payment.amountMinor, currency: payment.currency, providerEventId: outcome.providerEventId } },
+      session,
+    );
+    // MAZAD-031: emitted ONLY on this verified-success transition (payment SUCCEEDED + request PAID, one
+    // transaction). Replay, PENDING, FAILED and RECONCILIATION_REQUIRED paths return before this line. It is a
+    // MANAGED_MARKETING event on the request aggregate: it carries no auction, entitlement or bid meaning.
+    await this.outbox.recordRequired(
+      managedMarketingPaymentConfirmedEvent({
+        requestId,
+        paymentId: confirmed._id.toString(),
+        occurredAt: now,
+        amountMinor: payment.amountMinor,
+        currency: payment.currency,
+        advertiserAccountId: payment.advertiserAccountId.toString(),
+      }),
       session,
     );
     return done(EntryPaymentStatus.SUCCEEDED, { requestPaid: true });

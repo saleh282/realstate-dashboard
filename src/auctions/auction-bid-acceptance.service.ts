@@ -12,6 +12,9 @@ import { AuctionErrorCode } from '../common/errors/auction-error-codes';
 import { BidErrorCode } from '../common/errors/bid-error-codes';
 import { EGP_CURRENCY, MONEY_MINOR_MAX, isMoneyMinorAmount } from '../common/money/money';
 import { ClockService } from '../common/time/clock.service';
+import { bidAcceptedEvent } from '../outbox/outbox-events';
+import { OUTBOX_AGGREGATE_VERSION_INDEX } from '../outbox/outbox.constants';
+import { OutboxService } from '../outbox/outbox.service';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { AUCTION_BID_ENTITLEMENT_PORT, AuctionBidEntitlementPort } from './auction-bid-entitlement.port';
 import { AuctionLifecycleService } from './auction-lifecycle.service';
@@ -124,6 +127,7 @@ export class AuctionBidAcceptanceService {
     private readonly clock: ClockService,
     @Inject(AUCTION_BID_ENTITLEMENT_PORT) private readonly entitlement: AuctionBidEntitlementPort,
     @InjectConnection() private readonly connection: Connection,
+    private readonly outbox: OutboxService,
   ) {}
 
   /** `actorId` MUST be the authenticated principal's id; it is the only source of bidder identity. */
@@ -279,6 +283,27 @@ export class AuctionBidAcceptanceService {
       session,
     );
 
+    // (9b) MAZAD-031: the committed domain fact for downstream consumers, in the SAME transaction (transactional
+    // outbox). Written after the Auction write (the aggregate's serialisation point). A replayed request returned
+    // earlier and never reaches this line, so a retry can never emit a second BID_ACCEPTED; an aborted or
+    // retried attempt discards it with everything else.
+    await this.outbox.recordRequired(
+      bidAcceptedEvent({
+        auctionId: auction._id.toString(),
+        occurredAt: now,
+        sequence,
+        amountMinor: amount,
+        currency: EGP_CURRENCY,
+        acceptedBidCount: acquired.acceptedBidCount,
+        currentEndAt: extension.currentEndAt,
+        previousEndAt: observedEndAt,
+        extended: extension.extended,
+        nextMinimumBidMinor: this.safeAdd(amount, auction.minimumBidStepMinor),
+        bidderAccountId: new Types.ObjectId(actorId).toString(),
+      }),
+      session,
+    );
+
     const result: AcceptedBidResult = {
       bid: {
         id: bid._id.toString(),
@@ -352,7 +377,9 @@ export class AuctionBidAcceptanceService {
       // Duplicate (auctionId, sequence): a racing acceptance took this position.
       const keys = Object.keys(e.keyPattern ?? {});
       const text = String(e.message ?? '');
-      return (keys.includes('auctionId') && keys.includes('sequence')) || text.includes('bid_auction_sequence') || text.includes('bid_request_actor_auction_key') || keys.includes('keyHash');
+      return (keys.includes('auctionId') && keys.includes('sequence')) || text.includes('bid_auction_sequence') || text.includes('bid_request_actor_auction_key') || keys.includes('keyHash')
+        // A concurrent transaction on this auction took the outbox aggregate version (MAZAD-031): re-read and retry.
+        || text.includes(OUTBOX_AGGREGATE_VERSION_INDEX) || (keys.includes('aggregateType') && keys.includes('aggregateVersion'));
     }
     return false;
   }

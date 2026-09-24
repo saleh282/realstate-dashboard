@@ -9,6 +9,8 @@ import { PaymentErrorCode } from '../common/errors/payment-error-codes';
 import { EGP_CURRENCY } from '../common/money/money';
 import { TransactionAttemptConflict, retryConflict, runTransactionWithRetry } from '../common/mongo/transaction-runner';
 import { ClockService } from '../common/time/clock.service';
+import { auctionEntryPaymentConfirmedEvent } from '../outbox/outbox-events';
+import { OutboxService } from '../outbox/outbox.service';
 import { decideOutcome } from './payment-verification';
 import { PAYMENT_UNIQUE_INDEXES } from './auction-entry-payment.service';
 import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from './auction-payment-provider.port';
@@ -58,6 +60,7 @@ export class AuctionPaymentConfirmationService {
     private readonly clock: ClockService,
     @Inject(AUCTION_PAYMENT_PROVIDER_PORT) private readonly provider: AuctionPaymentProviderPort,
     @InjectConnection() private readonly connection: Connection,
+    private readonly outbox: OutboxService,
   ) {}
 
   async confirm(paymentId: string): Promise<PaymentConfirmationResult> {
@@ -149,6 +152,21 @@ export class AuctionPaymentConfirmationService {
     );
     await this.audit.logSystemRequired(
       { action: AuditAction.AUCTION_BID_ENTITLEMENT_GRANTED, targetResourceId: payment.auctionId.toString(), targetUserId: payment.bidderAccountId.toString(), reason: 'bid entitlement granted', metadata: { paymentId, lateConfirmation } },
+      session,
+    );
+    // MAZAD-031: emitted ONLY here — the single verified-success transition, in the transaction that wrote the
+    // SUCCEEDED payment and the entitlement. The replay branch above returned earlier (no duplicate), and
+    // PENDING / FAILED / mismatch / reconciliation paths never reach this line.
+    await this.outbox.recordRequired(
+      auctionEntryPaymentConfirmedEvent({
+        paymentId: confirmed._id.toString(),
+        auctionId: payment.auctionId.toString(),
+        occurredAt: now,
+        amountMinor: payment.amountMinor,
+        currency: payment.currency,
+        lateConfirmation,
+        bidderAccountId: payment.bidderAccountId.toString(),
+      }),
       session,
     );
     return done(EntryPaymentStatus.SUCCEEDED, { entitlementGranted: true });

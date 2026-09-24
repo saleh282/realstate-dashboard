@@ -13,6 +13,7 @@ import { AuctionStatus } from '../src/auctions/auction.types';
 import { AuctionLifecycleService } from '../src/auctions/auction-lifecycle.service';
 import { BidLedgerService } from '../src/bids/bid-ledger.service';
 import { AuctionLifecycleWorker } from '../src/auctions/auction-lifecycle.worker';
+import { OutboxService } from '../src/outbox/outbox.service';
 import { AUCTION_BID_EXISTENCE_PORT, BidLedgerAuctionBidExistencePort } from '../src/auctions/auction-bid-existence.port';
 
 /**
@@ -110,6 +111,7 @@ function fakeAuctionCollection(seed: FakeAuction[]) {
       const chain: any = {
         sort: (s: any) => { sort = s; return chain; },
         select: () => chain,
+        session: () => chain,
         lean: () => chain,
         exec: async () => {
           const candidates = sorted(docs.filter((doc) => matchesFilter(doc, filter)), sort);
@@ -143,11 +145,22 @@ function lifecycleService(options: {
   const audit = { logRequired: jest.fn().mockResolvedValue(undefined), logSystemAction: jest.fn().mockResolvedValue(undefined) };
   const clock = { now: jest.fn(() => options.now ?? NOW) };
   const bidExistence = { hasValidBids: options.hasValidBids ?? jest.fn().mockResolvedValue(false) };
-  const session = { withTransaction: jest.fn(async (work: () => Promise<void>) => work()), endSession: jest.fn().mockResolvedValue(undefined) };
+  // MAZAD-031: activation/expiry/extension now run in a transaction (state change + outbox event), so the
+  // session shim supports both `withTransaction` (cancel) and the explicit start/commit/abort of the shared runner.
+  const session = {
+    withTransaction: jest.fn(async (work: () => Promise<void>) => work()),
+    startTransaction: jest.fn(),
+    commitTransaction: jest.fn().mockResolvedValue(undefined),
+    abortTransaction: jest.fn().mockResolvedValue(undefined),
+    inTransaction: jest.fn(() => true),
+    endSession: jest.fn().mockResolvedValue(undefined),
+  };
   const connection = { startSession: jest.fn().mockResolvedValue(session) };
+  // The outbox itself is covered against a transactional model in outbox-domain-events.spec.ts; here it is a spy.
+  const outbox = { recordRequired: jest.fn().mockResolvedValue({ eventId: 'e', aggregateVersion: 1 }) };
   const instance = Object.create(AuctionLifecycleService.prototype) as any;
-  Object.assign(instance, { auctions: store.model, users, audit, clock, bidExistence, connection });
-  return { instance: instance as AuctionLifecycleService, store, users, audit, clock, bidExistence, session };
+  Object.assign(instance, { auctions: store.model, users, audit, clock, bidExistence, connection, outbox });
+  return { instance: instance as AuctionLifecycleService, store, users, audit, clock, bidExistence, session, outbox };
 }
 
 async function errorCode(action: () => Promise<unknown>): Promise<string | undefined> {
@@ -673,15 +686,21 @@ describe('AuctionLifecycleWorker dependency wiring', () => {
 
     const auctionModel = {
       findOneAndUpdate: jest.fn(() => ({ exec: async () => null })),
-      findOne: jest.fn(() => ({ sort: () => ({ select: () => ({ lean: () => ({ exec: async () => null }) }) }) })),
+      findOne: jest.fn(() => ({ sort: () => ({ select: () => ({ session: () => ({ lean: () => ({ exec: async () => null }) }) }) }) })),
+    };
+    // Expiry/activation now run in a transaction (MAZAD-031), so the provider graph needs a session-capable connection.
+    const txSession = {
+      startTransaction: jest.fn(), commitTransaction: jest.fn().mockResolvedValue(undefined), abortTransaction: jest.fn().mockResolvedValue(undefined),
+      inTransaction: () => true, endSession: jest.fn().mockResolvedValue(undefined),
     };
     const moduleRef = await Test.createTestingModule({
       imports: [ConfigModule.forRoot({ ignoreEnvFile: true, isGlobal: true, load: [() => ({ NODE_ENV: 'test' })] })],
       providers: [
         { provide: getModelToken(Auction.name), useValue: auctionModel },
         { provide: getModelToken(User.name), useValue: {} },
-        { provide: getConnectionToken(), useValue: {} },
+        { provide: getConnectionToken(), useValue: { startSession: async () => txSession } },
         { provide: AuditLogService, useValue: { logSystemAction: jest.fn(), logRequired: jest.fn() } },
+        { provide: OutboxService, useValue: { recordRequired: jest.fn() } },
         ClockService,
         { provide: BidLedgerService, useValue: { hasAcceptedBids: async () => false } },
         { provide: AUCTION_BID_EXISTENCE_PORT, useClass: BidLedgerAuctionBidExistencePort },
