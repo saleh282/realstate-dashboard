@@ -11,8 +11,9 @@ import {
 } from '../src/auctions/auction-transitions';
 import { AuctionStatus } from '../src/auctions/auction.types';
 import { AuctionLifecycleService } from '../src/auctions/auction-lifecycle.service';
+import { BidLedgerService } from '../src/bids/bid-ledger.service';
 import { AuctionLifecycleWorker } from '../src/auctions/auction-lifecycle.worker';
-import { AUCTION_BID_EXISTENCE_PORT, NoBidsYetAuctionBidExistencePort } from '../src/auctions/auction-bid-existence.port';
+import { AUCTION_BID_EXISTENCE_PORT, BidLedgerAuctionBidExistencePort } from '../src/auctions/auction-bid-existence.port';
 
 /**
  * MAZAD-024 — Auction lifecycle, scheduling, property locking, cancellation
@@ -682,7 +683,8 @@ describe('AuctionLifecycleWorker dependency wiring', () => {
         { provide: getConnectionToken(), useValue: {} },
         { provide: AuditLogService, useValue: { logSystemAction: jest.fn(), logRequired: jest.fn() } },
         ClockService,
-        { provide: AUCTION_BID_EXISTENCE_PORT, useClass: NoBidsYetAuctionBidExistencePort },
+        { provide: BidLedgerService, useValue: { hasAcceptedBids: async () => false } },
+        { provide: AUCTION_BID_EXISTENCE_PORT, useClass: BidLedgerAuctionBidExistencePort },
         AuctionLifecycleService,
         AuctionLifecycleWorker,
       ],
@@ -723,5 +725,39 @@ describe('AuctionLifecycleService.cancel optimistic expectedStatus (MAZAD-025)',
     const { instance } = lifecycleService({ docs: [auctionDoc({ status: AuctionStatus.CANCELLED })] });
     expect(await errorCode(() => instance.cancel(ADVERTISER_ID, AUCTION_ID, 'x', undefined, AuctionStatus.CANCELLED)))
       .toBe(AuctionErrorCode.TRANSITION_INVALID);
+  });
+});
+
+describe('lifecycle expiry with the Bid-ledger-backed port (MAZAD-026)', () => {
+  const EXPIRED = { status: AuctionStatus.ACTIVE, currentEndAt: new Date('2026-02-05T09:59:59Z') };
+
+  function ledgerBackedPort(bidAuctionIds: string[]) {
+    const ledger = { hasAcceptedBids: jest.fn(async (id: string) => bidAuctionIds.includes(id)) };
+    return new BidLedgerAuctionBidExistencePort(ledger as any);
+  }
+
+  it('an expired ACTIVE auction with no persisted bids ends as ENDED_NO_BIDS', async () => {
+    const port = ledgerBackedPort([]);
+    const { instance, store, audit } = lifecycleService({ docs: [auctionDoc(EXPIRED)], hasValidBids: jest.fn((id: string) => port.hasValidBids(id)) });
+    await expect(instance.expireDueAuctions()).resolves.toEqual({ endedNoBids: 1, endedPendingClose: 0 });
+    expect(store.docs[0].status).toBe(AuctionStatus.ENDED_NO_BIDS);
+    expect(audit.logSystemAction).toHaveBeenCalledWith(AuditAction.AUCTION_ENDED_NO_BIDS, AUCTION_ID, expect.any(String), expect.anything());
+  });
+
+  it('an expired ACTIVE auction with a persisted bid ends as ENDED_PENDING_CLOSE — never COMPLETED, no winner set', async () => {
+    const port = ledgerBackedPort([AUCTION_ID]);
+    const { instance, store, audit } = lifecycleService({ docs: [auctionDoc(EXPIRED)], hasValidBids: jest.fn((id: string) => port.hasValidBids(id)) });
+    await expect(instance.expireDueAuctions()).resolves.toEqual({ endedNoBids: 0, endedPendingClose: 1 });
+    expect(store.docs[0].status).toBe(AuctionStatus.ENDED_PENDING_CLOSE);
+    expect((store.docs[0] as any).winnerAccountId).toBeUndefined();
+    expect(audit.logSystemAction).toHaveBeenCalledWith(AuditAction.AUCTION_ENDED_PENDING_CLOSE, AUCTION_ID, expect.any(String), expect.anything());
+  });
+
+  it('a second worker pass is a no-op either way (idempotent)', async () => {
+    const port = ledgerBackedPort([AUCTION_ID]);
+    const { instance, audit } = lifecycleService({ docs: [auctionDoc(EXPIRED)], hasValidBids: jest.fn((id: string) => port.hasValidBids(id)) });
+    await instance.expireDueAuctions();
+    await expect(instance.expireDueAuctions()).resolves.toEqual({ endedNoBids: 0, endedPendingClose: 0 });
+    expect(audit.logSystemAction).toHaveBeenCalledTimes(1);
   });
 });
