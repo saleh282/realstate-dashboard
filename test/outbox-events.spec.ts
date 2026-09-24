@@ -374,9 +374,20 @@ describe('scope guards (MAZAD-031)', () => {
 
   it('only OutboxService writes events, and only through a caller-supplied session', () => {
     const producers = fs.readdirSync(path.join(__dirname, '..', 'src'), { recursive: true }).map(String).filter((f) => f.endsWith('.ts') && !f.startsWith('outbox'));
+    // MAZAD-032 closure: the realtime activation cutover READS committed events (one aggregate, to learn each auction's highest
+    // committed version) and its module registers the model for that. That is the ONLY exception, and it is read-only.
+    const readOnlyReaders = new Set(['realtime/realtime-cutover.store.ts', 'realtime/realtime.module.ts']);
     for (const file of producers) {
       const source = fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8');
-      expect(source).not.toMatch(/OutboxEvent\b|outbox_events/);
+      expect(source).not.toMatch(/outbox_events/);
+      if (readOnlyReaders.has(file.split(path.sep).join('/'))) {
+        const calls = [...source.matchAll(/this\.outbox\s*\.(\w+)/g)].map((match) => match[1]);
+        expect(calls.every((call) => call === 'aggregate')).toBe(true); // never create / update / delete through the model
+        expect(source).not.toMatch(/\.(create|insertMany|updateOne|updateMany|deleteOne|deleteMany|bulkWrite|findOneAndUpdate|replaceOne)\([^)]*[Oo]utbox/);
+      } else {
+        expect(source).not.toMatch(/OutboxEvent\b/);
+      }
     }
+    expect(readOnlyReaders.size).toBe(2);
   });
 });

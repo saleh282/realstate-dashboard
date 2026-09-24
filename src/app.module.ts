@@ -26,6 +26,7 @@ import { GeocodingModule } from './geocoding/geocoding.module';
 import { FavoritesModule } from './favorites/favorites.module';
 import { AuctionsModule } from './auctions/auctions.module';
 import { OutboxModule } from './outbox/outbox.module';
+import { RealtimeModule } from './realtime/realtime.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { OutboxModule } from './outbox/outbox.module';
     FavoritesModule,
     AuctionsModule,
     OutboxModule,
+    RealtimeModule,
     HealthModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }],

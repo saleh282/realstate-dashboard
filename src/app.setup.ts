@@ -1,7 +1,9 @@
 import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { WsAdapter } from '@nestjs/platform-ws';
 import helmet from 'helmet';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { API_GLOBAL_PREFIX } from './common/http/api-prefix';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { requestIdMiddleware } from './common/request-context/request-context';
 import { buildCorsOptions } from './config/cors.config';
@@ -43,7 +45,9 @@ export function configureApp(app: NestExpressApplication, env: NodeJS.ProcessEnv
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());
   app.enableCors(buildCorsOptions(env));
-  app.setGlobalPrefix('api/v1', { exclude: UNPREFIXED_ROUTES });
+  app.setGlobalPrefix(API_GLOBAL_PREFIX, { exclude: UNPREFIXED_ROUTES });
+  // Plain WebSocket (`ws`) for the auction realtime channel (MAZAD-032). Gateways are not covered by the HTTP prefix, pipes, filters or throttler.
+  app.useWebSocketAdapter(new WsAdapter(app));
   app.enableShutdownHooks();
 }
 

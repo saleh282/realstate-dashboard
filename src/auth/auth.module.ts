@@ -25,6 +25,6 @@ import { AccountDeletionModule } from '../account-deletion/account-deletion.modu
   ],
   controllers: [AuthController],
   providers: [AuthService, MailService, SmsService, JwtStrategy, JwtRefreshStrategy],
-  exports: [AuthService, MailService],
+  exports: [AuthService, MailService, JwtStrategy],
 })
 export class AuthModule {}

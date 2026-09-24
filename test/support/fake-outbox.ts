@@ -131,6 +131,14 @@ export class FakeOutboxStore {
   insertAttempts = 0;
   /** Every `collection.createIndex` call (spec + options), for assertions about per-consumer index creation. */
   createdIndexes: Array<{ spec: any; options: any }> = [];
+  /** Test hook: how new event ids are minted (default: a fresh ObjectId stamped with the real clock). Lets a test give an event a hostile id. */
+  idFactory?: () => Types.ObjectId;
+  /** Every `aggregate()` call (pipeline + options), for assertions about the one read the realtime cutover makes. */
+  aggregates: Array<{ pipeline: any[]; options: any }> = [];
+  /** Test hook: runs right AFTER an `aggregate()` result was taken — a commit here lands after the read but before whatever the caller does next. */
+  afterAggregate?: () => Promise<void>;
+  /** Optional shared ordering log (see the cutover specs). */
+  trace?: string[];
 
   readonly model: any;
   readonly service: OutboxService;
@@ -200,7 +208,7 @@ export class FakeOutboxStore {
         if (!buffer) throw new Error('fake outbox: insert outside an attached transaction');
         const out = [];
         for (const doc of docs) {
-          const row = { _id: new Types.ObjectId(), createdAt: new Date(), ...doc };
+          const row = { _id: store.idFactory?.() ?? new Types.ObjectId(), createdAt: new Date(), ...doc };
           // Visible to the snapshot ⇒ genuine duplicate key; committed after the snapshot ⇒ WriteConflict (as MongoDB reports it).
           if ([...buffer.snapshot, ...buffer.inserts].some((existing) => store.sameVersion(existing, row))) throw outboxDuplicateVersion();
           if (store.rows.some((existing) => store.sameVersion(existing, row))) throw outboxWriteConflict();
@@ -260,6 +268,40 @@ export class FakeOutboxStore {
           return { matchedCount: 1, modifiedCount: 1 };
         },
       }),
+      /** Committed rows only (an open transaction's inserts are buffered elsewhere), exactly what a majority read sees. Supports the stages the realtime cutover uses. */
+      aggregate: (pipeline: any[]) => {
+        let options: any = {};
+        const chain: any = {
+          option: (o: any) => { options = { ...options, ...o }; return chain; },
+          exec: async () => {
+            await tick();
+            let rows: any[] = store.rows;
+            for (const stage of pipeline) {
+              if (stage.$match) rows = rows.filter((row) => matches(row, stage.$match));
+              else if (stage.$sort) rows = sortRows(rows, stage.$sort);
+              else if (stage.$limit !== undefined) rows = rows.slice(0, stage.$limit);
+              else if (stage.$group) {
+                const { _id: keySpec, ...accumulators } = stage.$group;
+                const groups = new Map<any, any>();
+                for (const row of rows) {
+                  const key = getPath(row, String(keySpec).slice(1));
+                  if (groups.has(key)) continue; // `$first`: the first row of the group in the incoming (sorted) order
+                  const out: any = { _id: key };
+                  for (const [name, spec] of Object.entries<any>(accumulators)) out[name] = getPath(row, String(spec.$first).slice(1));
+                  groups.set(key, out);
+                }
+                rows = [...groups.values()];
+              } else throw new Error(`fake outbox: unsupported aggregate stage ${Object.keys(stage)[0]}`);
+            }
+            const result = rows.map((row) => clone(row));
+            store.aggregates.push({ pipeline, options });
+            store.trace?.push('outbox.aggregate');
+            if (store.afterAggregate) await store.afterAggregate();
+            return result;
+          },
+        };
+        return chain;
+      },
       collection: {
         createIndex: async (spec: any, options: any) => { store.createdIndexes.push({ spec, options }); return options?.name ?? 'index'; },
       },

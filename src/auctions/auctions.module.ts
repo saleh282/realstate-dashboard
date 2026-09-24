@@ -78,6 +78,6 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
     { provide: AUCTION_BID_ENTITLEMENT_PORT, useExisting: PersistentBidEntitlementPort },
     { provide: AUCTION_BID_EXISTENCE_PORT, useClass: BidLedgerAuctionBidExistencePort },
   ],
-  exports: [AuctionsService, AuctionLifecycleService, AuctionBidAcceptanceService, AuctionFinalizationService],
+  exports: [AuctionsService, AuctionsQueryService, AuctionLifecycleService, AuctionBidAcceptanceService, AuctionFinalizationService],
 })
 export class AuctionsModule {}

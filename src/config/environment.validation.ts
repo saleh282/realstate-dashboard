@@ -1,4 +1,5 @@
 import { isPublicOsmNominatim } from '../geocoding/geocoding.config';
+import { REALTIME_MAX_MESSAGE_BYTES_HARD_CAP, REALTIME_TOPOLOGY_SINGLE_INSTANCE } from '../realtime/realtime.constants';
 import { parseTrustProxy } from './trust-proxy.config';
 import {
   PASSWORD_POLICY_MESSAGE,
@@ -120,6 +121,28 @@ export function validateEnvironment(config: Environment): Environment {
   const outboxRetryMax = valueOf(config, 'OUTBOX_RETRY_MAX_SECONDS');
   if (outboxRetryBase && outboxRetryMax && /^\d+$/.test(outboxRetryBase) && /^\d+$/.test(outboxRetryMax) && Number(outboxRetryBase) > Number(outboxRetryMax)) {
     errors.push('OUTBOX_RETRY_BASE_SECONDS must not exceed OUTBOX_RETRY_MAX_SECONDS');
+  }
+
+  // MAZAD-032 realtime. Opt-in: enabling it both accepts sockets AND makes this process the sole claimant of the outbox `realtime` consumer.
+  validateBoolean(config, 'REALTIME_ENABLED', errors);
+  validateInteger(config, 'REALTIME_MAX_CONNECTIONS', errors, { min: 1, max: 100_000 });
+  validateInteger(config, 'REALTIME_MAX_CONNECTIONS_PER_IP', errors, { min: 1, max: 10_000 });
+  validateInteger(config, 'REALTIME_MAX_SUBSCRIPTIONS_PER_SOCKET', errors, { min: 1, max: 500 });
+  validateInteger(config, 'REALTIME_MAX_MESSAGE_BYTES', errors, { min: 128, max: REALTIME_MAX_MESSAGE_BYTES_HARD_CAP });
+  validateInteger(config, 'REALTIME_MESSAGE_RATE_LIMIT', errors, { min: 1, max: 1_000 });
+  validateInteger(config, 'REALTIME_MESSAGE_RATE_WINDOW_SECONDS', errors, { min: 1, max: 300 });
+  validateInteger(config, 'REALTIME_HEARTBEAT_SECONDS', errors, { min: 5, max: 300 });
+  validateInteger(config, 'REALTIME_MAX_BUFFERED_BYTES', errors, { min: 16_384, max: 67_108_864 });
+  const realtimeTopology = valueOf(config, 'REALTIME_TOPOLOGY');
+  if (realtimeTopology && realtimeTopology !== REALTIME_TOPOLOGY_SINGLE_INSTANCE) {
+    errors.push(`REALTIME_TOPOLOGY must be ${REALTIME_TOPOLOGY_SINGLE_INSTANCE} (no shared fan-out adapter exists yet)`);
+  }
+  if (nodeEnv === 'production' && valueOf(config, 'REALTIME_ENABLED').toLowerCase() === 'true' && realtimeTopology !== REALTIME_TOPOLOGY_SINGLE_INSTANCE) {
+    // The hub is per-process memory and the outbox gives each event to ONE claimant of `realtime`: with several realtime-enabled replicas,
+    // clients connected to the others silently miss events. Production must state that exactly one instance serves realtime.
+    errors.push(
+      `REALTIME_TOPOLOGY=${REALTIME_TOPOLOGY_SINGLE_INSTANCE} is required in production when REALTIME_ENABLED=true: exactly one backend instance may serve realtime (set REALTIME_ENABLED=false on every other replica)`,
+    );
   }
 
   const resetSecret = valueOf(config, 'JWT_RESET_SECRET');

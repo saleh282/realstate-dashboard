@@ -34,7 +34,9 @@
     "@nestjs/mongoose": "^10.0.2",
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.3.0",
+    "@nestjs/platform-ws": "^10.4.22",
     "@nestjs/throttler": "^5.1.1",
+    "@nestjs/websockets": "^10.4.22",
     "bcrypt": "^6.0.0",
     "class-validator": "^0.14.1",
     "cloudinary": "^2.0.1",
@@ -57,12 +59,14 @@
     "@types/node": "^20.11.5",
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^7.2.1",
+    "@types/ws": "^8.18.1",
     "class-transformer": "^0.5.1",
     "jest": "^30.5.1",
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "ws": "8.18.0"
   },
   "overrides": {
     "multer": "2.4.0",
