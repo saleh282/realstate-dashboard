@@ -6,6 +6,7 @@ import { BidLedgerAuctionBidExistencePort } from '../src/auctions/auction-bid-ex
 import { AuctionLifecycleService } from '../src/auctions/auction-lifecycle.service';
 import { AuctionsController } from '../src/auctions/auctions.controller';
 import { AuctionStatus } from '../src/auctions/auction.types';
+import { PersistentBidEntitlementPort } from '../src/payments/persistent-bid-entitlement.port';
 import { AuditAction } from '../src/audit/schemas/audit-log.schema';
 import { SystemRole } from '../src/auth/roles.enum';
 import { AuthorizationErrorCode } from '../src/authorization/authorization-error-codes';
@@ -775,11 +776,12 @@ describe('payment boundary and HTTP boundary (MAZAD-027)', () => {
     expect(mongo.transactionsStarted).toBe(1);
   });
 
-  it('is bound in the real module to the fail-closed port, and the token exists for MAZAD-028 to rebind', () => {
+  it('is bound in the real module to the persistent server-confirmed entitlement port (MAZAD-028), no longer fail-closed', () => {
     expect(typeof AUCTION_BID_ENTITLEMENT_PORT).toBe('symbol');
     const providers: any[] = Reflect.getMetadata('providers', require('../src/auctions/auctions.module').AuctionsModule);
     const bound = providers.find((p) => p?.provide === AUCTION_BID_ENTITLEMENT_PORT);
-    expect(bound.useClass).toBe(FailClosedBidEntitlementPort);
+    expect(bound.useExisting).toBe(PersistentBidEntitlementPort);
+    expect(bound.useClass).toBeUndefined();
   });
 
   it('exposes no public bid route: no controller mentions bids and the auction route table is unchanged', () => {
@@ -789,5 +791,68 @@ describe('payment boundary and HTTP boundary (MAZAD-027)', () => {
     expect(paths).toEqual(['/', 'mine', 'mine/:auctionId', 'mine/:auctionId/cancel', '/', ':auctionId']);
     expect(JSON.stringify(paths)).not.toMatch(/bid/i);
     expect(Reflect.getMetadata('controllers', require('../src/bids/bids.module').BidsModule)).toBeUndefined();
+  });
+});
+
+
+describe('AuctionBidAcceptanceService with the persistent entitlement port (MAZAD-028)', () => {
+  /** Entitlement rows keyed (auction,bidder); records the session each lookup used. */
+  function persistent(rows: Array<[string, string]>) {
+    const lookups: any[] = [];
+    const model: any = {
+      exists: (filter: any) => ({
+        session: (session: any) => ({
+          exec: async () => {
+            lookups.push({ filter, session });
+            return rows.some(([a, b]) => a === String(filter.auctionId) && b === String(filter.bidderAccountId)) ? { _id: 'x' } : null;
+          },
+        }),
+      }),
+    };
+    return { port: new PersistentBidEntitlementPort(model), lookups };
+  }
+
+  it('accepts a bid when a server-confirmed entitlement exists, looked up with the transaction session', async () => {
+    const { port, lookups } = persistent([[AUCTION, ALICE]]);
+    const { service, mongo } = build(port);
+    const result = await service.acceptBid(ALICE, AUCTION, 100_000);
+    expect(result.bid.sequence).toBe(1);
+    expect(mongo.bids).toHaveLength(1);
+    expect(lookups).toHaveLength(1);
+    expect(lookups[0].session.txn).toBeDefined();
+    expect(String(lookups[0].filter.auctionId)).toBe(AUCTION);
+    expect(String(lookups[0].filter.bidderAccountId)).toBe(ALICE);
+  });
+
+  it('missing entitlement still yields BID_ENTITLEMENT_REQUIRED and writes nothing', async () => {
+    const { service, mongo } = build(persistent([]).port);
+    expect(await codeOf(() => service.acceptBid(ALICE, AUCTION, 100_000))).toBe(BidErrorCode.ENTITLEMENT_REQUIRED);
+    expect(mongo.bids).toHaveLength(0);
+    expect(mongo.committedAuction().acceptedBidCount).toBe(0);
+  });
+
+  it("another bidder cannot use someone else's entitlement", async () => {
+    const { service } = build(persistent([[AUCTION, ALICE]]).port);
+    expect(await codeOf(() => service.acceptBid(BOB, AUCTION, 100_000))).toBe(BidErrorCode.ENTITLEMENT_REQUIRED);
+  });
+
+  it('an entitlement for a different auction does not count', async () => {
+    const { service } = build(persistent([['64b000000000000000000f02', ALICE]]).port);
+    expect(await codeOf(() => service.acceptBid(ALICE, AUCTION, 100_000))).toBe(BidErrorCode.ENTITLEMENT_REQUIRED);
+  });
+
+  it('an entitlement does not bypass any other rule: admin, self-bid, suspended, ended, inactive, minimum', async () => {
+    const all: Array<[string, string]> = [ADMIN, SUPER, SUSPENDED, ADVERTISER, ALICE].map((b) => [AUCTION, b] as [string, string]);
+    const { service, mongo } = build(persistent(all).port);
+    for (const actor of [ADMIN, SUPER, SUSPENDED, ADVERTISER]) {
+      await expect(service.acceptBid(actor, AUCTION, 100_000)).rejects.toBeInstanceOf(ForbiddenException);
+    }
+    expect(await codeOf(() => service.acceptBid(ALICE, AUCTION, 99_999))).toBe(BidErrorCode.BELOW_MINIMUM);
+    mongo.clockNow = END;
+    expect(await codeOf(() => service.acceptBid(ALICE, AUCTION, 100_000))).toBe(BidErrorCode.AUCTION_ENDED);
+    mongo.clockNow = OPEN_NOW;
+    mongo.committedAuction().status = AuctionStatus.ENDED_PENDING_CLOSE;
+    expect(await codeOf(() => service.acceptBid(ALICE, AUCTION, 100_000))).toBe(BidErrorCode.AUCTION_NOT_ACTIVE);
+    expect(mongo.bids).toHaveLength(0);
   });
 });

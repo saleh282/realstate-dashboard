@@ -46,6 +46,27 @@ export class AuctionRuleSnapshot {
 const AuctionRuleSnapshotSchema = SchemaFactory.createForClass(AuctionRuleSnapshot);
 
 /**
+ * The admin-configured bidder entry fee for ONE auction (MAZAD-028).
+ * Write-once (set only while the auction is SCHEDULED and has no fee, via a
+ * conditional update in `AuctionEntryFeeService`), server-owned, and never
+ * derived from a bidder-supplied amount. Absent = NOT configured = paid
+ * bidding fails closed; it is never read as zero/free.
+ */
+@Schema({ _id: false })
+export class AuctionEntryFee {
+  @Prop({
+    required: true,
+    validate: { validator: (value: unknown) => isMoneyMinorAmount(value, { positive: true }), message: 'entry fee amountMinor is outside the safe integer range' },
+  })
+  amountMinor: number;
+  @Prop({ type: String, required: true, enum: [EGP_CURRENCY] }) currency: typeof EGP_CURRENCY;
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true }) configuredByActorId: Types.ObjectId;
+  @Prop({ required: true }) configuredAt: Date;
+}
+
+const AuctionEntryFeeSchema = SchemaFactory.createForClass(AuctionEntryFee);
+
+/**
  * Persistence/domain foundation for auctions (MAZAD-023). Establishes the
  * schema, immutable rule snapshot, status vocabulary and indexes that later
  * tasks (bid acceptance, anti-sniping execution, scheduling/closing
@@ -107,6 +128,10 @@ export class Auction {
 
   // --- Immutable rule snapshot ---
   @Prop({ type: AuctionRuleSnapshotSchema, required: true, immutable: true }) ruleSnapshot: AuctionRuleSnapshot;
+
+  // --- Entry fee (MAZAD-028) ---
+  /** Bidder entry fee for this auction; absent until an admin configures it (the future Admin approval workflow supplies it via `AuctionEntryFeeService.configure`). Absent fails closed. */
+  @Prop({ type: AuctionEntryFeeSchema }) entryFee?: AuctionEntryFee;
 
   // --- Bidding state (MAZAD-027) ---
   /**

@@ -1,0 +1,164 @@
+import { ConflictException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
+import { AuditLogService } from '../audit/audit-log.service';
+import { AuditAction } from '../audit/schemas/audit-log.schema';
+import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
+import { Capability } from '../authorization/capability';
+import { AuctionStatus } from '../auctions/auction.types';
+import { Auction, AuctionDocument } from '../auctions/schemas/auction.schema';
+import { AuctionErrorCode } from '../common/errors/auction-error-codes';
+import { PaymentErrorCode } from '../common/errors/payment-error-codes';
+import { EGP_CURRENCY, isMoneyMinorAmount } from '../common/money/money';
+import { retryConflict, runTransactionWithRetry } from '../common/mongo/transaction-runner';
+import { ClockService } from '../common/time/clock.service';
+import { User, UserDocument } from '../users/schemas/user.schema';
+import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from './auction-payment-provider.port';
+import { EntryPaymentStatus, PaymentPurpose } from './payment.types';
+import { AuctionBidEntitlement, AuctionBidEntitlementDocument } from './schemas/auction-bid-entitlement.schema';
+import { AuctionEntryPayment, AuctionEntryPaymentDocument } from './schemas/auction-entry-payment.schema';
+
+export const PAYMENT_UNIQUE_INDEXES = ['entry_payment_one_live_per_bidder_auction', 'entry_payment_provider_reference', 'entitlement_auction_bidder', 'entitlement_payment'] as const;
+
+export type InitiatedEntryPayment = {
+  paymentId: string;
+  auctionId: string;
+  amountMinor: number;
+  currency: string;
+  status: EntryPaymentStatus;
+  providerReference?: string;
+  clientHandoff?: string;
+  /** True when an existing INITIATED attempt was returned instead of opening a new one. */
+  reused: boolean;
+};
+
+/**
+ * Payment INITIATION (MAZAD-028). Internal service; no HTTP route yet.
+ * Initiating grants nothing — only server-verified confirmation does. The
+ * amount is copied from the auction's configured fee, never from the caller.
+ */
+@Injectable()
+export class AuctionEntryPaymentService {
+  constructor(
+    @InjectModel(Auction.name) private readonly auctions: Model<AuctionDocument>,
+    @InjectModel(User.name) private readonly users: Model<UserDocument>,
+    @InjectModel(AuctionEntryPayment.name) private readonly payments: Model<AuctionEntryPaymentDocument>,
+    @InjectModel(AuctionBidEntitlement.name) private readonly entitlements: Model<AuctionBidEntitlementDocument>,
+    private readonly audit: AuditLogService,
+    private readonly clock: ClockService,
+    @Inject(AUCTION_PAYMENT_PROVIDER_PORT) private readonly provider: AuctionPaymentProviderPort,
+    @InjectConnection() private readonly connection: Connection,
+  ) {}
+
+  /** `actorId` MUST be the authenticated principal's id; there is deliberately no amount parameter. */
+  async initiate(actorId: string, auctionId: string, ip?: string): Promise<InitiatedEntryPayment> {
+    if (!this.provider.configured) {
+      throw new ServiceUnavailableException({ message: 'خدمة الدفع غير متاحة حالياً', code: PaymentErrorCode.PROVIDER_UNAVAILABLE });
+    }
+    if (!Types.ObjectId.isValid(auctionId)) throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
+    if (!Types.ObjectId.isValid(actorId)) throw new NotFoundException({ message: 'الحساب غير موجود', code: AuctionErrorCode.ACTOR_INVALID });
+
+    const { payment, reused } = await runTransactionWithRetry(
+      this.connection,
+      (session) => this.openAttempt(session, actorId, auctionId, ip),
+      { uniqueIndexNames: PAYMENT_UNIQUE_INDEXES, retryExhausted: retryConflict('عملية الدفع قيد المعالجة؛ أعد المحاولة', PaymentErrorCode.RETRY_EXHAUSTED) },
+    );
+
+    if (reused && payment.providerReference) return this.toResult(payment, true);
+
+    try {
+      const opened = await this.provider.initiate({ purpose: PaymentPurpose.AUCTION_ENTRY, paymentId: payment._id.toString(), amountMinor: payment.amountMinor, currency: payment.currency });
+      await this.payments
+        .updateOne(
+          { _id: payment._id, status: EntryPaymentStatus.INITIATED, providerReference: { $exists: false } },
+          { $set: { providerReference: opened.providerReference } },
+        )
+        .exec();
+      return this.toResult({ ...payment, providerReference: opened.providerReference }, reused, opened.clientHandoff);
+    } catch (error) {
+      // Only a reference-less attempt may be failed here: one that already has a reference may be paid at the gateway.
+      if (!payment.providerReference) await this.failUnreferenced(payment._id);
+      throw error;
+    }
+  }
+
+  private async openAttempt(session: ClientSession, actorId: string, auctionId: string, ip?: string) {
+    const auction: any = await this.auctions.findById(auctionId).session(session).lean().exec();
+    const actor = await this.users.findById(actorId).session(session).lean().exec();
+    if (!auction) throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
+    if (!actor) throw new NotFoundException({ message: 'الحساب غير موجود', code: AuctionErrorCode.ACTOR_INVALID });
+
+    // Payment never replaces bidding authorization: a principal who could never bid has nothing to buy.
+    AuthorizationPolicyService.assert(actor, Capability.PAYMENT_ENTRY_INITIATE);
+    AuthorizationPolicyService.assertBid(actor, auction.advertiserAccountId.toString());
+
+    if (auction.status !== AuctionStatus.SCHEDULED && auction.status !== AuctionStatus.ACTIVE) {
+      throw new ConflictException({ message: 'لا يمكن دفع رسوم الاشتراك لهذا المزاد', code: PaymentErrorCode.AUCTION_NOT_PAYABLE });
+    }
+    const fee = auction.entryFee;
+    if (!fee || !isMoneyMinorAmount(fee.amountMinor, { positive: true }) || fee.currency !== EGP_CURRENCY) {
+      throw new ConflictException({ message: 'لم يتم تحديد رسوم الاشتراك لهذا المزاد', code: PaymentErrorCode.ENTRY_FEE_NOT_CONFIGURED });
+    }
+
+    const entitled = await this.entitlements.exists({ auctionId: auction._id, bidderAccountId: new Types.ObjectId(actorId) }).session(session).exec();
+    const live = await this.payments.findOne({ auctionId: auction._id, bidderAccountId: new Types.ObjectId(actorId), isLive: true }).session(session).lean().exec();
+    if (entitled || live?.status === EntryPaymentStatus.SUCCEEDED) {
+      throw new ConflictException({ message: 'تم دفع رسوم الاشتراك لهذا المزاد مسبقاً', code: PaymentErrorCode.ALREADY_PAID });
+    }
+    if (live) return { payment: live as any, reused: true };
+
+    const now = this.clock.now();
+    const [created] = await this.payments.create(
+      [{
+        auctionId: auction._id,
+        bidderAccountId: new Types.ObjectId(actorId),
+        amountMinor: fee.amountMinor,
+        currency: EGP_CURRENCY,
+        status: EntryPaymentStatus.INITIATED,
+        isLive: true,
+        initiatedAt: now,
+        provider: this.provider.providerKey,
+        purpose: PaymentPurpose.AUCTION_ENTRY,
+      }],
+      { session },
+    );
+    await this.audit.logRequired(
+      {
+        action: AuditAction.AUCTION_ENTRY_PAYMENT_INITIATED,
+        actorUserId: actorId,
+        targetResourceId: auctionId,
+        reason: 'entry payment initiated',
+        ip,
+        metadata: { paymentId: created._id.toString(), amountMinor: fee.amountMinor, currency: EGP_CURRENCY, provider: this.provider.providerKey },
+      },
+      session,
+    );
+    return { payment: created.toObject() as any, reused: false };
+  }
+
+  private async failUnreferenced(paymentId: Types.ObjectId) {
+    try {
+      await this.payments
+        .updateOne(
+          { _id: paymentId, status: EntryPaymentStatus.INITIATED, providerReference: { $exists: false } },
+          { $set: { status: EntryPaymentStatus.FAILED, failedAt: this.clock.now(), failureCode: 'PROVIDER_INITIATION_FAILED' }, $unset: { isLive: '' } },
+        )
+        .exec();
+    } catch {
+      /* the original provider error is what matters; the attempt stays INITIATED for reconciliation */
+    }
+  }
+
+  private toResult(payment: any, reused: boolean, clientHandoff?: string): InitiatedEntryPayment {
+    return {
+      paymentId: payment._id.toString(),
+      auctionId: payment.auctionId.toString(),
+      amountMinor: payment.amountMinor,
+      currency: payment.currency,
+      status: payment.status,
+      providerReference: payment.providerReference,
+      clientHandoff,
+      reused,
+    };
+  }
+}

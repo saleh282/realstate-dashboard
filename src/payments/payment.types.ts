@@ -1,0 +1,51 @@
+/**
+ * Entry-fee payment state machine (MAZAD-028):
+ *
+ *   INITIATED ──(server-verified success)──▶ SUCCEEDED   (terminal)
+ *       │
+ *       └────(server-verified failure)────▶ FAILED       (terminal)
+ *
+ * Only the server-side confirmation service moves a payment out of INITIATED,
+ * and only from an outcome it obtained itself from the provider port. There is
+ * no client-reachable transition. A verified success for a FAILED payment is
+ * NOT a transition: it is flagged for manual reconciliation.
+ */
+export enum EntryPaymentStatus {
+  INITIATED = 'INITIATED',
+  SUCCEEDED = 'SUCCEEDED',
+  FAILED = 'FAILED',
+}
+
+/** Set (never cleared) when server-side verification disagreed with the server-owned payment. */
+export enum PaymentReconciliationFlag {
+  AMOUNT_MISMATCH = 'AMOUNT_MISMATCH',
+  CURRENCY_MISMATCH = 'CURRENCY_MISMATCH',
+  REFERENCE_MISMATCH = 'REFERENCE_MISMATCH',
+  CONFIRMED_AFTER_FAILURE = 'CONFIRMED_AFTER_FAILURE',
+}
+
+/** What the provider, asked server-to-server, says about one payment. Produced ONLY by the provider port. */
+export type VerifiedProviderOutcome = {
+  status: 'SUCCEEDED' | 'FAILED' | 'PENDING';
+  providerReference: string;
+  amountMinor: number;
+  currency: string;
+  /** Provider's own event/transaction id, kept for reconciliation (never a secret, never the raw payload). */
+  providerEventId?: string;
+  failureCode?: string;
+};
+
+/**
+ * Why a payment exists. The two purposes are stored in SEPARATE collections
+ * with purpose-specific business effects; they share only infrastructure
+ * (provider port, verification rules, transaction runner, audit). `purpose`
+ * is also stamped immutably on each payment row as a defensive marker.
+ */
+export enum PaymentPurpose {
+  AUCTION_ENTRY = 'AUCTION_ENTRY',
+  MANAGED_MARKETING = 'MANAGED_MARKETING',
+}
+
+/** Same attempt state machine for both purposes. */
+export const PaymentAttemptStatus = EntryPaymentStatus;
+export type PaymentAttemptStatus = EntryPaymentStatus;

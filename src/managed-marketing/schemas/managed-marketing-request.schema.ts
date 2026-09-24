@@ -37,6 +37,9 @@ export class ManagedMarketingRequest {
   @Prop({ trim: true, maxlength: 1000 }) reviewReason?: string;
   @Prop({ trim: true, maxlength: 1000 }) cancellationReason?: string;
   @Prop() cancelledAt?: Date;
+  /** Set only by the server-confirmed MANAGED_MARKETING payment (MAZAD-028). A factual timestamp; no SLA/schedule is derived from it here. */
+  @Prop() paidAt?: Date;
+  @Prop({ type: Types.ObjectId, ref: 'ManagedMarketingPayment' }) paidPaymentId?: Types.ObjectId;
 }
 
 export const ManagedMarketingRequestSchema = SchemaFactory.createForClass(ManagedMarketingRequest);

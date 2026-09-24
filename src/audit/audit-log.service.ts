@@ -90,6 +90,36 @@ export class AuditLogService {
     );
   }
 
+  /**
+   * In-transaction audit for server-initiated business effects with no human
+   * actor (e.g. a payment confirmed by the server-to-server verification
+   * path). Like `logRequired`, a failure aborts the protected transition.
+   */
+  async logSystemRequired(
+    options: {
+      action: AuditAction;
+      targetResourceId: string;
+      targetUserId?: string;
+      reason: string;
+      metadata?: Record<string, unknown>;
+    },
+    session: ClientSession,
+  ): Promise<void> {
+    await this.auditModel.create(
+      [{
+        action: options.action,
+        userId: null,
+        ...(options.targetUserId ? { targetUserId: new Types.ObjectId(options.targetUserId) } : {}),
+        targetResourceId: options.targetResourceId,
+        reason: options.reason,
+        ip: 'system',
+        metadata: options.metadata,
+        requestId: auditRequestId(),
+      }],
+      { session },
+    );
+  }
+
   async logAdminResourceAction(
     action: AuditAction,
     actorUserId: string,

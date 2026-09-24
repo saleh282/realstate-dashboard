@@ -27,6 +27,7 @@ const ADMIN_CAPABILITIES = new Set<Capability>([
   Capability.ADMIN_CATALOG_MANAGE,
   Capability.ADMIN_MANAGED_MARKETING_MANAGE,
   Capability.ADMIN_AUCTION_READ,
+  Capability.ADMIN_AUCTION_FEE_MANAGE,
 ]);
 
 const MARKETPLACE_MUTATIONS = new Set<Capability>([

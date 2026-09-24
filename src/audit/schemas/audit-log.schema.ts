@@ -82,6 +82,16 @@ export enum AuditAction {
   AUCTION_ENDED_PENDING_CLOSE = 'auction_ended_pending_close',
   AUCTION_END_TIME_EXTENDED = 'auction_end_time_extended',
   AUCTION_BID_ACCEPTED = 'auction_bid_accepted',
+  AUCTION_ENTRY_FEE_CONFIGURED = 'auction_entry_fee_configured',
+  AUCTION_ENTRY_PAYMENT_INITIATED = 'auction_entry_payment_initiated',
+  AUCTION_ENTRY_PAYMENT_CONFIRMED = 'auction_entry_payment_confirmed',
+  AUCTION_ENTRY_PAYMENT_FAILED = 'auction_entry_payment_failed',
+  AUCTION_ENTRY_PAYMENT_REJECTED = 'auction_entry_payment_rejected',
+  AUCTION_BID_ENTITLEMENT_GRANTED = 'auction_bid_entitlement_granted',
+  MANAGED_MARKETING_PAYMENT_INITIATED = 'managed_marketing_payment_initiated',
+  MANAGED_MARKETING_PAYMENT_CONFIRMED = 'managed_marketing_payment_confirmed',
+  MANAGED_MARKETING_PAYMENT_FAILED = 'managed_marketing_payment_failed',
+  MANAGED_MARKETING_PAYMENT_REJECTED = 'managed_marketing_payment_rejected',
 }
 
 @Schema({ timestamps: { createdAt: true, updatedAt: false }, collection: 'audit_logs' })

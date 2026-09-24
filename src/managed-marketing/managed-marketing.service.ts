@@ -68,7 +68,7 @@ export class ManagedMarketingService {
   }
   async listMine(actor: string) { const items = await this.requests.find({ advertiserAccountId: this.id(actor) }).sort({ createdAt: -1 }).lean().exec(); return { items: items.map(i => this.requestView(i)) }; }
   async cancel(actor: string, requestId: string, reason: string | undefined, ip?: string) {
-    const item = await this.requests.findOneAndUpdate({ _id: this.id(requestId), advertiserAccountId: this.id(actor), status: { $in: [ManagedMarketingRequestStatus.PENDING_REVIEW, ManagedMarketingRequestStatus.APPROVED] }, paymentStatus: { $in: [ManagedMarketingPaymentStatus.NOT_ELIGIBLE, ManagedMarketingPaymentStatus.AWAITING_PAYMENT] } }, { $set: { status: ManagedMarketingRequestStatus.CANCELLED, cancellationReason: reason?.trim(), cancelledAt: new Date() } }, { new: true }).lean().exec();
+    const item = await this.requests.findOneAndUpdate({ _id: this.id(requestId), advertiserAccountId: this.id(actor), status: { $in: [ManagedMarketingRequestStatus.PENDING_REVIEW, ManagedMarketingRequestStatus.APPROVED] }, paymentStatus: { $in: [ManagedMarketingPaymentStatus.NOT_ELIGIBLE, ManagedMarketingPaymentStatus.AWAITING_PAYMENT, ManagedMarketingPaymentStatus.FAILED] } }, { $set: { status: ManagedMarketingRequestStatus.CANCELLED, cancellationReason: reason?.trim(), cancelledAt: new Date() } }, { new: true }).lean().exec();
     if (!item) throw new ConflictException({ message: 'لا يمكن إلغاء الطلب بعد بدء الدفع', code: 'MANAGED_MARKETING_CANCELLATION_NOT_ALLOWED' });
     await this.audit.logResourceAction(AuditAction.MANAGED_MARKETING_REQUEST_CANCELLED, actor, requestId, reason?.trim() || 'customer cancelled before payment', ip);
     return { message: 'تم إلغاء طلب التسويق', request: this.requestView(item) };
