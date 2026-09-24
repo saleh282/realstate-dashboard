@@ -183,9 +183,13 @@ export function validateEnvironment(config: Environment): Environment {
   }
 
   const geocodingProvider = valueOf(config, 'GEOCODING_PROVIDER').toLowerCase();
-  if (geocodingProvider && !['nominatim', 'disabled'].includes(geocodingProvider)) {
-    errors.push('GEOCODING_PROVIDER must be nominatim or disabled');
+  if (geocodingProvider && !['nominatim', 'google', 'disabled'].includes(geocodingProvider)) {
+    errors.push('GEOCODING_PROVIDER must be nominatim, google or disabled');
   }
+  if (geocodingProvider === 'google' && !valueOf(config, 'GOOGLE_MAPS_SERVER_API_KEY')) {
+    errors.push('GOOGLE_MAPS_SERVER_API_KEY is required when GEOCODING_PROVIDER=google');
+  }
+  const usesNominatim = !geocodingProvider || geocodingProvider === 'nominatim';
   validateBoolean(config, 'GEOCODING_ALLOW_PUBLIC_PROVIDER', errors);
   validateInteger(config, 'GEOCODING_MIN_INTERVAL_MS', errors, { min: 0 });
   validateInteger(config, 'GEOCODING_MAX_CONCURRENCY', errors, { min: 1, max: 64 });
@@ -195,7 +199,7 @@ export function validateEnvironment(config: Environment): Environment {
 
   if (nodeEnv === 'production') {
     if (
-      geocodingProvider !== 'disabled' &&
+      usesNominatim &&
       isPublicOsmNominatim(valueOf(config, 'GEOCODING_PROVIDER_BASE_URL')) &&
       valueOf(config, 'GEOCODING_ALLOW_PUBLIC_PROVIDER').toLowerCase() !== 'true'
     ) {
@@ -203,7 +207,7 @@ export function validateEnvironment(config: Environment): Environment {
         'GEOCODING_PROVIDER_BASE_URL must point to a self-hosted or commercial geocoder in production (the public OpenStreetMap Nominatim service forbids production use); set GEOCODING_ALLOW_PUBLIC_PROVIDER=true only as a temporary, explicit override',
       );
     }
-    if (!valueOf(config, 'GEOCODING_USER_AGENT')) {
+    if (usesNominatim && !valueOf(config, 'GEOCODING_USER_AGENT')) {
       errors.push('GEOCODING_USER_AGENT is required in production');
     }
     const origins = valueOf(config, 'CORS_ORIGINS');
