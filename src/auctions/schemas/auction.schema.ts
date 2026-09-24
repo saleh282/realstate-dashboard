@@ -150,10 +150,25 @@ export class Auction {
   @Prop() cancelledAt?: Date;
   @Prop({ trim: true, maxlength: 1000 }) cancellationReason?: string;
 
-  // --- Completion / winner (schema only; winner selection itself is MAZAD-024+) ---
+  // --- Completion / winner (MAZAD-030) ---
+  /**
+   * Written exactly once, by `AuctionFinalizationService`, in ONE conditional
+   * update `{status: ENDED_PENDING_CLOSE, winningBidId: {$exists: false}} ->
+   * COMPLETED + these fields`. COMPLETED is terminal (no outgoing transition)
+   * and every other Auction write is filtered on a non-terminal status, so a
+   * finalized winner is never silently replaceable. `COMPLETED` means the
+   * bidding lifecycle was finalized and the winning accepted bid determined —
+   * NOT that payment or ownership transfer occurred (that is outside Mazad).
+   * Never set for ENDED_NO_BIDS or CANCELLED; there is no second-place promotion.
+   * Non-PII only: the winner is referenced by account id + the account-type
+   * snapshot copied from the winning Bid; nothing from the profile is copied.
+   */
   @Prop() completedAt?: Date;
-  /** Set only on COMPLETED. Never set for ENDED_NO_BIDS or CANCELLED — a cancelled auction has no winner and there is no automatic second-place promotion. */
   @Prop({ type: Types.ObjectId, ref: 'User' }) winnerAccountId?: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Bid' }) winningBidId?: Types.ObjectId;
+  @Prop({ type: Number, min: 1 }) winningBidSequence?: number;
+  @Prop() winningBidAcceptedAt?: Date;
+  @Prop({ type: String, enum: AccountType }) winnerAccountTypeSnapshot?: AccountType;
   @Prop({
     validate: { validator: (value: unknown) => value === undefined || isMoneyMinorAmount(value, { positive: true }), message: 'winningBidAmountMinor is outside the safe integer range' },
   })

@@ -14,6 +14,8 @@ import { AUCTION_BID_ENTITLEMENT_PORT } from './auction-bid-entitlement.port';
 import { AuctionBiddingReadService } from './auction-bidding-read.service';
 import { AuctionBidsController } from './auction-bids.controller';
 import { AuctionBidAcceptanceService } from './auction-bid-acceptance.service';
+import { AuctionFinalizationService } from './auction-finalization.service';
+import { AuctionFinalizationWorker } from './auction-finalization.worker';
 import { AuctionLifecycleService } from './auction-lifecycle.service';
 import { AuctionLifecycleWorker } from './auction-lifecycle.worker';
 import { AdminAuctionsController } from './admin-auctions.controller';
@@ -36,6 +38,9 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
  *    (MAZAD-027); internal only, no controller; its
  *    `AUCTION_BID_ENTITLEMENT_PORT` is bound to the persisted, server-confirmed
  *    entitlement of `PaymentsModule` (MAZAD-028).
+ *  - `AuctionFinalizationService` + `AuctionFinalizationWorker` — the authoritative
+ *    close (MAZAD-030): `ENDED_PENDING_CLOSE → COMPLETED` with an immutable winner
+ *    derived only from the Bid ledger; internal, no HTTP surface.
  *  - `AuctionBidsController` + `AuctionBiddingReadService` — the bid HTTP API
  *    (MAZAD-029): placement (a thin adapter over the acceptance service, with
  *    durable request idempotency), current bid state and anonymised history.
@@ -63,10 +68,12 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
     AuctionBidAcceptanceService,
     AuctionBiddingReadService,
     AuctionLifecycleWorker,
+    AuctionFinalizationService,
+    AuctionFinalizationWorker,
     ClockService,
     { provide: AUCTION_BID_ENTITLEMENT_PORT, useExisting: PersistentBidEntitlementPort },
     { provide: AUCTION_BID_EXISTENCE_PORT, useClass: BidLedgerAuctionBidExistencePort },
   ],
-  exports: [AuctionsService, AuctionLifecycleService, AuctionBidAcceptanceService],
+  exports: [AuctionsService, AuctionLifecycleService, AuctionBidAcceptanceService, AuctionFinalizationService],
 })
 export class AuctionsModule {}

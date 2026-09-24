@@ -103,5 +103,12 @@ describe('environment validation', () => {
       expect(invalid({ AUCTION_LIFECYCLE_INTERVAL_SECONDS: '1' })).toThrow('AUCTION_LIFECYCLE_INTERVAL_SECONDS');
       expect(invalid({ AUCTION_LIFECYCLE_BATCH_SIZE: '1000' })).toThrow('AUCTION_LIFECYCLE_BATCH_SIZE');
     });
+
+    it('validates the auction finalization worker settings (MAZAD-030)', () => {
+      expect(invalid({ AUCTION_FINALIZATION_WORKER_ENABLED: 'true', AUCTION_FINALIZATION_INTERVAL_SECONDS: '30', AUCTION_FINALIZATION_BATCH_SIZE: '50' })).not.toThrow();
+      expect(invalid({ AUCTION_FINALIZATION_WORKER_ENABLED: 'yes' })).toThrow('AUCTION_FINALIZATION_WORKER_ENABLED');
+      expect(invalid({ AUCTION_FINALIZATION_INTERVAL_SECONDS: '1' })).toThrow('AUCTION_FINALIZATION_INTERVAL_SECONDS');
+      expect(invalid({ AUCTION_FINALIZATION_BATCH_SIZE: '1000' })).toThrow('AUCTION_FINALIZATION_BATCH_SIZE');
+    });
   });
 });

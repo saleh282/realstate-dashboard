@@ -82,6 +82,7 @@ export enum AuditAction {
   AUCTION_ENDED_PENDING_CLOSE = 'auction_ended_pending_close',
   AUCTION_END_TIME_EXTENDED = 'auction_end_time_extended',
   AUCTION_BID_ACCEPTED = 'auction_bid_accepted',
+  AUCTION_FINALIZED = 'auction_finalized',
   AUCTION_ENTRY_FEE_CONFIGURED = 'auction_entry_fee_configured',
   AUCTION_ENTRY_PAYMENT_INITIATED = 'auction_entry_payment_initiated',
   AUCTION_ENTRY_PAYMENT_CONFIRMED = 'auction_entry_payment_confirmed',
