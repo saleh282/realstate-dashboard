@@ -57,7 +57,7 @@ describe('MAZAD-019 property revision lifecycle', () => {
     await expect(service.validateRevisionForSubmission({
       ...submissionCandidate(),
       galleryMedia: [{ slotId: 'exterior' }, { slotId: 'entrance' }, { slotId: 'living_1' }, { slotId: 'bedroom_1' }, { slotId: 'kitchen_1' }],
-    }, {})).rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.REQUIRED_PHOTO_SLOTS_MISSING, missingPhotoSlots: ['bathroom_1'] }) });
+    }, {})).rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.REQUIRED_PHOTO_SLOTS_MISSING, details: { missingPhotoSlots: ['bathroom_1'] } }) });
   });
 
   it('allows SELF_SERVICE submission when every required classified photo exists', async () => {

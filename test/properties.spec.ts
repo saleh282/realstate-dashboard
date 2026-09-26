@@ -88,7 +88,7 @@ describe('property publishing validation', () => {
     })).rejects.toMatchObject({
       response: expect.objectContaining({
         code: 'PROPERTY_REQUIRED_PHOTO_SLOTS_MISSING',
-        missingPhotoSlots: [missingSlot],
+        details: { missingPhotoSlots: [missingSlot], invalidPhotoSlots: [] },
       }),
     });
   });
@@ -99,7 +99,7 @@ describe('property publishing validation', () => {
     await expect(service().create(userId, dto, files)).rejects.toMatchObject({
       response: expect.objectContaining({
         code: 'PROPERTY_PHOTO_SLOT_MEDIA_DUPLICATED',
-        duplicatePhotoSlots: ['exterior', 'entrance'],
+        details: { duplicatePhotoSlots: ['exterior', 'entrance'] },
       }),
     });
   });

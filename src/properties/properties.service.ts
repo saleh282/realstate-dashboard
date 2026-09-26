@@ -179,8 +179,7 @@ export class PropertiesService {
       throw new BadRequestException({
         message: 'يجب استكمال جميع فئات صور العقار المطلوبة',
         code: EvidenceErrorCode.REQUIRED_PHOTO_SLOTS_MISSING,
-        missingPhotoSlots,
-        invalidPhotoSlots,
+        details: { missingPhotoSlots, invalidPhotoSlots },
       });
     }
     const seenRequiredPhotoContent = new Map<string, string>();
@@ -196,7 +195,7 @@ export class PropertiesService {
       throw new BadRequestException({
         message: 'يجب استخدام صورة مستقلة لكل قسم مطلوب',
         code: EvidenceErrorCode.PHOTO_SLOT_MEDIA_DUPLICATED,
-        duplicatePhotoSlots: [...new Set(duplicatePhotoSlots)],
+        details: { duplicatePhotoSlots: [...new Set(duplicatePhotoSlots)] },
       });
     }
     if (images.length ? dto.coverImageIndex >= images.length : dto.coverImageIndex !== 0) {
@@ -875,7 +874,7 @@ export class PropertiesService {
       throw new BadRequestException({
         message: 'لا يمكن نشر العقار قبل استكمال صور العرض المطلوبة',
         code: PropertyErrorCode.REQUIRED_PHOTO_SLOTS_MISSING,
-        missingPhotoSlots,
+        details: { missingPhotoSlots },
       });
     }
   }
