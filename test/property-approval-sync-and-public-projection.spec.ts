@@ -23,7 +23,11 @@ const REQUIRED_PUBLIC_REVISION_FIELDS = [
   'governorateCode', 'city', 'district', 'area', 'bedrooms', 'bathrooms', 'floor',
   'totalPriceMinor', 'currency', 'paymentMethodCodes', 'marketingMode',
   'galleryMedia', 'entranceImageAsset', 'coverImageIndex', 'moderationStatus',
+  // DPF-016: a pinned revision's deprecated flat fields come from its attributes.
+  'formDefinitionVersionId', 'attributes',
 ];
+/** Fields that only matter for a revision pinned to a FormDefinitionVersion. */
+const PIN_FIELDS = ['formDefinitionVersionId', 'attributes'];
 const PRIVATE_OR_UNUSED_REVISION_FIELDS = [
   'privateEvidenceAssets', 'supersededAssets', 'street', 'additionalAddressDetails', 'latitude', 'longitude',
   'livingRooms', 'kitchens', 'totalFloors', 'buildingYear', 'finishingStatusCode', 'deliveryStatusCode',
@@ -298,11 +302,19 @@ describe('DPF-002 public read paths load only the revision fields they project',
       _id: new Types.ObjectId(propertyId), createdAt: new Date('2026-01-01T00:00:00Z'), images: [], currentPublicRevisionId: revision,
     });
     const revision = project(fullRevision(revisionId), PUBLIC_REVISION_PROJECTION_FIELDS.join(' '));
-    const baseline = JSON.stringify(await hydrate([bare(revision)]));
-    for (const field of PUBLIC_REVISION_PROJECTION_FIELDS) {
-      const { [field]: _dropped, ...withoutField } = revision;
-      const output = JSON.stringify(await hydrate([bare(withoutField)]));
-      expect({ field, changed: output !== baseline }).toEqual({ field, changed: true });
+    // A pinned revision carries no legacy spec fields; its flat fields come from `attributes`.
+    const { bedrooms: _b, bathrooms: _ba, floor: _f, ...pinnedBase } = revision;
+    const pinned = { ...pinnedBase, formDefinitionVersionId: new Types.ObjectId(), attributes: { bedrooms: 7, bathrooms: 3, floor: 4 } };
+    for (const [fixture, fields] of [
+      [revision, PUBLIC_REVISION_PROJECTION_FIELDS.filter((field) => !PIN_FIELDS.includes(field))],
+      [pinned, PIN_FIELDS],
+    ] as const) {
+      const baseline = JSON.stringify(await hydrate([bare(fixture)]));
+      for (const field of fields) {
+        const { [field]: _dropped, ...withoutField } = fixture as Record<string, unknown>;
+        const output = JSON.stringify(await hydrate([bare(withoutField)]));
+        expect({ field, changed: output !== baseline }).toEqual({ field, changed: true });
+      }
     }
   });
 });

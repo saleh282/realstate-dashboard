@@ -114,7 +114,7 @@ export class AuctionsQueryService {
    * Used by `getPublic` and by the bid-state/bid-history reads (MAZAD-029) so
    * nothing can be revealed through them that `GET /auctions/:id` hides.
    */
-  async getPubliclyVisible(id: string) {
+  async getPubliclyVisible(id: string, options: { specifications?: boolean } = {}) {
     assertId(id);
     const doc = await this.auctions.findById(id).lean().exec();
     if (!doc) throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
@@ -122,14 +122,15 @@ export class AuctionsQueryService {
     if (!PUBLIC_AUCTION_STATUSES.includes(doc.status)) throw unavailable();
     const projections = await this.properties.getAnchoredPublicProjections([
       { propertyId: doc.propertyId.toString(), revisionId: doc.propertyRevisionId.toString() },
-    ]);
+    ], options);
     const property = projections.get(`${doc.propertyId}:${doc.propertyRevisionId}`);
     if (!property) throw unavailable();
     return { doc, property };
   }
 
   async getPublic(id: string) {
-    const { doc, property } = await this.getPubliclyVisible(id);
+    // The auction page renders the anchored revision's specifications (DPF-016).
+    const { doc, property } = await this.getPubliclyVisible(id, { specifications: true });
     return { auction: toPublicAuction(doc, property), serverTime: this.clock.now() };
   }
 
@@ -161,7 +162,7 @@ export class AuctionsQueryService {
     if (!doc) throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
     const projections = await this.properties.getAnchoredPublicProjections([
       { propertyId: doc.propertyId.toString(), revisionId: doc.propertyRevisionId.toString() },
-    ]);
+    ], { specifications: true });
     return { auction: toOwnAuction(doc, projections.get(`${doc.propertyId}:${doc.propertyRevisionId}`) ?? null), serverTime: this.clock.now() };
   }
 

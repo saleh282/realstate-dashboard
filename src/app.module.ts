@@ -16,6 +16,7 @@ import { AmenitiesModule } from './amenities/amenities.module';
 import { PropertyOptionsModule } from './property-options/property-options.module';
 import { GovernoratesModule } from './governorates/governorates.module';
 import { PropertyFormOptionsModule } from './property-form-options/property-form-options.module';
+import { PropertyFormDefinitionsModule } from './property-form-definitions/property-form-definitions.module';
 import { PropertiesModule } from './properties/properties.module';
 import { BrokerApplicationsModule } from './broker-applications/broker-applications.module';
 import { PropertyPurposeCategoriesModule } from './property-purpose-categories/property-purpose-categories.module';
@@ -52,6 +53,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     PropertyOptionsModule,
     GovernoratesModule,
     PropertyFormOptionsModule,
+    PropertyFormDefinitionsModule,
     PropertiesModule,
     BrokerApplicationsModule,
     PropertyPurposeCategoriesModule,

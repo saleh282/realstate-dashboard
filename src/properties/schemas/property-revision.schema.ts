@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 import { EGP_CURRENCY, isMoneyMinorAmount } from '../../common/money/money';
 import { PropertyAsset } from './property.schema';
 import { AssetClassification, EvidenceDeliveryType } from '../../config/evidence-asset.types';
@@ -52,16 +52,29 @@ export class PropertyRevision {
   @Prop({ required: true, min: -90, max: 90, immutable: immutableOutsideDraft }) latitude: number;
   @Prop({ required: true, min: -180, max: 180, immutable: immutableOutsideDraft }) longitude: number;
   @Prop({ required: true, min: 1, immutable: immutableOutsideDraft }) area: number;
-  @Prop({ required: true, min: 0, max: 100, immutable: immutableOutsideDraft }) bedrooms: number;
-  @Prop({ required: true, min: 0, max: 100, immutable: immutableOutsideDraft }) livingRooms: number;
-  @Prop({ required: true, min: 0, max: 100, immutable: immutableOutsideDraft }) kitchens: number;
-  @Prop({ required: true, min: 0, max: 100, immutable: immutableOutsideDraft }) bathrooms: number;
-  @Prop({ required: true, min: -10, max: 300, immutable: immutableOutsideDraft }) floor: number;
-  @Prop({ required: true, min: 1, max: 300, immutable: immutableOutsideDraft }) totalFloors: number;
-  @Prop({ required: true, min: 1800, max: 2200, immutable: immutableOutsideDraft }) buildingYear: number;
-  @Prop({ required: true, trim: true, maxlength: 50, immutable: immutableOutsideDraft }) finishingStatusCode: string;
-  @Prop({ required: true, trim: true, maxlength: 50, immutable: immutableOutsideDraft }) deliveryStatusCode: string;
+  // Legacy spec fields (frozen §A5): no longer required; never written on
+  // revisions pinned to a FormDefinitionVersion, kept to read legacy revisions.
+  @Prop({ min: 0, max: 100, immutable: immutableOutsideDraft }) bedrooms?: number;
+  @Prop({ min: 0, max: 100, immutable: immutableOutsideDraft }) livingRooms?: number;
+  @Prop({ min: 0, max: 100, immutable: immutableOutsideDraft }) kitchens?: number;
+  @Prop({ min: 0, max: 100, immutable: immutableOutsideDraft }) bathrooms?: number;
+  @Prop({ min: -10, max: 300, immutable: immutableOutsideDraft }) floor?: number;
+  @Prop({ min: 1, max: 300, immutable: immutableOutsideDraft }) totalFloors?: number;
+  @Prop({ min: 1800, max: 2200, immutable: immutableOutsideDraft }) buildingYear?: number;
+  @Prop({ trim: true, maxlength: 50, immutable: immutableOutsideDraft }) finishingStatusCode?: string;
+  @Prop({ trim: true, maxlength: 50, immutable: immutableOutsideDraft }) deliveryStatusCode?: string;
   @Prop({ type: [String], default: [], immutable: immutableOutsideDraft }) amenityCodes: string[];
+  /**
+   * Dynamic-form pin (frozen §A5): all four present (pinned to the PRIMARY
+   * type's version) or all four absent (legacy revision, read through the
+   * legacy adapter). Never rewritten outside draft.
+   */
+  @Prop({ type: Types.ObjectId, ref: 'PropertyFormDefinition', immutable: immutableOutsideDraft }) formDefinitionId?: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'PropertyFormDefinitionVersion', immutable: immutableOutsideDraft }) formDefinitionVersionId?: Types.ObjectId;
+  @Prop({ min: 1, immutable: immutableOutsideDraft }) formDefinitionVersion?: number;
+  @Prop({ match: /^[a-f0-9]{64}$/, immutable: immutableOutsideDraft }) formContentHash?: string;
+  /** Flat map of the pinned version's applicable fields; present exactly when pinned. */
+  @Prop({ type: MongooseSchema.Types.Mixed, immutable: immutableOutsideDraft }) attributes?: Record<string, unknown>;
   @Prop({ required: true, immutable: immutableOutsideDraft, validate: { validator: (value: unknown) => isMoneyMinorAmount(value, { positive: true }) } }) totalPriceMinor: number;
   @Prop({ type: String, required: true, enum: [EGP_CURRENCY], default: EGP_CURRENCY, immutable: immutableOutsideDraft }) currency: typeof EGP_CURRENCY;
   @Prop({ immutable: immutableOutsideDraft, validate: { validator: (value: unknown) => value === undefined || isMoneyMinorAmount(value) } }) legacyDownPaymentMinor?: number;
@@ -99,3 +112,21 @@ PropertyRevisionSchema.index(
   { propertyId: 1, moderationStatus: 1 },
   { unique: true, partialFilterExpression: { moderationStatus: 'draft' }, name: 'property_one_draft_revision' },
 );
+
+export const REVISION_FORM_PIN_FIELDS = ['formDefinitionId', 'formDefinitionVersionId', 'formDefinitionVersion', 'formContentHash'] as const;
+
+/** Frozen §A5: the pin is all-or-nothing, and `attributes` exists exactly when pinned. */
+export function revisionFormPinError(revision: Record<string, unknown>): string | null {
+  const present = REVISION_FORM_PIN_FIELDS.filter((field) => revision[field] !== undefined && revision[field] !== null);
+  if (present.length !== 0 && present.length !== REVISION_FORM_PIN_FIELDS.length) return 'form pin fields must be all present or all absent';
+  const attributes = revision.attributes;
+  const hasAttributes = attributes !== undefined && attributes !== null;
+  if (hasAttributes !== (present.length === REVISION_FORM_PIN_FIELDS.length)) return 'attributes must be present exactly when the revision is pinned';
+  if (hasAttributes && (typeof attributes !== 'object' || Array.isArray(attributes))) return 'attributes must be a flat object';
+  return null;
+}
+
+PropertyRevisionSchema.pre('validate', function () {
+  const error = revisionFormPinError(this.toObject({ depopulate: true }) as Record<string, unknown>);
+  if (error) throw new Error(`PROPERTY_REVISION_FORM_PIN_INVALID: ${error}`);
+});

@@ -23,6 +23,9 @@ import { User, UserDocument } from '../users/schemas/user.schema';
 import { AccountType } from '../users/identity.types';
 import { PropertyLifecycleStatus, PropertyMarketingMode, PropertyMediaOrigin, PropertyMediaTagCode, PropertyRevisionModerationStatus } from './property.types';
 import { PropertyErrorCode } from '../common/errors/property-error-codes';
+import { requiredSlots, slotTag } from './media-profiles';
+import { buildSpecifications, catalogReferences, deprecatedFlatFields, effectiveSpec, isPinnedRecord, type Specifications } from './property-specifications';
+import { PropertyFormDefinitionVersion, type PropertyFormDefinitionVersionDocument } from '../property-form-definitions/schemas/property-form-definition-version.schema';
 import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
 import { PropertyAuctionLockService } from './property-auction-lock.service';
 import { IdempotencyService, canonicalize, sha256 } from '../common/idempotency/idempotency.service';
@@ -54,10 +57,14 @@ export const PUBLIC_REVISION_PROJECTION_FIELDS = [
   'governorateCode', 'city', 'district', 'area', 'bedrooms', 'bathrooms', 'floor',
   'totalPriceMinor', 'currency', 'paymentMethodCodes', 'marketingMode',
   'galleryMedia', 'entranceImageAsset', 'coverImageIndex', 'moderationStatus',
+  // DPF-016: pinned revisions derive the deprecated flat spec fields from their attributes.
+  'formDefinitionVersionId', 'attributes',
 ] as const;
 const PUBLIC_REVISION_SELECT = PUBLIC_REVISION_PROJECTION_FIELDS.join(' ');
 // Anchored reads load revisions directly and must also verify revision ownership.
 const ANCHORED_PUBLIC_REVISION_SELECT = `${PUBLIC_REVISION_SELECT} propertyId`;
+/** Single-auction reads also render `specifications` from the anchored revision (DPF-016). */
+const ANCHORED_SPECIFICATION_REVISION_SELECT = `${ANCHORED_PUBLIC_REVISION_SELECT} livingRooms kitchens totalFloors buildingYear finishingStatusCode deliveryStatusCode formDefinitionId formDefinitionVersion formContentHash`;
 
 type PropertyCreateFiles = {
   images?: Express.Multer.File[];
@@ -88,6 +95,7 @@ export class PropertiesService {
     private readonly auctionLock: PropertyAuctionLockService,
     private readonly outbox: OutboxService,
     @Optional() private readonly idempotency?: IdempotencyService,
+    @Optional() @InjectModel(PropertyFormDefinitionVersion.name) private readonly formVersions?: Model<PropertyFormDefinitionVersionDocument>,
   ) {}
 
   /** Digest of everything that defines a create/revision request, including file bytes. */
@@ -517,15 +525,9 @@ export class PropertiesService {
     return 'owner';
   }
 
+  /** Legacy guided photography: the `residential_rooms` profile over the legacy room counts (DPF-012). */
   private requiredPhotoSlots(dto: Pick<CreatePropertyDto, 'livingRooms' | 'bedrooms' | 'kitchens' | 'bathrooms'>): string[] {
-    return [
-      'exterior',
-      'entrance',
-      ...Array.from({ length: dto.livingRooms }, (_, index) => `living_${index + 1}`),
-      ...Array.from({ length: dto.bedrooms }, (_, index) => `bedroom_${index + 1}`),
-      ...Array.from({ length: dto.kitchens }, (_, index) => `kitchen_${index + 1}`),
-      ...Array.from({ length: dto.bathrooms }, (_, index) => `bathroom_${index + 1}`),
-    ];
+    return requiredSlots('residential_rooms', dto);
   }
 
   async listMine(ownerId: string, options: { page?: number; limit?: number } = {}) {
@@ -541,7 +543,7 @@ export class PropertiesService {
     const latest = new Map<string, any>();
     for (const revision of revisions) if (!latest.has(revision.propertyId.toString())) latest.set(revision.propertyId.toString(), revision);
     return {
-      items: items.map(i => this.toOwner({ ...i, draftRevision: latest.get(i._id.toString()) })),
+      items: await this.withOwnerSpecifications(items.map(i => ({ ...i, draftRevision: latest.get(i._id.toString()) }))),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -552,7 +554,8 @@ export class PropertiesService {
     if (!item) throw new NotFoundException('العقار غير موجود');
     const revisions = await this.revisions.find({ propertyId: item._id }).sort({ revisionNumber: -1 }).lean().exec();
     const draftRevision = revisions.find(revision => [PropertyRevisionModerationStatus.DRAFT, PropertyRevisionModerationStatus.REJECTED].includes(revision.moderationStatus));
-    return { property: { ...this.toOwner({ ...item, draftRevision }), revisions: revisions.map(revision => this.revisionSummary(revision)) } };
+    const [owned] = await this.withOwnerSpecifications([{ ...item, draftRevision }]);
+    return { property: { ...owned, revisions: revisions.map(revision => this.revisionSummary(revision)) } };
   }
   async listPublished(query: ListPublishedPropertiesDto = {}) {
     const { filter: dimensionFilter, sort, page, limit } = await this.buildPublicListingQuery(query);
@@ -670,8 +673,10 @@ export class PropertiesService {
       this.options.find({ group: 'payment_method', code: { $in: revision.paymentMethodCodes ?? [] } }).lean().exec(),
     ]);
     const typesById = new Map<string, any>(types.map((value: any): [string, any] => [value._id.toString(), value]));
+    const [specifications] = await this.specificationsFor([revision]);
     return { property: {
       ...this.toMarketplacePublic(item),
+      specifications,
       purposeCategoryNameAr: purpose?.nameAr,
       propertyTypeNameAr: (revision.purposeSubcategoryId ? typesById.get(revision.purposeSubcategoryId.toString())?.nameAr : undefined) ?? revision.legacyPropertyTypeCode,
       governorateNameAr: governorate?.nameAr ?? revision.governorateCode,
@@ -772,12 +777,12 @@ export class PropertiesService {
    * the public-visibility gate, and pairs whose revision does not belong to
    * the property, are simply absent from the result.
    */
-  async getAnchoredPublicProjections(pairs: Array<{ propertyId: string; revisionId: string }>): Promise<Map<string, any>> {
+  async getAnchoredPublicProjections(pairs: Array<{ propertyId: string; revisionId: string }>, options: { specifications?: boolean } = {}): Promise<Map<string, any>> {
     const valid = pairs.filter((pair) => Types.ObjectId.isValid(pair.propertyId) && Types.ObjectId.isValid(pair.revisionId));
     if (!valid.length) return new Map();
     const [properties, revisions] = await Promise.all([
       this.properties.find({ _id: { $in: [...new Set(valid.map((pair) => pair.propertyId))] }, ...this.publicVisibilityFilter() }).lean().exec(),
-      this.revisions.find({ _id: { $in: [...new Set(valid.map((pair) => pair.revisionId))] } }, ANCHORED_PUBLIC_REVISION_SELECT).lean().exec(),
+      this.revisions.find({ _id: { $in: [...new Set(valid.map((pair) => pair.revisionId))] } }, options.specifications ? ANCHORED_SPECIFICATION_REVISION_SELECT : ANCHORED_PUBLIC_REVISION_SELECT).lean().exec(),
     ]);
     const propertyById = new Map(properties.map((item) => [item._id.toString(), item]));
     const revisionById = new Map(revisions.map((revision) => [revision._id.toString(), revision]));
@@ -794,7 +799,9 @@ export class PropertiesService {
     }
     // hydratePublicListings preserves input order, so results pair up with `keys`.
     const hydrated = await this.hydratePublicListings(anchored);
-    return new Map(hydrated.map((item, index) => [keys[index], item]));
+    // Single-auction reads show the anchored revision's specifications, never the current property's.
+    const specifications = options.specifications ? await this.specificationsFor(anchored.map((item) => item.currentPublicRevisionId)) : undefined;
+    return new Map(hydrated.map((item, index) => [keys[index], specifications ? { ...item, specifications: specifications[index] } : item]));
   }
 
   async updateOwnerVisibility(ownerId: string, id: string, isVisible: boolean) {
@@ -1064,13 +1071,7 @@ export class PropertiesService {
   }
 
   private mediaTagFromGuidedSlot(slotId?: string): PropertyMediaTagCode {
-    if (slotId === 'exterior') return PropertyMediaTagCode.EXTERIOR;
-    if (slotId === 'entrance') return PropertyMediaTagCode.ENTRANCE;
-    if (slotId?.startsWith('living_')) return PropertyMediaTagCode.LIVING_ROOM;
-    if (slotId?.startsWith('bedroom_')) return PropertyMediaTagCode.BEDROOM;
-    if (slotId?.startsWith('kitchen_')) return PropertyMediaTagCode.KITCHEN;
-    if (slotId?.startsWith('bathroom_')) return PropertyMediaTagCode.BATHROOM;
-    return PropertyMediaTagCode.OTHER;
+    return slotTag('residential_rooms', slotId);
   }
 
   private async persistPlatformMediaMutation(id: string, revisionId: string, version: number, galleryMedia: PropertyAsset[], actor: string, ip: string | undefined, reason: string, metadata: Record<string, unknown>) {
@@ -1135,11 +1136,14 @@ export class PropertiesService {
     const purposeNames = new Map(purposes.map(value => [value._id.toString(), value.nameAr]));
     const typesById = new Map(types.map(value => [value._id.toString(), value]));
     const paymentNames = new Map(payments.map(value => [value.code, value.nameAr]));
+    const revisionSpecifications = await this.specificationsFor(revisions);
+    const specificationsById = new Map(revisions.map((revision, index) => [revision._id.toString(), revisionSpecifications[index]]));
     const present = (revision: any) => {
       const result = this.revisionAdmin(revision);
       if (!result) return undefined;
       return {
         ...result,
+        specifications: specificationsById.get(revision._id.toString()),
         purposeCategoryNameAr: revision.purposeCategoryId ? purposeNames.get(revision.purposeCategoryId.toString()) : undefined,
         propertyTypeNameAr: revision.purposeSubcategoryId ? typesById.get(revision.purposeSubcategoryId.toString())?.nameAr : revision.legacyPropertyTypeCode,
         propertyTypes: this.propertyTypesView(revision, typesById),
@@ -1323,6 +1327,27 @@ export class PropertiesService {
     return value && typeof value === 'object' && (value.title || value.revisionNumber) ? value : undefined;
   }
 
+  /**
+   * DPF-016 `specifications` for each record (a revision, or an aggregate that
+   * has none). Pinned versions are batch-loaded by id; catalog labels are
+   * looked up live (PD-6). Legacy records never touch the version collection.
+   */
+  private async specificationsFor(records: any[]): Promise<Array<Specifications | undefined>> {
+    const pinnedIds = [...new Set(records.filter(isPinnedRecord).map((record) => String(record.formDefinitionVersionId)))];
+    const versions = pinnedIds.length && this.formVersions
+      ? await this.formVersions.find({ _id: { $in: pinnedIds } }, { fields: 1, mediaProfile: 1 }).lean().exec()
+      : [];
+    const versionById = new Map<string, any>(versions.map((version: any) => [String(version._id), version]));
+    const pinnedVersionOf = (record: any) => (isPinnedRecord(record) ? versionById.get(String(record.formDefinitionVersionId)) : undefined);
+    const specs = records.map((record) => (record ? effectiveSpec(record, pinnedVersionOf(record)) : undefined));
+    const references = records.flatMap((record, index) => (specs[index] ? catalogReferences(specs[index]!, pinnedVersionOf(record)) : []));
+    const options = references.length
+      ? await this.options.find({ group: { $in: [...new Set(references.map((reference) => reference.catalogGroup))] }, code: { $in: [...new Set(references.map((reference) => reference.code))] } }).lean().exec()
+      : [];
+    const labels = new Map(options.map((option) => [`${option.group}:${option.code}`, option.nameAr]));
+    return records.map((record, index) => (specs[index] ? buildSpecifications(specs[index]!, pinnedVersionOf(record), (group, code) => labels.get(`${group}:${code}`)) : undefined));
+  }
+
   /** Every selected type for presentation: the primary first, then catalog order. */
   private propertyTypesView(revision: any, typesById: Map<string, any>) {
     if (!revision) return [];
@@ -1359,6 +1384,8 @@ export class PropertiesService {
     const requiredPhotoSlots = guided ? this.requiredPhotoSlots(revision) : [];
     const suppliedPhotoSlots = new Set((revision.galleryMedia ?? []).map((asset: PropertyAsset) => asset.slotId));
     const photoCount = (revision.galleryMedia ?? []).length;
+    const flat = deprecatedFlatFields(revision);
+    const spec = effectiveSpec(revision);
     return {
       ...this.revisionSummary(revision),
       title: revision.title,
@@ -1371,10 +1398,13 @@ export class PropertiesService {
       city: revision.city,
       district: revision.district,
       area: revision.area,
-      bedrooms: revision.bedrooms,
-      livingRooms: revision.livingRooms,
-      kitchens: revision.kitchens,
-      bathrooms: revision.bathrooms,
+      bedrooms: flat.bedrooms,
+      livingRooms: flat.livingRooms,
+      kitchens: flat.kitchens,
+      bathrooms: flat.bathrooms,
+      attributes: spec.attributes,
+      formDefinitionVersionId: spec.formDefinitionVersionId,
+      formDefinitionVersion: spec.formDefinitionVersion,
       totalPriceMinor: revision.totalPriceMinor,
       currency: revision.currency,
       paymentMethodCodes: revision.paymentMethodCodes,
@@ -1409,22 +1439,36 @@ export class PropertiesService {
     return safe;
   }
 
+  /** Owner projections plus `specifications` of the revision the owner sees (pending, draft, else public). */
+  private async withOwnerSpecifications(items: any[]) {
+    const specifications = await this.specificationsFor(items.map((item) => this.effectiveRevision(item, true) ?? item));
+    return items.map((item, index) => ({ ...this.toOwner(item), specifications: specifications[index] }));
+  }
+
   private toOwner(item: any) {
     const result = this.projectProperty(item, true);
     const revision = this.effectiveRevision(item, true);
+    const spec = effectiveSpec(revision ?? item);
+    // Legacy: today's revision-then-aggregate fallback. Pinned: the pinned attributes only.
+    const flat = isPinnedRecord(revision) ? deprecatedFlatFields(revision) : undefined;
+    const legacy = (field: string) => (flat ? flat[field] : revision?.[field] ?? item[field]);
     return {
       ...result,
       street: revision?.street ?? item.street,
       additionalAddressDetails: revision?.additionalAddressDetails ?? item.additionalAddressDetails,
       latitude: revision?.latitude ?? item.latitude,
       longitude: revision?.longitude ?? item.longitude,
-      livingRooms: revision?.livingRooms ?? item.livingRooms,
-      kitchens: revision?.kitchens ?? item.kitchens,
-      totalFloors: revision?.totalFloors ?? item.totalFloors,
-      buildingYear: revision?.buildingYear ?? item.buildingYear,
-      finishingStatusCode: revision?.finishingStatusCode ?? item.finishingStatusCode,
-      deliveryStatusCode: revision?.deliveryStatusCode ?? item.deliveryStatusCode,
+      livingRooms: legacy('livingRooms'),
+      kitchens: legacy('kitchens'),
+      totalFloors: legacy('totalFloors'),
+      buildingYear: legacy('buildingYear'),
+      finishingStatusCode: legacy('finishingStatusCode'),
+      deliveryStatusCode: legacy('deliveryStatusCode'),
       amenityCodes: revision?.amenityCodes ?? item.amenityCodes,
+      // DPF-016: effective values and the pin (null for legacy).
+      attributes: spec.attributes,
+      formDefinitionVersionId: spec.formDefinitionVersionId,
+      formDefinitionVersion: spec.formDefinitionVersion,
       isPriceNegotiable: revision?.isPriceNegotiable ?? item.isPriceNegotiable,
       hidePhone: revision?.hidePhone ?? item.hidePhone,
       privateEvidence: this.privateEvidenceDescriptors(revision, item),
@@ -1435,6 +1479,7 @@ export class PropertiesService {
   private projectProperty(item: any, includePending: boolean) {
     const revision = this.effectiveRevision(item, includePending);
     const source = revision ?? item;
+    const flat = deprecatedFlatFields(source);
     const money = revision
       ? { totalPriceMinor: revision.totalPriceMinor, currency: revision.currency }
       : item.propertyContractVersion >= 1 && isMoneyMinorAmount(item.totalPriceMinor, { positive: true }) && item.currency === EGP_CURRENCY
@@ -1458,9 +1503,9 @@ export class PropertiesService {
       city: source.city,
       district: source.district,
       area: source.area,
-      bedrooms: source.bedrooms,
-      bathrooms: source.bathrooms,
-      floor: source.floor,
+      bedrooms: flat.bedrooms,
+      bathrooms: flat.bathrooms,
+      floor: flat.floor,
       ...money,
       paymentMethodCodes: revision?.paymentMethodCodes,
       marketingMode: revision?.marketingMode,
@@ -1488,7 +1533,8 @@ export class PropertiesService {
     const source = pending ?? revision ?? item;
     const pendingProjection = pending ? this.revisionAdmin(pending) : undefined;
     const base = { ...this.toOwner(item), ...(pendingProjection ? { ...pendingProjection, revisionId: pendingProjection.id } : {}), id: item._id.toString(), owner, status: pending ? PropertyRevisionModerationStatus.PENDING_REVIEW : (revision?.moderationStatus ?? item.status), reviewReason: pending?.reviewReason ?? item.reviewReason, reviewedAt: pending?.reviewedAt ?? item.reviewedAt };
-    return detailed ? { ...base, street: source.street, additionalAddressDetails: source.additionalAddressDetails, latitude: source.latitude, longitude: source.longitude, bedrooms: source.bedrooms, livingRooms: source.livingRooms, kitchens: source.kitchens, bathrooms: source.bathrooms, floor: source.floor, totalFloors: source.totalFloors, buildingYear: source.buildingYear, finishingStatusCode: source.finishingStatusCode, deliveryStatusCode: source.deliveryStatusCode, amenityCodes: source.amenityCodes, isPriceNegotiable: source.isPriceNegotiable, paymentMethodCodes: revision?.paymentMethodCodes, paymentMethodCode: item.paymentMethodCode, advertiserType: item.advertiserType, hidePhone: source.hidePhone } : base;
+    const flat = deprecatedFlatFields(source);
+    return detailed ? { ...base, street: source.street, additionalAddressDetails: source.additionalAddressDetails, latitude: source.latitude, longitude: source.longitude, bedrooms: flat.bedrooms, livingRooms: flat.livingRooms, kitchens: flat.kitchens, bathrooms: flat.bathrooms, floor: flat.floor, totalFloors: flat.totalFloors, buildingYear: flat.buildingYear, finishingStatusCode: flat.finishingStatusCode, deliveryStatusCode: flat.deliveryStatusCode, amenityCodes: source.amenityCodes, isPriceNegotiable: source.isPriceNegotiable, paymentMethodCodes: revision?.paymentMethodCodes, paymentMethodCode: item.paymentMethodCode, advertiserType: item.advertiserType, hidePhone: source.hidePhone } : base;
   }
 
   private privateEvidenceDescriptors(revision: any, item: any) {

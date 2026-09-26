@@ -15,6 +15,18 @@ import {
   type ExistingIndex,
 } from '../022-property-type-selection';
 import { PROPERTY_TYPE_LISTING_INDEXES, RETIRED_PURPOSE_LISTING_INDEX } from '../../properties/property-listing-indexes';
+import {
+  areaOutcome,
+  buildLegacyPropertyDataReport,
+  ensureFormDefinitionIndexes,
+  pairWithPublicRevisions,
+  scanAreaBackfill,
+  scanLegacyDefinitions,
+  scanRegistrySeed,
+  seedLegacyDefinition,
+  seedRegistry,
+} from '../025-property-form-foundation';
+import { LEGACY_RESIDENTIAL_CONTENT_HASH } from '../../property-form-definitions/property-form-definition.constants';
 
 function afterCheckpoint(checkpoint?: string): Record<string, unknown> {
   if (!checkpoint) return {};
@@ -710,6 +722,151 @@ export const retirePurposeListingIndexMigration: MigrationDefinition = {
   },
 };
 
+/** M-A (DPF-013): the engineering-owned registry entries the legacy form needs. Insert-only. */
+export const propertyAttributeRegistryMigration: MigrationDefinition = {
+  id: '025-property-attribute-registry',
+  version: 1,
+  description: 'DPF-013 M-A: seed the legacy residential Attribute Registry entries (insert-only; existing keys are never modified)',
+  rollback: {
+    kind: 'none',
+    remediation: 'Registry keys are immutable identity and may already be referenced by form versions; never delete them. Inspect migration_ledger and the registry before any reviewed repair.',
+    restoreProcedure: 'Restore the verified pre-migration snapshot to a separate database and compare property_attributes before any production remediation.',
+  },
+  async preflight({ db }) {
+    const { missing, matching, conflicting, inactive } = await scanRegistrySeed(db);
+    return {
+      eligible: missing.length,
+      alreadyApplied: matching.length,
+      blockers: conflicting.length ? [{ code: 'PROPERTY_ATTRIBUTE_SEED_CONFLICT', message: `Registry keys exist with a different identity: ${conflicting.join(', ')}` }] : [],
+      summary: { missing, conflicting, inactive },
+    };
+  },
+  async migrateBatch({ db }) {
+    const inserted = await seedRegistry(db, new Date());
+    return { scanned: 1, modified: inserted, done: true };
+  },
+  async validate({ db }) {
+    const { missing, conflicting } = await scanRegistrySeed(db);
+    const problems = [...missing, ...conflicting];
+    return {
+      valid: problems.length === 0,
+      errors: problems.map((key) => ({ code: 'PROPERTY_ATTRIBUTE_SEED_MISSING', message: `Registry key ${key} is missing or has a different identity` })),
+    };
+  },
+};
+
+/** M-B (DPF-013): a head plus published legacy v1 for every existing property type. */
+export const legacyPropertyFormDefinitionsMigration: MigrationDefinition = {
+  id: '026-legacy-property-form-definitions',
+  version: 1,
+  description: 'DPF-013 M-B: create a FormDefinition head and an immutable published legacy residential v1 for every existing property type',
+  dependencies: ['025-property-attribute-registry'],
+  rollback: {
+    kind: 'none',
+    remediation: 'Published versions are immutable and may already be pinned by revisions; never delete them. Archive a definition through the Admin lifecycle instead.',
+    restoreProcedure: 'Restore the verified pre-migration snapshot to a separate database and compare property_form_definitions/_versions before any production remediation.',
+  },
+  async preflight({ db }) {
+    const registry = await scanRegistrySeed(db);
+    const scanResult = await scanLegacyDefinitions(db);
+    const registryProblems = [...registry.missing, ...registry.conflicting, ...registry.inactive];
+    return {
+      eligible: scanResult.withoutHead + scanResult.seededHeadsMissingVersion,
+      alreadyApplied: scanResult.withHead - scanResult.seededHeadsMissingVersion,
+      blockers: [
+        ...(registryProblems.length ? [{ code: 'PROPERTY_ATTRIBUTE_REGISTRY_INCOMPLETE', message: `Legacy registry keys are missing, conflicting or inactive: ${registryProblems.join(', ')}` }] : []),
+        ...(scanResult.invalidSeededVersions.length ? [{ code: 'LEGACY_FORM_VERSION_MISMATCH', message: 'Seeded legacy versions do not match the legacy content hash', sampleIds: scanResult.invalidSeededVersions.slice(0, 20) }] : []),
+      ],
+      summary: { propertyTypes: scanResult.types, legacyContentHash: LEGACY_RESIDENTIAL_CONTENT_HASH },
+    };
+  },
+  async migrateBatch(context) {
+    if (!context.checkpoint) await ensureFormDefinitionIndexes(context.db);
+    const types = await context.db.collection('property_types').find(afterCheckpoint(context.checkpoint), { projection: { _id: 1 } }).sort({ _id: 1 }).limit(context.batchSize).toArray();
+    if (!types.length) return { scanned: 0, modified: 0, done: true };
+    const now = new Date();
+    let modified = 0;
+    for (const type of types) {
+      const outcome = await seedLegacyDefinition(context.db, type._id as ObjectId, now);
+      modified += Number(outcome.headInserted) + Number(outcome.versionInserted);
+    }
+    return { scanned: types.length, modified, checkpoint: String(types[types.length - 1]._id), done: types.length < context.batchSize };
+  },
+  async validate({ db }) {
+    const scanResult = await scanLegacyDefinitions(db);
+    const valid = scanResult.withoutHead === 0 && scanResult.seededHeadsMissingVersion === 0 && scanResult.invalidSeededVersions.length === 0;
+    return {
+      valid,
+      errors: valid ? [] : [{ code: 'LEGACY_FORM_DEFINITIONS_INCOMPLETE', message: `${scanResult.withoutHead} types without a head, ${scanResult.seededHeadsMissingVersion} seeded heads without their version, ${scanResult.invalidSeededVersions.length} mismatched versions` }],
+      summary: scanResult,
+    };
+  },
+};
+
+/**
+ * M-C (DPF-014): report only. Run it as a dry-run
+ * (`--dry-run --migration=027-legacy-property-data-report`) whenever the
+ * report is needed; it writes nothing and never runs in a full apply.
+ */
+export const legacyPropertyDataReportMigration: MigrationDefinition = {
+  id: '027-legacy-property-data-report',
+  version: 1,
+  description: 'DPF-014 M-C: legacy property data report for product decision PD-2 (read-only; the report is the preflight summary)',
+  manualOnly: true,
+  rollback: { kind: 'automatic', instructions: 'Nothing to roll back: the report writes no data.' },
+  async preflight({ db }) {
+    return { eligible: 0, alreadyApplied: 0, blockers: [], summary: await buildLegacyPropertyDataReport(db) };
+  },
+  async migrateBatch() {
+    return { scanned: 0, modified: 0, done: true };
+  },
+  async validate() {
+    return { valid: true, errors: [] };
+  },
+};
+
+/** M-D (DPF-014): Property.area from the current public revision, only where they differ. */
+export const propertyAreaBackfillMigration: MigrationDefinition = {
+  id: '028-property-area-backfill',
+  version: 1,
+  description: 'DPF-014 M-D: set Property.area to its current public revision area where they differ; revisions are never written',
+  dependencies: ['015-property-attribution-revisions'],
+  rollback: {
+    kind: 'none',
+    remediation: 'The backfill only copies the approved revision area onto the aggregate (the same sync approval performs). Inspect migration_ledger before any reviewed repair.',
+    restoreProcedure: 'Restore the verified pre-migration snapshot to a separate database and compare properties.area before any production remediation.',
+  },
+  async preflight({ db }) {
+    const result = await scanAreaBackfill(db);
+    return { eligible: result.differing, alreadyApplied: result.matching, blockers: [], summary: result };
+  },
+  async migrateBatch(context) {
+    const properties = context.db.collection('properties');
+    const batch = await properties.find({ currentPublicRevisionId: { $exists: true }, ...afterCheckpoint(context.checkpoint) }, { projection: { area: 1, currentPublicRevisionId: 1 } })
+      .sort({ _id: 1 }).limit(context.batchSize).toArray();
+    if (!batch.length) return { scanned: 0, modified: 0, done: true };
+    let modified = 0;
+    for (const { property, revision } of await pairWithPublicRevisions(context.db, batch)) {
+      if (areaOutcome(property, revision) !== 'differing') continue;
+      // Guarded: skip a row whose public revision or area changed since it was read.
+      const result = await properties.updateOne(
+        { _id: property._id, currentPublicRevisionId: property.currentPublicRevisionId, area: property.area ?? null },
+        { $set: { area: revision!.area } },
+      );
+      modified += result.modifiedCount;
+    }
+    return { scanned: batch.length, modified, checkpoint: String(batch[batch.length - 1]._id), done: batch.length < context.batchSize };
+  },
+  async validate({ db }) {
+    const result = await scanAreaBackfill(db);
+    return {
+      valid: result.differing === 0,
+      errors: result.differing ? [{ code: 'PROPERTY_AREA_BACKFILL_INCOMPLETE', message: `${result.differing} properties still differ from their public revision area` }] : [],
+      summary: result,
+    };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
@@ -723,6 +880,10 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyTypeSelectionBackfillMigration,
   propertyTypeListingIndexesMigration,
   retirePurposeListingIndexMigration,
+  propertyAttributeRegistryMigration,
+  legacyPropertyFormDefinitionsMigration,
+  legacyPropertyDataReportMigration,
+  propertyAreaBackfillMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {

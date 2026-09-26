@@ -14,6 +14,7 @@ describe('Property form options catalog', () => {
       { listPublic: jest.fn().mockResolvedValue({ items: [{ code: 'cairo' }] }), listPublicCities: jest.fn().mockResolvedValue({ items: [{ code: 'new_cairo', governorateCode: 'cairo' }] }) } as any,
       { listPublic: jest.fn().mockResolvedValue({ items: [{ id: 'purpose-1', code: 'residential' }] }) } as any,
       { listPublicMapped: jest.fn().mockResolvedValue({ items: [{ id: 'type-1', code: 'apartment', purposeCategoryId: 'purpose-1' }] }) } as any,
+      { creationPointers: jest.fn().mockResolvedValue(new Map([['type-1', { purposeSubcategoryId: 'type-1', legacyWritable: true }]])) } as any,
     );
     await expect(controller.list()).resolves.toEqual({
       finishingStatuses: [items[0]], deliveryStatuses: [items[1]],
@@ -21,6 +22,7 @@ describe('Property form options catalog', () => {
       cities: [{ code: 'new_cairo', governorateCode: 'cairo' }],
       purposeCategories: [{ id: 'purpose-1', code: 'residential' }],
       purposeSubcategories: [{ id: 'type-1', code: 'apartment', purposeCategoryId: 'purpose-1' }],
+      limits: { maxPropertyTypes: 4 },
     });
   });
 

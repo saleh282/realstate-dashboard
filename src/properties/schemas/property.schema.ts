@@ -28,6 +28,14 @@ export class PropertyAsset {
 
 const PropertyAssetSchema = SchemaFactory.createForClass(PropertyAsset);
 
+/** Typed facet values; V1 promotes only `bedrooms` (integer 0-100). No dynamic keys. */
+@Schema({ _id: false, strict: 'throw' })
+export class PropertyFacets {
+  @Prop({ min: 0, max: 100, validate: { validator: (value: unknown) => value === undefined || Number.isInteger(value), message: 'facets.bedrooms must be an integer' } })
+  bedrooms?: number;
+}
+export const PropertyFacetsSchema = SchemaFactory.createForClass(PropertyFacets);
+
 @Schema({ timestamps: true, collection: 'properties' })
 export class Property {
   /** @deprecated Compatibility alias for advertiserAccountId during migration. */
@@ -68,16 +76,24 @@ export class Property {
   @Prop({ required: true, min: -90, max: 90 }) latitude: number;
   @Prop({ required: true, min: -180, max: 180 }) longitude: number;
   @Prop({ required: true, min: 1 }) area: number;
-  @Prop({ required: true, min: 0, max: 100 }) bedrooms: number;
-  @Prop({ required: true, min: 0, max: 100 }) livingRooms: number;
-  @Prop({ required: true, min: 0, max: 100 }) kitchens: number;
-  @Prop({ required: true, min: 0, max: 100 }) bathrooms: number;
-  @Prop({ required: true, min: -10, max: 300 }) floor: number;
-  @Prop({ required: true, min: 1, max: 300 }) totalFloors: number;
-  @Prop({ required: true, min: 1800, max: 2200 }) buildingYear: number;
-  @Prop({ required: true, trim: true, maxlength: 50 }) finishingStatusCode: string;
-  @Prop({ required: true, trim: true, maxlength: 50 }) deliveryStatusCode: string;
+  // Legacy spec fields (frozen §A5/§A6): no longer required on the aggregate;
+  // properties created through a FormDefinition do not store them.
+  @Prop({ min: 0, max: 100 }) bedrooms?: number;
+  @Prop({ min: 0, max: 100 }) livingRooms?: number;
+  @Prop({ min: 0, max: 100 }) kitchens?: number;
+  @Prop({ min: 0, max: 100 }) bathrooms?: number;
+  @Prop({ min: -10, max: 300 }) floor?: number;
+  @Prop({ min: 1, max: 300 }) totalFloors?: number;
+  @Prop({ min: 1800, max: 2200 }) buildingYear?: number;
+  @Prop({ trim: true, maxlength: 50 }) finishingStatusCode?: string;
+  @Prop({ trim: true, maxlength: 50 }) deliveryStatusCode?: string;
   @Prop({ type: [String], default: [] }) amenityCodes: string[];
+  /**
+   * Promoted search facets (frozen §A6), written only by approval sync and
+   * the facet backfill, never from client input; each write replaces the
+   * whole object.
+   */
+  @Prop({ type: PropertyFacetsSchema, default: undefined }) facets?: PropertyFacets;
   /** @deprecated Read-only migration source. New writes use totalPriceMinor. */
   @Prop() totalPrice?: number;
   /** @deprecated Read-only migration source. New writes use downPaymentMinor. */

@@ -10,6 +10,7 @@ import { PropertyType, PropertyTypeSchema } from './schemas/property-type.schema
 import { PropertyPurposeCategoriesModule } from '../property-purpose-categories/property-purpose-categories.module';
 import { Property, PropertySchema } from '../properties/schemas/property.schema';
 import { PropertyRevision, PropertyRevisionSchema } from '../properties/schemas/property-revision.schema';
+import { PropertyFormDefinitionsModule } from '../property-form-definitions/property-form-definitions.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { PropertyRevision, PropertyRevisionSchema } from '../properties/schemas/
       { name: PropertyRevision.name, schema: PropertyRevisionSchema },
     ]),
     PropertyPurposeCategoriesModule,
+    PropertyFormDefinitionsModule,
     AuditModule,
     PassportModule,
   ],
