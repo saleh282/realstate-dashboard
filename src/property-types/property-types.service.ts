@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
 import { CreatePropertyTypeDto } from './dto/create-property-type.dto';
@@ -8,6 +8,8 @@ import { UpdatePropertyTypeDto } from './dto/update-property-type.dto';
 import { PropertyType, PropertyTypeDocument } from './schemas/property-type.schema';
 import { PROPERTY_TYPE_ICON_OPTIONS } from './property-type-options';
 import { PropertyPurposeCategory, PropertyPurposeCategoryDocument } from '../property-purpose-categories/schemas/property-purpose-category.schema';
+import { Property, PropertyDocument } from '../properties/schemas/property.schema';
+import { PropertyRevision, PropertyRevisionDocument } from '../properties/schemas/property-revision.schema';
 
 @Injectable()
 export class PropertyTypesService {
@@ -15,6 +17,9 @@ export class PropertyTypesService {
     @InjectModel(PropertyType.name) private readonly model: Model<PropertyTypeDocument>,
     @InjectModel(PropertyPurposeCategory.name) private readonly purposes: Model<PropertyPurposeCategoryDocument>,
     private readonly audit: AuditLogService,
+    @InjectModel(Property.name) private readonly properties: Model<PropertyDocument>,
+    @InjectModel(PropertyRevision.name) private readonly revisions: Model<PropertyRevisionDocument>,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
 
   async listPublic() {
@@ -77,11 +82,9 @@ export class PropertyTypesService {
     const update = Object.fromEntries(
       Object.entries(values).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]),
     );
-    const item = await this.model.findOneAndUpdate(
-      { _id: id, $or: [{ version: expectedVersion }, ...(expectedVersion === 0 ? [{ version: { $exists: false } }] : [])] },
-      { $set: { ...update, updatedBy: new Types.ObjectId(actorUserId) }, $inc: { version: 1 } },
-      { new: true, runValidators: true },
-    ).lean().exec();
+    const item = await this.changesPurpose(id, dto.purposeCategoryId)
+      ? await this.reparentUnusedType(id, expectedVersion, update, actorUserId)
+      : await this.applyUpdate(id, expectedVersion, update, actorUserId);
     if (!item) {
       if (!(await this.model.exists({ _id: id }))) throw new NotFoundException('نوع العقار غير موجود');
       throw new ConflictException({ message: 'تم تعديل نوع العقار بواسطة طلب آخر', code: 'PROPERTY_TYPE_VERSION_CONFLICT' });
@@ -94,6 +97,60 @@ export class PropertyTypesService {
       ip,
     );
     return { message: 'تم تحديث نوع العقار بنجاح', ...this.toAdmin(item) };
+  }
+
+  private applyUpdate(id: string, expectedVersion: number, update: Record<string, unknown>, actorUserId: string, session?: ClientSession) {
+    return this.model.findOneAndUpdate(
+      { _id: id, $or: [{ version: expectedVersion }, ...(expectedVersion === 0 ? [{ version: { $exists: false } }] : [])] },
+      { $set: { ...update, updatedBy: new Types.ObjectId(actorUserId) }, $inc: { version: 1 } },
+      { new: true, runValidators: true, session },
+    ).lean().exec();
+  }
+
+  // A missing type is left to the regular update path so its NotFound handling stays unchanged.
+  private async changesPurpose(id: string, purposeCategoryId: string | null | undefined) {
+    if (purposeCategoryId === undefined) return false;
+    const current = await this.model.findById(id).select({ purposeCategoryId: 1 }).lean().exec();
+    return Boolean(current) && (current!.purposeCategoryId?.toString() ?? null) !== (purposeCategoryId ?? null);
+  }
+
+  // Every Property/PropertyRevision write that references a type also increments that type's
+  // usageCount inside its own transaction, so running the usage check and the reparent in one
+  // transaction turns a concurrent listing write into a write conflict instead of a stale check.
+  private async reparentUnusedType(id: string, expectedVersion: number, update: Record<string, unknown>, actorUserId: string) {
+    const session = await this.connection.startSession();
+    try {
+      let item: Awaited<ReturnType<PropertyTypesService['applyUpdate']>> = null;
+      await session.withTransaction(async () => {
+        await this.assertNotReferencedByListings(id, session);
+        item = await this.applyUpdate(id, expectedVersion, update, actorUserId, session);
+      });
+      return item;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  // usageCount is a conservative delete guard, not an exact usage metric, so reparenting is
+  // decided by existence. A type is used as the primary (purposeSubcategoryId) or as an
+  // additional selected type (purposeSubcategoryIds). strictQuery is pinned off so the array
+  // filter is never stripped to {} while the field is not yet declared on the schemas.
+  private async assertNotReferencedByListings(id: string, session: ClientSession) {
+    const typeId = new Types.ObjectId(id);
+    const checks = [
+      () => this.properties.exists({ purposeSubcategoryId: typeId }),
+      () => this.properties.exists({ purposeSubcategoryIds: typeId }),
+      () => this.revisions.exists({ purposeSubcategoryId: typeId }),
+      () => this.revisions.exists({ purposeSubcategoryIds: typeId }),
+    ];
+    for (const check of checks) {
+      if (await check().setOptions({ strictQuery: false }).session(session).exec()) {
+        throw new ConflictException({
+          message: 'لا يمكن نقل نوع عقار مستخدم في عقارات إلى غرض آخر؛ أنشئ نوعاً جديداً تحت الغرض المطلوب',
+          code: 'PROPERTY_TYPE_REPARENT_IN_USE',
+        });
+      }
+    }
   }
 
   async remove(id: string, actorUserId: string, ip?: string) {
