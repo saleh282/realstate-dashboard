@@ -10,6 +10,8 @@ import { PropertiesModule } from '../properties/properties.module';
 import { UsersModule } from '../users/users.module';
 import { AUCTION_BID_EXISTENCE_PORT, BidLedgerAuctionBidExistencePort } from './auction-bid-existence.port';
 import { PaymentsModule } from '../payments/payments.module';
+import { AuctionEntryEntitlementService } from '../payments/auction-entry-entitlement.service';
+import { AuctionEntryPaymentsController } from '../payments/auction-entry-payments.controller';
 import { PersistentBidEntitlementPort } from '../payments/persistent-bid-entitlement.port';
 import { AUCTION_BID_ENTITLEMENT_PORT } from './auction-bid-entitlement.port';
 import { AuctionBiddingReadService } from './auction-bidding-read.service';
@@ -63,7 +65,7 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
     OutboxModule,
     MongooseModule.forFeature([{ name: Auction.name, schema: AuctionSchema }]),
   ],
-  controllers: [AuctionsController, AuctionBidsController, AdminAuctionsController],
+  controllers: [AuctionsController, AuctionBidsController, AdminAuctionsController, AuctionEntryPaymentsController],
   providers: [
     AuctionsService,
     AuctionsQueryService,
@@ -71,6 +73,7 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
     AuctionLifecycleService,
     AuctionBidAcceptanceService,
     AuctionBiddingReadService,
+    AuctionEntryEntitlementService,
     AuctionLifecycleWorker,
     AuctionFinalizationService,
     AuctionFinalizationWorker,

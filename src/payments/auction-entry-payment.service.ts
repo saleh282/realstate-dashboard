@@ -33,7 +33,7 @@ export type InitiatedEntryPayment = {
 };
 
 /**
- * Payment INITIATION (MAZAD-028). Internal service; no HTTP route yet.
+ * Payment INITIATION (MAZAD-028), exposed over HTTP by MAZAD-034A's controller.
  * Initiating grants nothing — only server-verified confirmation does. The
  * amount is copied from the auction's configured fee, never from the caller.
  */
@@ -52,9 +52,6 @@ export class AuctionEntryPaymentService {
 
   /** `actorId` MUST be the authenticated principal's id; there is deliberately no amount parameter. */
   async initiate(actorId: string, auctionId: string, ip?: string): Promise<InitiatedEntryPayment> {
-    if (!this.provider.configured) {
-      throw new ServiceUnavailableException({ message: 'خدمة الدفع غير متاحة حالياً', code: PaymentErrorCode.PROVIDER_UNAVAILABLE });
-    }
     if (!Types.ObjectId.isValid(auctionId)) throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
     if (!Types.ObjectId.isValid(actorId)) throw new NotFoundException({ message: 'الحساب غير موجود', code: AuctionErrorCode.ACTOR_INVALID });
 
@@ -95,6 +92,10 @@ export class AuctionEntryPaymentService {
     if (auction.status !== AuctionStatus.SCHEDULED && auction.status !== AuctionStatus.ACTIVE) {
       throw new ConflictException({ message: 'لا يمكن دفع رسوم الاشتراك لهذا المزاد', code: PaymentErrorCode.AUCTION_NOT_PAYABLE });
     }
+    const openNow = this.clock.now();
+    if (auction.status === AuctionStatus.ACTIVE && auction.currentEndAt && openNow.getTime() >= new Date(auction.currentEndAt).getTime()) {
+      throw new ConflictException({ message: 'لا يمكن دفع رسوم الاشتراك لهذا المزاد', code: PaymentErrorCode.AUCTION_NOT_PAYABLE });
+    }
     const fee = auction.entryFee;
     if (!fee || !isMoneyMinorAmount(fee.amountMinor, { positive: true }) || fee.currency !== EGP_CURRENCY) {
       throw new ConflictException({ message: 'لم يتم تحديد رسوم الاشتراك لهذا المزاد', code: PaymentErrorCode.ENTRY_FEE_NOT_CONFIGURED });
@@ -105,7 +106,20 @@ export class AuctionEntryPaymentService {
     if (entitled || live?.status === EntryPaymentStatus.SUCCEEDED) {
       throw new ConflictException({ message: 'تم دفع رسوم الاشتراك لهذا المزاد مسبقاً', code: PaymentErrorCode.ALREADY_PAID });
     }
-    if (live) return { payment: live as any, reused: true };
+    // MAZAD-034A: a payment the server flagged (verification mismatch, success after failure) must be reconciled by an
+    // operator first; opening another attempt could charge the bidder twice.
+    const flagged = await this.payments.exists({ auctionId: auction._id, bidderAccountId: new Types.ObjectId(actorId), reconciliationFlag: { $exists: true } }).session(session).exec();
+    if (flagged) {
+      throw new ConflictException({ message: 'الدفعة قيد المراجعة اليدوية', code: PaymentErrorCode.RECONCILIATION_REQUIRED });
+    }
+    if (live) {
+      // An attempt that already has its gateway reference is returned as it is (no provider call is needed).
+      if (!live.providerReference) this.assertProviderAvailable();
+      return { payment: live as any, reused: true };
+    }
+    // Every eligibility/state check above passed: only now does a NEW provider operation matter. Fail closed
+    // BEFORE writing anything, so an unavailable gateway never leaves an attempt row behind.
+    this.assertProviderAvailable();
 
     const now = this.clock.now();
     const [created] = await this.payments.create(
@@ -134,6 +148,12 @@ export class AuctionEntryPaymentService {
       session,
     );
     return { payment: created.toObject() as any, reused: false };
+  }
+
+  private assertProviderAvailable(): void {
+    if (!this.provider.configured) {
+      throw new ServiceUnavailableException({ message: 'خدمة الدفع غير متاحة حالياً', code: PaymentErrorCode.PROVIDER_UNAVAILABLE });
+    }
   }
 
   private async failUnreferenced(paymentId: Types.ObjectId) {

@@ -21,8 +21,8 @@ import { AuctionEntryPayment, AuctionEntryPaymentSchema } from './schemas/auctio
  * Provider-neutral payment foundation (MAZAD-028) with two ISOLATED purposes:
  * AUCTION_ENTRY (payments + bid entitlement) and MANAGED_MARKETING (payments +
  * request PAID). Separate collections and services; only infrastructure
- * (provider port, verification rules, transaction runner, audit) is shared. Internal services only: no controller, no webhook route, no
- * gateway. The provider port is bound to the fail-closed default until a real
+ * (provider port, verification rules, transaction runner, audit) is shared. The MAZAD-034A HTTP routes live in `AuctionsModule` (they need the public
+ * auction visibility gate, and this module must not import it back). The provider port is bound to the fail-closed default until a real
  * adapter is chosen. `Auction` is re-registered here (like BidsModule) to
  * avoid a module cycle with AuctionsModule, which consumes the entitlement port.
  */
@@ -49,6 +49,6 @@ import { AuctionEntryPayment, AuctionEntryPaymentSchema } from './schemas/auctio
     PersistentBidEntitlementPort,
     { provide: AUCTION_PAYMENT_PROVIDER_PORT, useClass: UnconfiguredPaymentProvider },
   ],
-  exports: [AuctionEntryFeeService, AuctionEntryPaymentService, AuctionPaymentConfirmationService, ManagedMarketingPaymentService, ManagedMarketingPaymentConfirmationService, PersistentBidEntitlementPort],
+  exports: [AuctionEntryFeeService, AuctionEntryPaymentService, AuctionPaymentConfirmationService, ManagedMarketingPaymentService, ManagedMarketingPaymentConfirmationService, PersistentBidEntitlementPort, AUCTION_PAYMENT_PROVIDER_PORT, MongooseModule],
 })
 export class PaymentsModule {}

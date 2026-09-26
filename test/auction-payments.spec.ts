@@ -341,12 +341,16 @@ describe('structure and safety (MAZAD-028)', () => {
     await expect(ctx.confirmation.confirm(a.paymentId)).rejects.toBeInstanceOf(ServiceUnavailableException);
     expect(ctx.mongo.rows('entitlements')).toHaveLength(0);
   });
-  it('no HTTP route exists for payments, confirmation or bids', () => {
-    expect(Reflect.getMetadata('path', PaymentsModule)).toBeUndefined();
+  it('the only HTTP routes are the authenticated own-entitlement read and payment initiation: no confirm/success route (MAZAD-034A)', () => {
+    const { AuctionEntryPaymentsController } = require('../src/payments/auction-entry-payments.controller');
+    const { AuctionsModule } = require('../src/auctions/auctions.module');
+    expect(Reflect.getMetadata('controllers', AuctionsModule)).toContain(AuctionEntryPaymentsController);
     expect(Reflect.getMetadata('controllers', PaymentsModule)).toBeUndefined();
+    const routes = Object.getOwnPropertyNames(AuctionEntryPaymentsController.prototype).filter((n) => n !== 'constructor').sort();
+    expect(routes).toEqual(['initiate', 'status']);
     for (const controller of [AuctionsController, AdminAuctionsController]) {
-      const routes = Object.getOwnPropertyNames(controller.prototype).filter((n) => n !== 'constructor');
-      expect(routes.filter((n) => /bid|pay|entitle|confirm/i.test(n))).toEqual([]);
+      const names = Object.getOwnPropertyNames(controller.prototype).filter((n) => n !== 'constructor');
+      expect(names.filter((n) => /bid|pay|entitle|confirm/i.test(n))).toEqual([]);
     }
   });
   it('entitlements are unique per (auction, bidder) and per payment; live payments unique per (auction, bidder)', () => {
