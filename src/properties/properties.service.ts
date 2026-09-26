@@ -33,6 +33,24 @@ import { OutboxService } from '../outbox/outbox.service';
 const PROPERTY_IMAGE_POLICY = { kind: 'image' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000 };
 const PROPERTY_EVIDENCE_POLICY = { kind: 'document' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000, allowPdf: true };
 
+/**
+ * PropertyRevision fields read by the public projection chain
+ * (`hydratePublicListings` -> `toMarketplacePublic` -> `projectProperty` / `publicImages`).
+ * Fields `projectProperty` reads but `toMarketplacePublic` strips (reviewReason, reviewedAt,
+ * decisionVersion, version) are deliberately not loaded. Extend this list whenever a public
+ * projection starts reading another revision field.
+ */
+export const PUBLIC_REVISION_PROJECTION_FIELDS = [
+  'revisionNumber', 'title', 'description', 'operationType',
+  'purposeCategoryId', 'purposeSubcategoryId', 'legacyPropertyTypeCode',
+  'governorateCode', 'city', 'district', 'area', 'bedrooms', 'bathrooms', 'floor',
+  'totalPriceMinor', 'currency', 'paymentMethodCodes', 'marketingMode',
+  'galleryMedia', 'entranceImageAsset', 'coverImageIndex', 'moderationStatus',
+] as const;
+const PUBLIC_REVISION_SELECT = PUBLIC_REVISION_PROJECTION_FIELDS.join(' ');
+// Anchored reads load revisions directly and must also verify revision ownership.
+const ANCHORED_PUBLIC_REVISION_SELECT = `${PUBLIC_REVISION_SELECT} propertyId`;
+
 type PropertyCreateFiles = {
   images?: Express.Multer.File[];
   titleDeed?: Express.Multer.File[];
@@ -488,7 +506,7 @@ export class PropertiesService {
     const { filter: dimensionFilter, sort, page, limit } = await this.buildPublicListingQuery(query);
     const filter = { ...this.publicVisibilityFilter(), ...dimensionFilter };
     const [items, total] = await Promise.all([
-      this.properties.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).populate('currentPublicRevisionId').lean().exec(),
+      this.properties.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).populate({ path: 'currentPublicRevisionId', select: PUBLIC_REVISION_SELECT }).lean().exec(),
       this.properties.countDocuments(filter).exec(),
     ]);
     return {
@@ -638,7 +656,7 @@ export class PropertiesService {
   async getPublicProjectionsByIds(ids: string[]): Promise<Map<string, ReturnType<PropertiesService['toMarketplacePublic']>>> {
     const validIds = [...new Set(ids)].filter((id) => Types.ObjectId.isValid(id));
     if (!validIds.length) return new Map();
-    const items = await this.properties.find({ _id: { $in: validIds }, ...this.publicVisibilityFilter() }).populate('currentPublicRevisionId').lean().exec();
+    const items = await this.properties.find({ _id: { $in: validIds }, ...this.publicVisibilityFilter() }).populate({ path: 'currentPublicRevisionId', select: PUBLIC_REVISION_SELECT }).lean().exec();
     const hydrated = await this.hydratePublicListings(items);
     return new Map(hydrated.map((item) => [item.id, item]));
   }
@@ -701,7 +719,7 @@ export class PropertiesService {
     if (!valid.length) return new Map();
     const [properties, revisions] = await Promise.all([
       this.properties.find({ _id: { $in: [...new Set(valid.map((pair) => pair.propertyId))] }, ...this.publicVisibilityFilter() }).lean().exec(),
-      this.revisions.find({ _id: { $in: [...new Set(valid.map((pair) => pair.revisionId))] } }).lean().exec(),
+      this.revisions.find({ _id: { $in: [...new Set(valid.map((pair) => pair.revisionId))] } }, ANCHORED_PUBLIC_REVISION_SELECT).lean().exec(),
     ]);
     const propertyById = new Map(properties.map((item) => [item._id.toString(), item]));
     const revisionById = new Map(revisions.map((revision) => [revision._id.toString(), revision]));
@@ -1103,6 +1121,7 @@ export class PropertiesService {
           aggregateUpdate.$set.governorateCode = revision.governorateCode;
           aggregateUpdate.$set.city = revision.city;
           aggregateUpdate.$set.district = revision.district;
+          aggregateUpdate.$set.area = revision.area;
           aggregateUpdate.$set.totalPriceMinor = revision.totalPriceMinor;
           aggregateUpdate.$set.currency = revision.currency;
         } else if (property.currentPublicRevisionId) aggregateUpdate.$set.status = 'approved';
