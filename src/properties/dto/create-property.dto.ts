@@ -14,7 +14,10 @@ export class CreatePropertyDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) expectedRevisionVersion?: number;
   @IsIn(['sale', 'rent']) operationType: string;
   @IsMongoId() purposeCategoryId: string;
+  /** Primary property type; drives the listing's form, media and facets. */
   @IsMongoId() purposeSubcategoryId: string;
+  /** Every selected property type, primary included (DPF-005). Omitted by pre-multi-type clients. */
+  @IsOptional() @Transform(jsonArray) @IsArray() @IsMongoId({ each: true }) purposeSubcategoryIds?: string[];
   /** @deprecated Accepted only as a non-authoritative compatibility hint. */
   @IsOptional() @Allow() propertyTypeCode?: unknown;
   @IsString() @MinLength(5) @MaxLength(150) title: string;

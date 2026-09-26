@@ -55,6 +55,8 @@ export class Property {
    */
   @Prop({ type: Types.ObjectId, ref: 'PropertyPurposeCategory', index: true }) purposeCategoryId?: Types.ObjectId;
   @Prop({ type: Types.ObjectId, ref: 'PropertyType', index: true }) purposeSubcategoryId?: Types.ObjectId;
+  /** Every selected type of the current public classification, primary included (DPF-005). Absent on pre-DPF-005 rows until backfilled. */
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'PropertyType' }], default: undefined }) purposeSubcategoryIds?: Types.ObjectId[];
   @Prop({ required: true, trim: true, maxlength: 150 }) title: string;
   @Prop({ required: true, trim: true, maxlength: 3000 }) description: string;
   @Prop({ required: true, trim: true, maxlength: 50, index: true }) governorateCode: string;

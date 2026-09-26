@@ -13,12 +13,13 @@ const oldRevisionId = '64b000000000000000000077';
 const actorId = '64b000000000000000000002';
 const purposeId = '64b000000000000000000010';
 const subcategoryId = '64b000000000000000000011';
+const secondSubcategoryId = '64b000000000000000000012';
 
 // The minimal revision field set, derived independently from projectProperty,
 // publicImages/revisionPublicImages, populatedRevision and hydratePublicListings.
 const REQUIRED_PUBLIC_REVISION_FIELDS = [
   'revisionNumber', 'title', 'description', 'operationType',
-  'purposeCategoryId', 'purposeSubcategoryId', 'legacyPropertyTypeCode',
+  'purposeCategoryId', 'purposeSubcategoryId', 'purposeSubcategoryIds', 'legacyPropertyTypeCode',
   'governorateCode', 'city', 'district', 'area', 'bedrooms', 'bathrooms', 'floor',
   'totalPriceMinor', 'currency', 'paymentMethodCodes', 'marketingMode',
   'galleryMedia', 'entranceImageAsset', 'coverImageIndex', 'moderationStatus',
@@ -107,6 +108,8 @@ describe('DPF-002 approval syncs Property.area', () => {
         status: 'approved', reviewReason: undefined, reviewedBy: new Types.ObjectId(actorId), reviewedAt: expect.any(Date),
         currentPublicRevisionId: revision._id, isOwnerVisible: true,
         operationType: 'rent', purposeCategoryId: revision.purposeCategoryId, purposeSubcategoryId: revision.purposeSubcategoryId,
+        // DPF-005: a pre-multi-type revision syncs as [purposeSubcategoryId].
+        purposeSubcategoryIds: [revision.purposeSubcategoryId],
         propertyTypeCode: 'duplex', governorateCode: 'giza', city: 'الشيخ زايد', district: 'الحي الأول',
         area: 220, totalPriceMinor: 250_000_000, currency: 'EGP',
       },
@@ -137,6 +140,7 @@ describe('DPF-002 public read paths load only the revision fields they project',
   const fullRevision = (id: string, overrides: Record<string, unknown> = {}) => ({
     _id: new Types.ObjectId(id), propertyId: new Types.ObjectId(propertyId), revisionNumber: 2, createdByActorId: new Types.ObjectId(actorId),
     operationType: 'rent', purposeCategoryId: new Types.ObjectId(purposeId), purposeSubcategoryId: new Types.ObjectId(subcategoryId), legacyPropertyTypeCode: 'duplex',
+    purposeSubcategoryIds: [new Types.ObjectId(subcategoryId), new Types.ObjectId(secondSubcategoryId)],
     title: 'دوبلكس للإيجار', description: 'وصف النسخة المعتمدة', governorateCode: 'giza', city: 'الشيخ زايد', district: 'الحي الأول',
     street: 'شارع سري', additionalAddressDetails: 'تفاصيل خاصة', latitude: 30.01, longitude: 31.01,
     area: 220, bedrooms: 4, livingRooms: 2, kitchens: 1, bathrooms: 3, floor: 5, totalFloors: 9, buildingYear: 2020,
@@ -207,7 +211,11 @@ describe('DPF-002 public read paths load only the revision fields they project',
     Object.assign(instance, {
       properties, revisions,
       governorates: lookup([{ code: 'giza', nameAr: 'الجيزة' }, { code: 'cairo', nameAr: 'القاهرة' }]),
-      propertyTypes: lookup([{ _id: new Types.ObjectId(subcategoryId), code: 'duplex', nameAr: 'دوبلكس' }, { _id: new Types.ObjectId(), code: 'apartment', nameAr: 'شقة' }]),
+      propertyTypes: lookup([
+        { _id: new Types.ObjectId(subcategoryId), code: 'duplex', nameAr: 'دوبلكس', sortOrder: 2 },
+        { _id: new Types.ObjectId(secondSubcategoryId), code: 'penthouse', nameAr: 'بنتهاوس', sortOrder: 1 },
+        { _id: new Types.ObjectId(), code: 'apartment', nameAr: 'شقة' },
+      ]),
       purposeCategories: lookup([{ _id: new Types.ObjectId(purposeId), nameAr: 'سكني' }]),
       options: lookup([{ code: 'cash', nameAr: 'كاش' }, { code: 'installments', nameAr: 'تقسيط' }]),
     });

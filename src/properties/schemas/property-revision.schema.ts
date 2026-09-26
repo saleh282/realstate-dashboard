@@ -39,6 +39,8 @@ export class PropertyRevision {
   @Prop({ required: true, enum: ['sale', 'rent'], immutable: immutableOutsideDraft }) operationType: string;
   @Prop({ type: Types.ObjectId, ref: 'PropertyPurposeCategory', immutable: immutableOutsideDraft }) purposeCategoryId?: Types.ObjectId;
   @Prop({ type: Types.ObjectId, ref: 'PropertyType', immutable: immutableOutsideDraft }) purposeSubcategoryId?: Types.ObjectId;
+  /** Every selected type, primary included, in canonical order (DPF-005). Pre-DPF-005 revisions omit it and read as [purposeSubcategoryId]. */
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'PropertyType' }], default: undefined, immutable: immutableOutsideDraft }) purposeSubcategoryIds?: Types.ObjectId[];
   @Prop({ trim: true, maxlength: 50, immutable: immutableOutsideDraft }) legacyPropertyTypeCode?: string;
   @Prop({ required: true, trim: true, maxlength: 150, immutable: immutableOutsideDraft }) title: string;
   @Prop({ required: true, trim: true, maxlength: 3000, immutable: immutableOutsideDraft }) description: string;

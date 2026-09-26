@@ -41,7 +41,7 @@ describe('property publishing validation', () => {
     Object.assign(instance, {
       users: { find: jest.fn().mockReturnValue(query([{ _id: { toString: () => userId }, systemRole: 'USER', accountType: AccountType.USER, accountStatus: 'ACTIVE' }])) },
       purposeCategories: { findOne: jest.fn().mockReturnValue(query({ _id: { toString: () => categoryId } })), updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ matchedCount: 1 }) }) },
-      propertyTypes: { findOne: jest.fn().mockReturnValue(query({ _id: { toString: () => subcategoryId }, code: 'apartment', purposeCategoryId: { toString: () => categoryId } })), updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ matchedCount: 1 }) }) },
+      propertyTypes: { findOne: jest.fn().mockReturnValue(query({ _id: { toString: () => subcategoryId }, code: 'apartment', purposeCategoryId: { toString: () => categoryId } })), updateMany: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ matchedCount: 1 }) }) },
       governorates: { findOne: jest.fn().mockReturnValue(query({ code: 'cairo' })) },
       cities: {
         findOne: jest.fn().mockReturnValue(query({ _id: '64b000000000000000000020', nameAr: 'القاهرة' })),

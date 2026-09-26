@@ -223,8 +223,9 @@ describe('DPF-001 property type reparent guard', () => {
     connection.set('strictQuery', true);
     const properties = connection.model('Dpf001Property', PropertySchema);
     const revisions = connection.model('Dpf001PropertyRevision', PropertyRevisionSchema);
-    expect(PropertySchema.path('purposeSubcategoryIds')).toBeUndefined();
-    expect(PropertyRevisionSchema.path('purposeSubcategoryIds')).toBeUndefined();
+    // DPF-005 declared the array on both schemas; the filter must still reach MongoDB either way.
+    expect(PropertySchema.path('purposeSubcategoryIds')).toBeDefined();
+    expect(PropertyRevisionSchema.path('purposeSubcategoryIds')).toBeDefined();
 
     const casted: [string, Record<string, unknown>][] = [];
     const exec = jest.spyOn(Query.prototype, 'exec').mockImplementation(async function (this: any) {

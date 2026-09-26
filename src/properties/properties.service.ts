@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, Model, Types } from 'mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { createHash, randomUUID } from 'node:crypto';
 import { Amenity, AmenityDocument } from '../amenities/schemas/amenity.schema';
 import { Governorate, GovernorateDocument } from '../governorates/schemas/governorate.schema';
@@ -29,6 +29,14 @@ import { IdempotencyService, canonicalize, sha256 } from '../common/idempotency/
 import { hasClearGovernorateConflict, isPointInsideEgypt } from '../common/validators/egypt-location.validator';
 import { propertyDecisionEvent } from '../outbox/outbox-events';
 import { OutboxService } from '../outbox/outbox.service';
+import {
+  PropertySubcategoriesInvalidReason,
+  canonicalPropertyTypeOrder,
+  normalizeSelectedPropertyTypeIds,
+  selectedPropertyTypeIds,
+  subcategoriesInvalid,
+  toObjectIds,
+} from './property-classification';
 
 const PROPERTY_IMAGE_POLICY = { kind: 'image' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000 };
 const PROPERTY_EVIDENCE_POLICY = { kind: 'document' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000, allowPdf: true };
@@ -42,7 +50,7 @@ const PROPERTY_EVIDENCE_POLICY = { kind: 'document' as const, maxBytes: 10 * 102
  */
 export const PUBLIC_REVISION_PROJECTION_FIELDS = [
   'revisionNumber', 'title', 'description', 'operationType',
-  'purposeCategoryId', 'purposeSubcategoryId', 'legacyPropertyTypeCode',
+  'purposeCategoryId', 'purposeSubcategoryId', 'purposeSubcategoryIds', 'legacyPropertyTypeCode',
   'governorateCode', 'city', 'district', 'area', 'bedrooms', 'bathrooms', 'floor',
   'totalPriceMinor', 'currency', 'paymentMethodCodes', 'marketingMode',
   'galleryMedia', 'entranceImageAsset', 'coverImageIndex', 'moderationStatus',
@@ -86,7 +94,9 @@ export class PropertiesService {
   private requestFingerprint(target: string, dto: CreatePropertyDto, files: PropertyCreateFiles): string {
     const digest = (list?: Express.Multer.File[]) =>
       (list ?? []).map((file) => `${file.fieldname}:${file.mimetype}:${sha256(file.buffer)}`);
-    return sha256(canonicalize({ target, dto, images: digest(files?.images), titleDeed: digest(files?.titleDeed) }));
+    // The selected-type set is order-insensitive: one logical selection, one fingerprint.
+    const identity = dto.purposeSubcategoryIds === undefined ? dto : { ...dto, purposeSubcategoryIds: canonicalPropertyTypeOrder(dto.purposeSubcategoryIds) };
+    return sha256(canonicalize({ target, dto: identity, images: digest(files?.images), titleDeed: digest(files?.titleDeed) }));
   }
 
   async create(actorId: string, dto: CreatePropertyDto, files: PropertyCreateFiles, ip?: string) {
@@ -225,6 +235,7 @@ export class PropertiesService {
     if (!type.purposeCategoryId || type.purposeCategoryId.toString() !== purpose._id.toString()) {
       throw new BadRequestException({ message: 'نوع العقار الفرعي لا يتبع غرض العقار المحدد', code: PropertyErrorCode.PURPOSE_HIERARCHY_MISMATCH });
     }
+    const selectedTypeIds = await this.resolveSelectedPropertyTypeIds(dto, purpose._id, type, existingProperty, existingDraft);
     if (governorate && !city && !legacyCityAllowed) {
       throw new BadRequestException({ message: 'المدينة غير موجودة أو لا تتبع المحافظة المحددة', code: PropertyErrorCode.CATALOG_VALUE_INVALID });
     }
@@ -273,6 +284,7 @@ export class PropertiesService {
         operationType: dto.operationType,
         purposeCategoryId: purpose._id,
         purposeSubcategoryId: type._id,
+        purposeSubcategoryIds: selectedTypeIds,
         legacyPropertyTypeCode: type.code,
         title: dto.title,
         description: dto.description,
@@ -319,6 +331,7 @@ export class PropertiesService {
         operationType: dto.operationType,
         purposeCategoryId: purpose._id,
         purposeSubcategoryId: type._id,
+        purposeSubcategoryIds: selectedTypeIds,
         propertyTypeCode: type.code,
         title: dto.title,
         description: dto.description,
@@ -384,7 +397,8 @@ export class PropertiesService {
           }
           const [purposeUsage, typeUsage, governorateUsage, cityUsage, optionUsage, amenityUsage] = await Promise.all([
             this.purposeCategories.updateOne({ _id: purpose._id, isActive: true }, { $inc: { usageCount: 1 } }, { session }).exec(),
-            this.propertyTypes.updateOne({ _id: type._id, purposeCategoryId: purpose._id, isActive: true }, { $inc: { usageCount: 1 } }, { session }).exec(),
+            // One increment per selected type (the primary is in the set exactly once).
+            this.propertyTypes.updateMany({ _id: { $in: selectedTypeIds }, purposeCategoryId: purpose._id, isActive: true }, { $inc: { usageCount: 1 } }, { session }).exec(),
             this.governorates.updateOne({ code: dto.governorateCode, isActive: true }, { $inc: { usageCount: 1 } }, { session }).exec(),
             city
               ? this.cities.updateOne({ _id: city._id, governorateId: governorate!._id, isActive: true }, { $inc: { usageCount: 1 } }, { session }).exec()
@@ -396,7 +410,7 @@ export class PropertiesService {
             ] }, { $inc: { usageCount: 1 } }, { session }).exec(),
             dto.amenityCodes.length ? this.amenities.updateMany({ code: { $in: dto.amenityCodes }, isActive: true }, { $inc: { usageCount: 1 } }, { session }).exec() : Promise.resolve({ matchedCount: 0 }),
           ]);
-          if (purposeUsage.matchedCount !== 1 || typeUsage.matchedCount !== 1) {
+          if (purposeUsage.matchedCount !== 1 || typeUsage.matchedCount !== selectedTypeIds.length) {
             throw new BadRequestException({ message: 'تم تغيير تصنيف غرض العقار؛ أعد تحميل الخيارات', code: PropertyErrorCode.PURPOSE_HIERARCHY_MISMATCH });
           }
           if (governorateUsage.matchedCount !== 1 || cityUsage.matchedCount !== 1 || optionUsage.matchedCount !== dto.paymentMethodCodes.length + 2 || amenityUsage.matchedCount !== dto.amenityCodes.length) {
@@ -442,6 +456,45 @@ export class PropertiesService {
         throw new ConflictException({ message: 'تغيرت نسخ العقار أثناء الحفظ', code: PropertyErrorCode.REVISION_VERSION_CONFLICT });
       }
       throw error;
+    }
+  }
+
+  /**
+   * Full type selection for a write (DPF-005). An explicit `purposeSubcategoryIds`
+   * is validated and canonicalized. Without it (a pre-multi-type client), an edit
+   * whose primary is unchanged keeps the latest revision's other selected types
+   * that are still valid; any other request selects only the primary.
+   */
+  private async resolveSelectedPropertyTypeIds(dto: CreatePropertyDto, purposeId: unknown, primary: { _id: unknown }, existingProperty?: any, existingDraft?: any): Promise<Types.ObjectId[]> {
+    const primaryId = String(primary._id).toLowerCase();
+    if (dto.purposeSubcategoryIds !== undefined) {
+      const selected = normalizeSelectedPropertyTypeIds(primaryId, dto.purposeSubcategoryIds);
+      await this.assertAdditionalPropertyTypes(selected.filter((id) => id !== primaryId), purposeId);
+      return toObjectIds(selected);
+    }
+    const previous = existingDraft ?? (existingProperty
+      ? await this.revisions.findOne({ propertyId: existingProperty._id }).sort({ revisionNumber: -1 }).select({ purposeSubcategoryId: 1, purposeSubcategoryIds: 1 }).lean().exec()
+      : undefined);
+    const carried = previous && String(previous.purposeSubcategoryId).toLowerCase() === primaryId
+      ? canonicalPropertyTypeOrder(selectedPropertyTypeIds(previous)).filter((id) => id !== primaryId)
+      : [];
+    const stillValid = carried.length
+      ? new Set((await this.propertyTypes.find({ _id: { $in: carried }, isActive: true, purposeCategoryId: purposeId }).lean().exec()).map((item) => item._id.toString()))
+      : new Set<string>();
+    return toObjectIds(canonicalPropertyTypeOrder([primaryId, ...carried.filter((id) => stillValid.has(id))]));
+  }
+
+  /** Non-primary selected types must exist, be active and belong to the listing's purpose. */
+  private async assertAdditionalPropertyTypes(additionalIds: string[], purposeId: unknown, session?: ClientSession) {
+    if (!additionalIds.length) return;
+    const lookup = this.propertyTypes.find({ _id: { $in: additionalIds } });
+    if (session) lookup.session(session);
+    const byId = new Map((await lookup.lean().exec()).map((item) => [item._id.toString(), item]));
+    const inactive = additionalIds.filter((id) => !byId.get(id)?.isActive);
+    if (inactive.length) throw subcategoriesInvalid(PropertySubcategoriesInvalidReason.INACTIVE, { invalidIds: inactive });
+    const mismatched = additionalIds.filter((id) => byId.get(id)!.purposeCategoryId?.toString() !== String(purposeId));
+    if (mismatched.length) {
+      throw new BadRequestException({ message: 'نوع العقار الفرعي لا يتبع غرض العقار المحدد', code: PropertyErrorCode.PURPOSE_HIERARCHY_MISMATCH, details: { invalidIds: mismatched } });
     }
   }
 
@@ -576,7 +629,7 @@ export class PropertiesService {
     if (!items.length) return [];
     const currentRevisions = items.map(item => this.populatedRevision(item.currentPublicRevisionId));
     const purposeIds = currentRevisions.map(revision => revision?.purposeCategoryId).filter(Boolean);
-    const subcategoryIds = currentRevisions.map(revision => revision?.purposeSubcategoryId).filter(Boolean);
+    const subcategoryIds = currentRevisions.flatMap(revision => selectedPropertyTypeIds(revision));
     const paymentCodes = currentRevisions.flatMap(revision => revision?.paymentMethodCodes ?? []);
     const [governorates, propertyTypes, purposes, paymentMethods] = await Promise.all([
       this.governorates.find({ code: { $in: [...new Set(currentRevisions.map((revision, index) => revision?.governorateCode ?? items[index].governorateCode))] } }).lean().exec(),
@@ -586,7 +639,7 @@ export class PropertiesService {
     ]);
     const governorateNames = new Map(governorates.map(item => [item.code, item.nameAr]));
     const propertyTypeNames = new Map(propertyTypes.map(item => [item.code, item.nameAr]));
-    const propertyTypeNamesById = new Map(propertyTypes.map(item => [item._id.toString(), item.nameAr]));
+    const propertyTypesById = new Map(propertyTypes.map(item => [item._id.toString(), item]));
     const purposeNames = new Map(purposes.map(item => [item._id.toString(), item.nameAr]));
     const paymentNames = new Map(paymentMethods.map(item => [item.code, item.nameAr]));
     return items.map(item => {
@@ -595,7 +648,8 @@ export class PropertiesService {
         ...this.toMarketplacePublic(item),
         governorateNameAr: governorateNames.get(revision?.governorateCode ?? item.governorateCode) ?? (revision?.governorateCode ?? item.governorateCode),
         purposeCategoryNameAr: revision?.purposeCategoryId ? purposeNames.get(revision.purposeCategoryId.toString()) : undefined,
-        propertyTypeNameAr: revision?.purposeSubcategoryId ? propertyTypeNamesById.get(revision.purposeSubcategoryId.toString()) : (propertyTypeNames.get(item.propertyTypeCode) ?? item.propertyTypeCode),
+        propertyTypeNameAr: revision?.purposeSubcategoryId ? propertyTypesById.get(revision.purposeSubcategoryId.toString())?.nameAr : (propertyTypeNames.get(item.propertyTypeCode) ?? item.propertyTypeCode),
+        propertyTypes: this.propertyTypesView(revision, propertyTypesById),
         paymentMethodNamesAr: (revision?.paymentMethodCodes ?? []).map((code: string) => paymentNames.get(code)).filter(Boolean),
       };
     });
@@ -606,18 +660,21 @@ export class PropertiesService {
     const item = await this.properties.findOne({ _id: id, ...this.publicVisibilityFilter() }).populate('currentPublicRevisionId').lean().exec();
     if (!item || !this.populatedRevision(item.currentPublicRevisionId)) throw new NotFoundException('العقار غير موجود');
     const revision = this.populatedRevision(item.currentPublicRevisionId)!;
-    const [purpose, type, governorate, paymentMethods] = await Promise.all([
+    const selectedTypeIds = selectedPropertyTypeIds(revision);
+    const [purpose, types, governorate, paymentMethods] = await Promise.all([
       revision.purposeCategoryId ? this.purposeCategories.findById(revision.purposeCategoryId).lean().exec() : undefined,
-      revision.purposeSubcategoryId ? this.propertyTypes.findById(revision.purposeSubcategoryId).lean().exec() : undefined,
+      selectedTypeIds.length ? this.propertyTypes.find({ _id: { $in: selectedTypeIds } }).lean().exec() : [],
       this.governorates.findOne({ code: revision.governorateCode }).lean().exec(),
       this.options.find({ group: 'payment_method', code: { $in: revision.paymentMethodCodes ?? [] } }).lean().exec(),
     ]);
+    const typesById = new Map<string, any>(types.map((value: any): [string, any] => [value._id.toString(), value]));
     return { property: {
       ...this.toMarketplacePublic(item),
       purposeCategoryNameAr: purpose?.nameAr,
-      propertyTypeNameAr: type?.nameAr ?? revision.legacyPropertyTypeCode,
+      propertyTypeNameAr: (revision.purposeSubcategoryId ? typesById.get(revision.purposeSubcategoryId.toString())?.nameAr : undefined) ?? revision.legacyPropertyTypeCode,
       governorateNameAr: governorate?.nameAr ?? revision.governorateCode,
       paymentMethodNamesAr: paymentMethods.map(item => item.nameAr),
+      propertyTypes: this.propertyTypesView(revision, typesById),
     } };
   }
 
@@ -850,6 +907,8 @@ export class PropertiesService {
     if (!purpose || !type || !type.purposeCategoryId || type.purposeCategoryId.toString() !== purpose._id.toString()) {
       throw new BadRequestException({ message: 'تصنيف غرض العقار غير صالح', code: PropertyErrorCode.PURPOSE_HIERARCHY_MISMATCH });
     }
+    const primaryTypeId = String(revision.purposeSubcategoryId).toLowerCase();
+    await this.assertAdditionalPropertyTypes(canonicalPropertyTypeOrder(selectedPropertyTypeIds(revision)).filter((id) => id !== primaryTypeId), purpose._id, session);
     if (paymentCount !== paymentMethodCodes.length) throw new BadRequestException({ message: 'إحدى طرق السداد غير متاحة', code: PropertyErrorCode.PAYMENT_METHODS_INVALID });
     if (revision.marketingMode === PropertyMarketingMode.SELF_SERVICE) {
       this.assertPresentationMediaComplete(revision);
@@ -1062,11 +1121,11 @@ export class PropertiesService {
     const revisions = await this.revisions.find({ propertyId: item._id }).sort({ revisionNumber: -1 }).lean().exec();
     const [purposes, types, payments] = await Promise.all([
       this.purposeCategories.find({ _id: { $in: revisions.map(revision => revision.purposeCategoryId).filter(Boolean) } }).lean().exec(),
-      this.propertyTypes.find({ _id: { $in: revisions.map(revision => revision.purposeSubcategoryId).filter(Boolean) } }).lean().exec(),
+      this.propertyTypes.find({ _id: { $in: revisions.flatMap(revision => selectedPropertyTypeIds(revision)) } }).lean().exec(),
       this.options.find({ group: 'payment_method', code: { $in: revisions.flatMap(revision => revision.paymentMethodCodes ?? []) } }).lean().exec(),
     ]);
     const purposeNames = new Map(purposes.map(value => [value._id.toString(), value.nameAr]));
-    const typeNames = new Map(types.map(value => [value._id.toString(), value.nameAr]));
+    const typesById = new Map(types.map(value => [value._id.toString(), value]));
     const paymentNames = new Map(payments.map(value => [value.code, value.nameAr]));
     const present = (revision: any) => {
       const result = this.revisionAdmin(revision);
@@ -1074,7 +1133,8 @@ export class PropertiesService {
       return {
         ...result,
         purposeCategoryNameAr: revision.purposeCategoryId ? purposeNames.get(revision.purposeCategoryId.toString()) : undefined,
-        propertyTypeNameAr: revision.purposeSubcategoryId ? typeNames.get(revision.purposeSubcategoryId.toString()) : revision.legacyPropertyTypeCode,
+        propertyTypeNameAr: revision.purposeSubcategoryId ? typesById.get(revision.purposeSubcategoryId.toString())?.nameAr : revision.legacyPropertyTypeCode,
+        propertyTypes: this.propertyTypesView(revision, typesById),
         paymentMethodNamesAr: (revision.paymentMethodCodes ?? []).map((code: string) => paymentNames.get(code)).filter(Boolean),
       };
     };
@@ -1116,6 +1176,7 @@ export class PropertiesService {
           aggregateUpdate.$set.operationType = revision.operationType;
           aggregateUpdate.$set.purposeCategoryId = revision.purposeCategoryId;
           aggregateUpdate.$set.purposeSubcategoryId = revision.purposeSubcategoryId;
+          aggregateUpdate.$set.purposeSubcategoryIds = selectedPropertyTypeIds(revision);
           aggregateUpdate.$set.propertyTypeCode = revision.legacyPropertyTypeCode;
           aggregateUpdate.$set.governorateCode = revision.governorateCode;
           aggregateUpdate.$set.city = revision.city;
@@ -1253,6 +1314,23 @@ export class PropertiesService {
     return value && typeof value === 'object' && (value.title || value.revisionNumber) ? value : undefined;
   }
 
+  /** Every selected type for presentation: the primary first, then catalog order. */
+  private propertyTypesView(revision: any, typesById: Map<string, any>) {
+    if (!revision) return [];
+    const primaryId = revision.purposeSubcategoryId?.toString();
+    return selectedPropertyTypeIds(revision)
+      .map((value) => {
+        const id = String(value);
+        const type = typesById.get(id);
+        return {
+          id, code: type?.code ?? (id === primaryId ? revision.legacyPropertyTypeCode : undefined), nameAr: type?.nameAr, iconKey: type?.iconKey,
+          isPrimary: id === primaryId, sortOrder: type?.sortOrder ?? Number.MAX_SAFE_INTEGER,
+        };
+      })
+      .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .map(({ sortOrder: _sortOrder, ...view }) => view);
+  }
+
   private revisionSummary(revision: any) {
     if (!revision) return undefined;
     return {
@@ -1278,6 +1356,7 @@ export class PropertiesService {
       description: revision.description,
       purposeCategoryId: revision.purposeCategoryId?.toString?.(),
       purposeSubcategoryId: revision.purposeSubcategoryId?.toString?.(),
+      purposeSubcategoryIds: selectedPropertyTypeIds(revision).map(String),
       propertyTypeCode: revision.legacyPropertyTypeCode,
       governorateCode: revision.governorateCode,
       city: revision.city,
@@ -1362,6 +1441,7 @@ export class PropertiesService {
       operationType: source.operationType,
       purposeCategoryId: revision?.purposeCategoryId?.toString?.(),
       purposeSubcategoryId: revision?.purposeSubcategoryId?.toString?.(),
+      purposeSubcategoryIds: revision ? selectedPropertyTypeIds(revision).map(String) : undefined,
       propertyTypeCode: source.legacyPropertyTypeCode ?? item.propertyTypeCode,
       title: source.title,
       description: source.description,
