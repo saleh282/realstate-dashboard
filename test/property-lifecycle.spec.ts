@@ -11,7 +11,7 @@ function sessionQuery(value: unknown) {
 
 function lifecycleService(options: { currentPublicRevisionId?: string; revision?: unknown; approvalCandidate?: unknown; aggregateModified?: number } = {}) {
   const session = { withTransaction: jest.fn(async (work: () => Promise<void>) => work()), endSession: jest.fn() };
-  const property = { _id: propertyId, pendingRevisionId: revisionId, currentPublicRevisionId: options.currentPublicRevisionId, publishedAt: undefined };
+  const property = { _id: propertyId, ownerId: actorId, advertiserAccountId: actorId, pendingRevisionId: revisionId, currentPublicRevisionId: options.currentPublicRevisionId, publishedAt: undefined };
   const revisions = {
     findOne: jest.fn().mockReturnValue({ session: () => ({ lean: () => ({ exec: jest.fn().mockResolvedValue(options.approvalCandidate === undefined ? {
       _id: revisionId, decisionVersion: 0, marketingMode: 'PLATFORM_MANAGED', livingRooms: 1, bedrooms: 1, kitchens: 1, bathrooms: 1,
@@ -24,9 +24,10 @@ function lifecycleService(options: { currentPublicRevisionId?: string; revision?
     updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ modifiedCount: options.aggregateModified ?? 1 }) }),
   };
   const audit = { logRequired: jest.fn().mockResolvedValue(undefined) };
+  const outbox = { recordRequired: jest.fn().mockResolvedValue(undefined) };
   const service = Object.create(PropertiesService.prototype) as any;
-  Object.assign(service, { properties, revisions, audit, connection: { startSession: jest.fn().mockResolvedValue(session) }, getForAdmin: jest.fn().mockResolvedValue({ property: { id: propertyId } }) });
-  return { service: service as PropertiesService, properties, revisions, audit, session };
+  Object.assign(service, { properties, revisions, audit, outbox, connection: { startSession: jest.fn().mockResolvedValue(session) }, getForAdmin: jest.fn().mockResolvedValue({ property: { id: propertyId } }) });
+  return { service: service as PropertiesService, properties, revisions, audit, outbox, session };
 }
 
 describe('MAZAD-019 property revision lifecycle', () => {
@@ -98,6 +99,9 @@ describe('MAZAD-019 property revision lifecycle', () => {
       expect.objectContaining({ $set: expect.objectContaining({ currentPublicRevisionId: revisionId, status: 'approved' }), $unset: { pendingRevisionId: 1 } }),
       expect.objectContaining({ session: expect.anything() }),
     );
+    expect(context.outbox.recordRequired).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'PROPERTY_APPROVED', privateRouting: { advertiserAccountId: actorId },
+    }), expect.anything());
   });
 
   it('rejects with a required reason and preserves an existing public pointer', async () => {
@@ -107,6 +111,9 @@ describe('MAZAD-019 property revision lifecycle', () => {
     const aggregateUpdate = context.properties.updateOne.mock.calls[0][1];
     expect(aggregateUpdate.$set.status).toBe('approved');
     expect(aggregateUpdate.$set.currentPublicRevisionId).toBeUndefined();
+    expect(context.outbox.recordRequired).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'PROPERTY_REJECTED', privateRouting: { advertiserAccountId: actorId },
+    }), expect.anything());
   });
 
   it('returns deterministic conflict for a stale or repeated decision', async () => {

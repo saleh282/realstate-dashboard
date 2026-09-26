@@ -147,6 +147,9 @@ export class AuctionFinalizationService {
     assertValidAuctionTransition(auction.status, AuctionStatus.COMPLETED);
 
     const winner = await this.determineWinner(session, auctionId, auction);
+    const winnerAccountId = winner.bidderAccountId.toString();
+    const losingBidderAccountIds = (await this.ledger.distinctBidderAccountIdsForAuction(auctionId, { session }))
+      .filter((accountId) => accountId !== winnerAccountId);
 
     const won = await this.auctions
       .findOneAndUpdate(
@@ -191,7 +194,8 @@ export class AuctionFinalizationService {
         winningBidAmountMinor: winner.amountMinor,
         currency: winner.currency,
         acceptedBidCount: auction.acceptedBidCount ?? 0,
-        winnerAccountId: winner.bidderAccountId.toString(),
+        winnerAccountId,
+        losingBidderAccountIds,
       }),
       session,
     );
@@ -239,4 +243,3 @@ export class AuctionFinalizationService {
     };
   }
 }
-

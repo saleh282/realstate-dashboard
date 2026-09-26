@@ -62,6 +62,7 @@ describe('event catalogue: names, versions, aggregates (MAZAD-031)', () => {
     expect(Object.values(OutboxEventType).sort()).toEqual([
       'AUCTION_ACTIVATED', 'AUCTION_CANCELLED', 'AUCTION_END_EXTENDED', 'AUCTION_ENDED_NO_BIDS', 'AUCTION_ENDED_PENDING_CLOSE', 'AUCTION_ENTRY_PAYMENT_CONFIRMED',
       'AUCTION_FINALIZED', 'BID_ACCEPTED', 'MANAGED_MARKETING_PAYMENT_CONFIRMED',
+      'KYC_APPROVED', 'KYC_REJECTED', 'PROPERTY_APPROVED', 'PROPERTY_REJECTED',
     ].sort());
     for (const name of Object.values(OutboxEventType)) expect(name).toMatch(/^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/);
   });

@@ -431,12 +431,13 @@ describe('scope guards (MAZAD-032)', () => {
     expect(code(store[0]).match(/InjectModel\([^)]*\)/g)).toEqual(['InjectModel(RealtimeCutover.name)', 'InjectModel(OutboxEvent.name)']);
   });
 
-  it('it registers exactly one consumer, named realtime, and no notification consumer exists anywhere in src', () => {
+  it('realtime remains one independently registered consumer alongside MAZAD-036 notifications', () => {
     const registrations = walk(srcDir).filter((f) => f.endsWith('.ts') && !f.endsWith('outbox-consumer.port.ts') && /[rR]egistry\.register\(/.test(fs.readFileSync(f, 'utf8')));
-    expect(registrations.map((f) => path.relative(srcDir, f))).toEqual(['realtime/realtime-outbox.consumer.ts']);
-    for (const file of walk(srcDir).filter((f) => f.endsWith('.ts'))) {
-      expect(fs.readFileSync(file, 'utf8')).not.toMatch(/class\s+\w*Notification\w*Consumer|name\s*[:=]\s*['"]notifications['"]/);
-    }
+    expect(registrations.map((f) => path.relative(srcDir, f)).sort()).toEqual([
+      'notifications/notifications-outbox.consumer.ts',
+      'realtime/realtime-outbox.consumer.ts',
+    ]);
+    expect(registrations.filter((f) => path.relative(srcDir, f).startsWith('realtime/'))).toHaveLength(1);
   });
 
   it('realtime subscribes to no payment event, and holds no reference to the payment modules', () => {

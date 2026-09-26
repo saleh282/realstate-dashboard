@@ -17,11 +17,23 @@ function createService() {
   const auditLogService = {
     log: jest.fn(),
     logAdminAction: jest.fn().mockResolvedValue(undefined),
+    logRequired: jest.fn().mockResolvedValue(undefined),
   };
+  const sessions: any[] = [];
+  const connection = {
+    startSession: jest.fn().mockImplementation(async () => {
+      const session = { withTransaction: jest.fn(async (work: () => Promise<void>) => work()), endSession: jest.fn() };
+      sessions.push(session);
+      return session;
+    }),
+  };
+  const outbox = { recordRequired: jest.fn().mockResolvedValue(undefined) };
   const service = new UsersService(
     userModel as any,
     refreshTokenService as any,
     auditLogService as any,
+    connection as any,
+    outbox as any,
   );
 
   return {
@@ -29,6 +41,9 @@ function createService() {
     userModel,
     refreshTokenService,
     auditLogService,
+    connection,
+    outbox,
+    sessions,
   };
 }
 
@@ -271,9 +286,7 @@ describe('admin KYC review state machine', () => {
     });
     userModel.findById = jest.fn().mockReturnValue({
       select: jest.fn().mockReturnValue({
-        lean: jest.fn().mockReturnValue({
-          exec: jest.fn().mockResolvedValue(current),
-        }),
+        session: jest.fn().mockReturnValue({ lean: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(current) }) }),
       }),
     });
   }
@@ -286,7 +299,7 @@ describe('admin KYC review state machine', () => {
     rejectionReason,
     expectedStatus,
   ) => {
-    const { service, userModel, auditLogService } = createService();
+    const { service, userModel, auditLogService, outbox } = createService();
     mockConditionalUpdate(userModel, {
       kycStatus: expectedStatus,
       kycVersion: 4,
@@ -312,22 +325,24 @@ describe('admin KYC review state machine', () => {
         kycVersion: 3,
       }),
       expect.objectContaining({ $inc: { kycVersion: 1 } }),
-      { new: true, runValidators: true },
+      expect.objectContaining({ new: true, runValidators: true, session: expect.anything() }),
     );
-    expect(auditLogService.logAdminAction).toHaveBeenCalledWith(
-      AuditAction.ADMIN_KYC_REVIEWED,
-      actorUserId,
-      targetUserId,
-      expect.any(String),
-      '127.0.0.1',
+    expect(auditLogService.logRequired).toHaveBeenCalledWith(
       expect.objectContaining({
-        before: { kycStatus: 'pending', kycVersion: 3 },
-        after: expect.objectContaining({
-          kycStatus: expectedStatus,
-          kycVersion: 4,
+        action: AuditAction.ADMIN_KYC_REVIEWED,
+        actorUserId,
+        targetUserId,
+        metadata: expect.objectContaining({
+          before: { kycStatus: 'pending', kycVersion: 3 },
+          after: expect.objectContaining({ kycStatus: expectedStatus, kycVersion: 4 }),
         }),
       }),
+      expect.anything(),
     );
+    expect(outbox.recordRequired).toHaveBeenCalledWith(expect.objectContaining({
+      type: decision === 'verified' ? 'KYC_APPROVED' : 'KYC_REJECTED',
+      privateRouting: { subjectAccountId: targetUserId },
+    }), expect.anything());
   });
 
   it('requires a meaningful rejection reason before writing', async () => {
@@ -371,7 +386,7 @@ describe('admin KYC review state machine', () => {
       ).rejects.toMatchObject({
         response: expect.objectContaining({ code: 'KYC_ALREADY_REVIEWED' }),
       });
-      expect(auditLogService.logAdminAction).not.toHaveBeenCalled();
+      expect(auditLogService.logRequired).not.toHaveBeenCalled();
     },
   );
 
@@ -407,12 +422,7 @@ describe('admin KYC review state machine', () => {
       .mockReturnValueOnce({ exec: jest.fn().mockResolvedValue(null) });
     userModel.findById = jest.fn().mockReturnValue({
       select: jest.fn().mockReturnValue({
-        lean: jest.fn().mockReturnValue({
-          exec: jest.fn().mockResolvedValue({
-            kycStatus: 'verified',
-            kycVersion: 2,
-          }),
-        }),
+        session: jest.fn().mockReturnValue({ lean: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ kycStatus: 'verified', kycVersion: 2 }) }) }),
       }),
     });
 
@@ -434,7 +444,7 @@ describe('admin KYC review state machine', () => {
 
     expect(attempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(attempts.filter((result) => result.status === 'rejected')).toHaveLength(1);
-    expect(auditLogService.logAdminAction).toHaveBeenCalledTimes(1);
+    expect(auditLogService.logRequired).toHaveBeenCalledTimes(1);
   });
 
 });

@@ -911,6 +911,8 @@ describe('AuctionBidAcceptanceService — request-level idempotency (MAZAD-029)'
     expect(mongo.bidRequests).toHaveLength(1);
     expect(mongo.committedAuction().acceptedBidCount).toBe(1);
     expect(mongo.audits.filter((a) => a.action === AuditAction.AUCTION_BID_ACCEPTED)).toHaveLength(1);
+    // MAZAD-036: a replay adds no second BID_ACCEPTED (and therefore no second OUTBID notification source).
+    expect(mongo.outbox.events('BID_ACCEPTED')).toHaveLength(1);
   });
 
   it('a replay returns the original result even after the auction moved on (later bids, end, cancellation)', async () => {
@@ -1071,6 +1073,18 @@ describe('BID_ACCEPTED domain event — transactional outbox (MAZAD-031)', () =>
     await service.acceptBid(ALICE, AUCTION, 110_000);
     expect(bidEvents(mongo).map((e) => [e.aggregateVersion, e.payload.sequence, e.payload.amountMinor])).toEqual([[1, 1, 100_000], [2, 2, 105_000], [3, 3, 110_000]]);
     expect(bidEvents(mongo).map((e) => e.payload.nextMinimumBidMinor)).toEqual([105_000, 110_000, 115_000]);
+    expect(bidEvents(mongo).map((e) => e.privateRouting)).toEqual([
+      { bidderAccountId: ALICE },
+      { bidderAccountId: BOB, previousHighestBidderAccountId: ALICE },
+      { bidderAccountId: ALICE, previousHighestBidderAccountId: BOB },
+    ]);
+  });
+
+  it('does not add false outbid routing when the highest bidder raises their own bid', async () => {
+    const { service, mongo } = build();
+    await service.acceptBid(ALICE, AUCTION, 100_000);
+    await service.acceptBid(ALICE, AUCTION, 105_000);
+    expect(bidEvents(mongo)[1].privateRouting).toEqual({ bidderAccountId: ALICE });
   });
 
   it('anti-sniping data is authoritative: the extension is reported with the SAME end time the auction committed', async () => {

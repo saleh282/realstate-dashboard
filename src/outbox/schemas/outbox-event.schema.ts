@@ -65,7 +65,7 @@ export class OutboxEvent {
   /** Plain-JSON facts; never account ids, PII, secrets or provider payloads (enforced by `assertValidOutboxDraft`). */
   @Prop({ type: Object, required: true, immutable: true }) payload: Record<string, unknown>;
   /** Recipient account ids for PRIVATE routing only — never part of a public projection. */
-  @Prop({ type: Object, immutable: true }) privateRouting?: Record<string, string>;
+  @Prop({ type: Object, immutable: true }) privateRouting?: Record<string, string | string[]>;
 
   /** Per-consumer delivery progress (see class docs). Mutable; absent until a consumer first claims the event. */
   @Prop({ type: Object }) delivery?: Record<string, OutboxConsumerDelivery>;

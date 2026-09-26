@@ -99,7 +99,10 @@ export class AuctionLifecycleService {
             )
             .exec();
           if (!doc) return null;
-          await this.outbox.recordRequired(auctionActivatedEvent({ auctionId: doc._id.toString(), occurredAt: now, currentEndAt: doc.currentEndAt }), session);
+          await this.outbox.recordRequired(auctionActivatedEvent({
+            auctionId: doc._id.toString(), occurredAt: now, currentEndAt: doc.currentEndAt,
+            advertiserAccountId: doc.advertiserAccountId.toString(),
+          }), session);
           return { doc, now };
         },
         { retryExhausted: retryConflict('تحديث حالة المزاد قيد المعالجة؛ أعد المحاولة', AuctionErrorCode.STATE_CONFLICT) },
@@ -271,7 +274,10 @@ export class AuctionLifecycleService {
           session,
         );
         // MAZAD-031: the domain event commits with the cancellation and its audit row (the reason is not in it).
-        await this.outbox.recordRequired(auctionCancelledEvent({ auctionId: updated!._id.toString(), occurredAt: cancelledAt, previousStatus: fromStatus }), session);
+        await this.outbox.recordRequired(auctionCancelledEvent({
+          auctionId: updated!._id.toString(), occurredAt: cancelledAt, previousStatus: fromStatus,
+          advertiserAccountId: updated!.advertiserAccountId.toString(),
+        }), session);
       });
       return { message: 'تم إلغاء المزاد بنجاح', auction: this.toSummary(updated!.toObject()) };
     } finally {

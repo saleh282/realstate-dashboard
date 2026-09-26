@@ -195,7 +195,7 @@ describe('property create/revision idempotency', () => {
     const records = fakeRecords();
     const idempotency = new IdempotencyService(records as any);
     const service: any = new (PropertiesService as any)(
-      {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { assertUnlocked: jest.fn() }, idempotency,
+      {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { assertUnlocked: jest.fn() }, { recordRequired: jest.fn() }, idempotency,
     );
     jest.spyOn(service, 'resolveAdvertiser').mockResolvedValue({ actorId: new Types.ObjectId(account), advertiserId: new Types.ObjectId(account), accountType: 'USER' });
     const createWithAttribution = jest.spyOn(service, 'createWithAttribution').mockResolvedValue(created);
@@ -274,7 +274,7 @@ describe('property create/revision idempotency', () => {
   });
 
   it('is optional infrastructure: the service still works when it is not provided', async () => {
-    const service: any = new (PropertiesService as any)({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { assertUnlocked: jest.fn() });
+    const service: any = new (PropertiesService as any)({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { assertUnlocked: jest.fn() }, { recordRequired: jest.fn() });
     jest.spyOn(service, 'resolveAdvertiser').mockResolvedValue({});
     jest.spyOn(service, 'createWithAttribution').mockResolvedValue(created);
     await expect(service.createSelf(account, dto, {}, '1.1.1.1', key)).resolves.toEqual(created);

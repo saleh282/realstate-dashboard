@@ -67,6 +67,13 @@ function build(seed: { auctions?: Array<{ id?: string; status?: AuctionStatus; c
   };
   const bidsModel: any = {
     countDocuments: (f: any) => ({ session: () => ({ exec: async () => rows.filter((r) => String(r.auctionId) === String(f.auctionId)).length }) }),
+    distinct: (_field: string, f: any) => ({
+      session: () => ({
+        exec: async () => [...new Map(rows
+          .filter((r) => String(r.auctionId) === String(f.auctionId))
+          .map((r) => [r.bidderAccountId.toString(), r.bidderAccountId])).values()],
+      }),
+    }),
     findOne: (f: any) => {
       let sort: any;
       const chain: any = {
@@ -442,12 +449,27 @@ describe('AUCTION_FINALIZED domain event — transactional outbox (MAZAD-031)', 
     expect(finalizedEvents(mongo)).toHaveLength(1);
     expect(mongo.outbox.events()[0]).toMatchObject({
       type: 'AUCTION_FINALIZED', schemaVersion: 1, aggregateType: 'AUCTION', aggregateId: AUCTION, aggregateVersion: 1, audience: 'PUBLIC', occurredAt: NOW,
-      privateRouting: { winnerAccountId: CAROL },
+      privateRouting: { winnerAccountId: CAROL, losingBidderAccountIds: [ALICE, BOB] },
       payload: { auctionId: AUCTION, status: AuctionStatus.COMPLETED, winningBidSequence: 3, winningBidAmountMinor: 250_000, currency: 'EGP', acceptedBidCount: 3, finalizedAt: NOW.toISOString() },
     });
     expect(JSON.stringify(finalizedEvents(mongo)[0].payload)).not.toMatch(new RegExp(`${ALICE}|${BOB}|${CAROL}`));
     expect(auction(mongo).status).toBe(AuctionStatus.COMPLETED);
     expect(finalizedAudits(mongo)).toHaveLength(1); // the audit row is preserved alongside the event
+  });
+
+  it('derives unique losing recipients from accepted ledger rows and excludes the winner', async () => {
+    const repeatedLoserBids = [
+      bidRow(AUCTION, 1, ALICE, 100_000),
+      bidRow(AUCTION, 2, BOB, 105_000),
+      bidRow(AUCTION, 3, BOB, 110_000),
+      bidRow(AUCTION, 4, CAROL, 250_000),
+    ];
+    const { service, mongo } = build({ auctions: [{ bids: repeatedLoserBids }] });
+    await service.finalize(AUCTION);
+    expect(finalizedEvents(mongo)[0].privateRouting).toEqual({
+      winnerAccountId: CAROL,
+      losingBidderAccountIds: [ALICE, BOB],
+    });
   });
 
   it('continues the auction stream after earlier events (dense version)', async () => {

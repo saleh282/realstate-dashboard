@@ -224,13 +224,16 @@ describe('AUCTION_TRANSITIONS matrix (MAZAD-024)', () => {
 
 describe('AuctionLifecycleService.activateDueAuctions (MAZAD-024)', () => {
   it('activates a SCHEDULED auction exactly at its scheduledStartAt boundary', async () => {
-    const { instance, store, audit } = lifecycleService({
+    const { instance, store, audit, outbox } = lifecycleService({
       docs: [auctionDoc({ scheduledStartAt: NOW })],
       now: NOW,
     });
     await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 1 });
     expect(store.docs[0].status).toBe(AuctionStatus.ACTIVE);
     expect(audit.logSystemAction).toHaveBeenCalledWith(AuditAction.AUCTION_ACTIVATED, AUCTION_ID, expect.any(String), expect.anything());
+    expect(outbox.recordRequired).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'AUCTION_ACTIVATED', privateRouting: { advertiserAccountId: ADVERTISER_ID },
+    }), expect.anything());
   });
 
   it('does not activate a SCHEDULED auction one millisecond before its start', async () => {
@@ -361,7 +364,7 @@ describe('AuctionLifecycleService.expireDueAuctions (MAZAD-024)', () => {
 
 describe('AuctionLifecycleService.cancel (MAZAD-024)', () => {
   it('cancels a SCHEDULED auction without requiring a reason', async () => {
-    const { instance, store, audit } = lifecycleService({ docs: [auctionDoc({ status: AuctionStatus.SCHEDULED })] });
+    const { instance, store, audit, outbox } = lifecycleService({ docs: [auctionDoc({ status: AuctionStatus.SCHEDULED })] });
     const result = await instance.cancel(ADVERTISER_ID, AUCTION_ID, undefined);
     expect(store.docs[0].status).toBe(AuctionStatus.CANCELLED);
     expect(store.docs[0].cancelledByActorId!.toString()).toBe(ADVERTISER_ID);
@@ -370,6 +373,9 @@ describe('AuctionLifecycleService.cancel (MAZAD-024)', () => {
       expect.objectContaining({ action: AuditAction.AUCTION_CANCELLED, actorUserId: ADVERTISER_ID, targetResourceId: AUCTION_ID }),
       expect.anything(),
     );
+    expect(outbox.recordRequired).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'AUCTION_CANCELLED', privateRouting: { advertiserAccountId: ADVERTISER_ID },
+    }), expect.anything());
   });
 
   it('rejects an ACTIVE cancellation without a reason', async () => {

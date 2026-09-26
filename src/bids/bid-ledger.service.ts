@@ -78,6 +78,16 @@ export class BidLedgerService {
       .exec();
   }
 
+  /** Unique participants from the immutable accepted-bid ledger, for private terminal routing only. */
+  async distinctBidderAccountIdsForAuction(auctionId: string, options: ReadOptions = {}): Promise<string[]> {
+    if (!Types.ObjectId.isValid(auctionId)) return [];
+    const ids = await this.bids
+      .distinct('bidderAccountId', { auctionId: new Types.ObjectId(auctionId) })
+      .session(options.session ?? null)
+      .exec();
+    return [...new Set(ids.map((id) => id.toString()))];
+  }
+
   /**
    * The next free ledger position: latest sequence + 1, or 1 for an empty
    * auction. Only race-safe when called inside the acceptance transaction

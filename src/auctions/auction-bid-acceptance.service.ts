@@ -230,6 +230,7 @@ export class AuctionBidAcceptanceService {
 
     // (6) Decide from the ledger — only now that the Auction is ours.
     const highest = await this.ledger.getHighestForAuction(auctionId, { session });
+    const previousHighestBidderAccountId = highest?.bidderAccountId?.toString();
     const minimum = this.requiredMinimum(auction.startingPriceMinor, auction.minimumBidStepMinor, highest?.amountMinor);
     if (amount < minimum) {
       throw new BadRequestException({
@@ -300,6 +301,9 @@ export class AuctionBidAcceptanceService {
         extended: extension.extended,
         nextMinimumBidMinor: this.safeAdd(amount, auction.minimumBidStepMinor),
         bidderAccountId: new Types.ObjectId(actorId).toString(),
+        ...(previousHighestBidderAccountId && previousHighestBidderAccountId !== actorId
+          ? { previousHighestBidderAccountId }
+          : {}),
       }),
       session,
     );

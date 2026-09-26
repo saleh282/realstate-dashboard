@@ -7,6 +7,7 @@ import { RefreshTokenModule } from '../refresh-token/refresh-token.module';
 import { AuditModule } from '../audit/audit.module';
 import { CloudinaryModule } from '../config/cloudinary.module';
 import { AccountDeletionModule } from '../account-deletion/account-deletion.module';
+import { OutboxModule } from '../outbox/outbox.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { AccountDeletionModule } from '../account-deletion/account-deletion.modu
     AuditModule,
     CloudinaryModule,
     AccountDeletionModule,
+    OutboxModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

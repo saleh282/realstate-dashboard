@@ -497,27 +497,24 @@ describe('worker: consumers are scheduled independently (MAZAD-031 closure)', ()
   });
 });
 
-describe('scope: which consumers exist (MAZAD-031 closure; updated deliberately by MAZAD-032)', () => {
+describe('scope: which consumers exist (MAZAD-031 closure; updated deliberately by MAZAD-032/036)', () => {
   const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]));
   const files = walk(path.join(__dirname, '..', 'src')).filter((f) => f.endsWith('.ts'));
   const text = (f: string) => fs.readFileSync(f, 'utf8');
   const inRealtime = (f: string) => f.includes(`${path.sep}src${path.sep}realtime${path.sep}`);
 
-  it('the only consumer registered in src is the MAZAD-032 `realtime` consumer; there is still no notification consumer, SSE or push code', () => {
+  it('the only registered consumers are independent `realtime` and `notifications` consumers; no SSE or external push provider exists', () => {
     for (const file of files) {
       const source = text(file);
-      // MAZAD-031 had none; MAZAD-032 adds exactly one registration, in its own module.
-      if (!file.endsWith(`${path.sep}outbox-consumer.port.ts`) && !file.endsWith(`${path.sep}realtime-outbox.consumer.ts`)) expect(source).not.toMatch(/\.register\(\s*\{[^}]*name:|registry\.register\(/);
+      const consumerFile = file.endsWith(`${path.sep}realtime-outbox.consumer.ts`) || file.endsWith(`${path.sep}notifications-outbox.consumer.ts`);
+      if (!file.endsWith(`${path.sep}outbox-consumer.port.ts`) && !consumerFile) expect(source).not.toMatch(/\.register\(\s*\{[^}]*name:|registry\.register\(/);
       // The WebSocket stack belongs to the realtime module (and only the adapter line in app.setup); nothing else may use it.
       if (!inRealtime(file)) expect(source).not.toMatch(/@WebSocketGateway|@nestjs\/websockets/);
       expect(source).not.toMatch(/socket\.io|@Sse\(|firebase-admin|web-push|nodemailer.*outbox/i);
-      // Notifications (MAZAD-036) do not exist yet; realtime consumer code lives only in the realtime module.
-      expect(source).not.toMatch(/class\s+\w*Notification\w*Consumer/);
-      expect(source).not.toMatch(/name\s*[:=]\s*['"]notifications['"]/);
       if (!inRealtime(file)) expect(source).not.toMatch(/class\s+\w*Realtime\w*Consumer|name\s*[:=]\s*['"]realtime['"]/);
     }
     const registrations = files.filter((f) => !f.endsWith(`${path.sep}outbox-consumer.port.ts`) && /registry\.register\(/.test(text(f)));
-    expect(registrations.map((f) => path.basename(f))).toEqual(['realtime-outbox.consumer.ts']);
+    expect(registrations.map((f) => path.basename(f)).sort()).toEqual(['notifications-outbox.consumer.ts', 'realtime-outbox.consumer.ts']);
   });
 
   it('the immutable event stays written exactly once by the producer: OutboxService is the only writer and never mentions a consumer', () => {

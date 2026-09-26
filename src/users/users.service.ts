@@ -6,8 +6,8 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { User, UserDocument, KycStatus } from './schemas/user.schema';
 import { RefreshTokenService } from '../refresh-token/refresh-token.service';
@@ -30,6 +30,8 @@ import {
   resolveSystemRole,
 } from './identity.types';
 import { AuthorizationErrorCode } from '../authorization/authorization-error-codes';
+import { kycDecisionEvent } from '../outbox/outbox-events';
+import { OutboxService } from '../outbox/outbox.service';
 
 @Injectable()
 export class UsersService {
@@ -37,6 +39,8 @@ export class UsersService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private refreshTokenService: RefreshTokenService,
     private auditLogService: AuditLogService,
+    @InjectConnection() private readonly connection: Connection,
+    private readonly outbox: OutboxService,
   ) {}
 
   static isEmail(identifier: string): boolean {
@@ -595,71 +599,72 @@ export class UsersService {
       $inc: { kycVersion: 1 },
       ...(normalizedReason ? {} : { $unset: { kycRejectionReason: 1 } }),
     };
-    const user = await this.userModel
-      .findOneAndUpdate(
-        {
-          _id: new Types.ObjectId(targetUserId),
-          kycStatus: KycStatus.PENDING,
-          ...versionPredicate,
-        },
-        update,
-        { new: true, runValidators: true },
-      )
-      .exec();
+    const session = await this.connection.startSession();
+    let user: UserDocument | null = null;
+    try {
+      await session.withTransaction(async () => {
+        user = await this.userModel
+          .findOneAndUpdate(
+            {
+              _id: new Types.ObjectId(targetUserId),
+              kycStatus: KycStatus.PENDING,
+              ...versionPredicate,
+            },
+            update,
+            { new: true, runValidators: true, session },
+          )
+          .exec();
 
-    if (!user) {
-      const current = await this.userModel
-        .findById(targetUserId)
-        .select('kycStatus kycVersion')
-        .lean()
-        .exec();
-      if (!current) throw new NotFoundException('المستخدم غير موجود');
-      if (current.kycStatus !== KycStatus.PENDING) {
-        throw new ConflictException({
-          message: 'تمت مراجعة طلب التحقق بالفعل',
-          code: 'KYC_ALREADY_REVIEWED',
-        });
-      }
-      throw new ConflictException({
-        message: 'تم تحديث طلب التحقق، يرجى إعادة تحميل البيانات',
-        code: 'KYC_REVIEW_VERSION_CONFLICT',
+        if (!user) {
+          const current = await this.userModel
+            .findById(targetUserId)
+            .select('kycStatus kycVersion')
+            .session(session)
+            .lean()
+            .exec();
+          if (!current) throw new NotFoundException('المستخدم غير موجود');
+          if (current.kycStatus !== KycStatus.PENDING) {
+            throw new ConflictException({ message: 'تمت مراجعة طلب التحقق بالفعل', code: 'KYC_ALREADY_REVIEWED' });
+          }
+          throw new ConflictException({ message: 'تم تحديث طلب التحقق، يرجى إعادة تحميل البيانات', code: 'KYC_REVIEW_VERSION_CONFLICT' });
+        }
+
+        await this.auditLogService.logRequired({
+          action: AuditAction.ADMIN_KYC_REVIEWED,
+          actorUserId,
+          targetUserId,
+          reason: decision === 'verified' ? 'قبول وتوثيق الهوية بنجاح' : 'رفض طلب التوثيق مع السبب: ' + normalizedReason,
+          ip,
+          metadata: {
+            before: { kycStatus: KycStatus.PENDING, kycVersion: expectedVersion },
+            after: {
+              kycStatus: nextStatus,
+              verificationTrustState: decision === 'verified' ? VerificationTrustState.VERIFIED : VerificationTrustState.UNVERIFIED,
+              kycVersion: expectedVersion + 1,
+              kycReviewedAt: reviewedAt.toISOString(),
+              ...(normalizedReason ? { kycRejectionReason: normalizedReason } : {}),
+            },
+          },
+        }, session);
+        await this.outbox.recordRequired(kycDecisionEvent({
+          accountId: targetUserId,
+          occurredAt: reviewedAt,
+          decision,
+          kycVersion: expectedVersion + 1,
+        }), session);
       });
+    } finally {
+      await session.endSession();
     }
 
-    await this.auditLogService.logAdminAction(
-      AuditAction.ADMIN_KYC_REVIEWED,
-      actorUserId,
-      targetUserId,
-      decision === 'verified'
-        ? 'قبول وتوثيق الهوية بنجاح'
-        : 'رفض طلب التوثيق مع السبب: ' + normalizedReason,
-      ip,
-      {
-        before: {
-          kycStatus: KycStatus.PENDING,
-          kycVersion: expectedVersion,
-        },
-        after: {
-          kycStatus: nextStatus,
-          verificationTrustState:
-            decision === 'verified'
-              ? VerificationTrustState.VERIFIED
-              : VerificationTrustState.UNVERIFIED,
-          kycVersion: expectedVersion + 1,
-          kycReviewedAt: reviewedAt.toISOString(),
-          ...(normalizedReason
-            ? { kycRejectionReason: normalizedReason }
-            : {}),
-        },
-      },
-    );
+    if (!user) throw new ConflictException({ message: 'تعذر مراجعة طلب التحقق', code: 'KYC_REVIEW_VERSION_CONFLICT' });
 
     return {
       message: decision === 'verified' ? 'تم توثيق هوية المستخدم بنجاح' : 'تم رفض طلب التوثيق',
       userId: targetUserId,
-      kycStatus: user.kycStatus,
-      kycVersion: user.kycVersion,
-      kycReviewedAt: user.kycReviewedAt,
+      kycStatus: (user as UserDocument).kycStatus,
+      kycVersion: (user as UserDocument).kycVersion,
+      kycReviewedAt: (user as UserDocument).kycReviewedAt,
     };
   }
 

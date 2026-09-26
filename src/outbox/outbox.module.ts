@@ -18,8 +18,8 @@ import { OutboxEvent, OutboxEventSchema } from './schemas/outbox-event.schema';
  * each registers itself with the exported `OutboxConsumerRegistry` from its own
  * module (`onModuleInit`) under a stable name and a list of subscribed event
  * types, and gets its own delivery progress per event. Adding one requires no
- * change here, in any producer, or in any other consumer. The registry is EMPTY
- * today: committed events accumulate durably and the dispatcher does nothing.
+ * change here, in any producer, or in any other consumer. When no feature
+ * consumer is registered, committed events remain durable and undispatched.
  * Delivery is at-least-once per consumer; consumers deduplicate by event id.
  */
 @Module({

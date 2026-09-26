@@ -27,6 +27,8 @@ import { AuthorizationPolicyService } from '../authorization/authorization-polic
 import { PropertyAuctionLockService } from './property-auction-lock.service';
 import { IdempotencyService, canonicalize, sha256 } from '../common/idempotency/idempotency.service';
 import { hasClearGovernorateConflict, isPointInsideEgypt } from '../common/validators/egypt-location.validator';
+import { propertyDecisionEvent } from '../outbox/outbox-events';
+import { OutboxService } from '../outbox/outbox.service';
 
 const PROPERTY_IMAGE_POLICY = { kind: 'image' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000 };
 const PROPERTY_EVIDENCE_POLICY = { kind: 'document' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000, allowPdf: true };
@@ -58,6 +60,7 @@ export class PropertiesService {
     private readonly audit: AuditLogService,
     @InjectConnection() private readonly connection: Connection,
     private readonly auctionLock: PropertyAuctionLockService,
+    private readonly outbox: OutboxService,
     @Optional() private readonly idempotency?: IdempotencyService,
   ) {}
 
@@ -1113,6 +1116,15 @@ export class PropertiesService {
           ip,
           metadata: { propertyId: id, revisionId, revisionNumber: revision.revisionNumber, beforeState: 'pending_review', afterState: status, versionBefore: version, versionAfter: version + 1, rejectionReason: normalizedReason },
         }, session);
+        const advertiserAccountId = (property.advertiserAccountId ?? property.ownerId).toString();
+        await this.outbox.recordRequired(propertyDecisionEvent({
+          propertyId: id,
+          revisionId,
+          occurredAt: now,
+          decision: status,
+          decisionVersion: version + 1,
+          advertiserAccountId,
+        }), session);
       });
       return this.getForAdmin(id);
     } finally { await session.endSession(); }

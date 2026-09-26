@@ -409,7 +409,7 @@ describe('MAZAD-021 approval denormalization', () => {
 
   function approvalHarness() {
     const session = { withTransaction: jest.fn(async (work: () => Promise<void>) => work()), endSession: jest.fn() };
-    const property = { _id: propertyId, pendingRevisionId: revisionId, currentPublicRevisionId: undefined, publishedAt: undefined };
+    const property = { _id: propertyId, ownerId: actorId, advertiserAccountId: actorId, pendingRevisionId: revisionId, currentPublicRevisionId: undefined, publishedAt: undefined };
     const approvedRevision = {
       _id: revisionId, revisionNumber: 2, operationType: 'rent',
       purposeCategoryId: CATEGORY_B, purposeSubcategoryId: SUBCATEGORY_B1, legacyPropertyTypeCode: 'villa',
@@ -430,7 +430,7 @@ describe('MAZAD-021 approval denormalization', () => {
     const audit = { logRequired: jest.fn().mockResolvedValue(undefined) };
     const service = Object.create(PropertiesService.prototype) as any;
     Object.assign(service, {
-      properties, revisions, audit,
+      properties, revisions, audit, outbox: { recordRequired: jest.fn().mockResolvedValue(undefined) },
       connection: { startSession: jest.fn().mockResolvedValue(session) },
       getForAdmin: jest.fn().mockResolvedValue({ property: { id: propertyId } }),
     });

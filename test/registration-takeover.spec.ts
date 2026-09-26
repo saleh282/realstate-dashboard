@@ -186,7 +186,7 @@ describe('UsersService.replaceUnverifiedRegistration', () => {
   it('only matches accounts that have never been verified and clears lockout state', async () => {
     const exec = jest.fn().mockResolvedValue({ modifiedCount: 1 });
     const updateOne = jest.fn().mockReturnValue({ exec });
-    const service = new UsersService({ updateOne } as any, {} as any, {} as any);
+    const service = new UsersService({ updateOne } as any, {} as any, {} as any, {} as any, {} as any);
 
     await expect(
       service.replaceUnverifiedRegistration('507f1f77bcf86cd799439011', { passwordHash: 'h', fullName: 'N' }),

@@ -147,7 +147,7 @@ describe('Bid ledger immutability (MAZAD-026)', () => {
 
   it('exposes no edit/withdraw/delete API on the ledger service', () => {
     const methods = Object.getOwnPropertyNames(BidLedgerService.prototype).filter((name) => name !== 'constructor');
-    expect(methods.sort()).toEqual(['countForAuction', 'getHighestForAuction', 'getLatestForAuction', 'hasAcceptedBids', 'listForAuction', 'listForBidder', 'nextSequenceFor']);
+    expect(methods.sort()).toEqual(['countForAuction', 'distinctBidderAccountIdsForAuction', 'getHighestForAuction', 'getLatestForAuction', 'hasAcceptedBids', 'listForAuction', 'listForBidder', 'nextSequenceFor']);
     for (const method of methods) expect(method).not.toMatch(/^(create|insert|append|add|place|update|edit|set|delete|remove|withdraw|cancel)/i);
   });
 });

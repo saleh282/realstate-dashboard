@@ -27,6 +27,7 @@ import { FavoritesModule } from './favorites/favorites.module';
 import { AuctionsModule } from './auctions/auctions.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     AuctionsModule,
     OutboxModule,
     RealtimeModule,
+    NotificationsModule,
     HealthModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }],
