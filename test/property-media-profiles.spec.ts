@@ -1,6 +1,7 @@
 import { MEDIA_PROFILES, SHIPPED_MEDIA_PROFILES } from '../src/property-form-definitions/property-form-definition.constants';
 import { MEDIA_PROFILE_DEFINITIONS, mediaRequirements, requiredSlots, slotTag } from '../src/properties/media-profiles';
 import { PropertiesService } from '../src/properties/properties.service';
+import { evaluateMedia } from '../src/properties/property-form-write';
 import { PropertyMediaTagCode } from '../src/properties/property.types';
 
 /**
@@ -48,7 +49,8 @@ describe('DPF-012 media profiles', () => {
   it('residential_rooms reproduces the removed requiredPhotoSlots for every fixture', () => {
     for (const fixture of roomFixtures) {
       expect(requiredSlots('residential_rooms', fixture)).toEqual(referenceRequiredPhotoSlots(fixture));
-      expect(service.requiredPhotoSlots(fixture)).toEqual(referenceRequiredPhotoSlots(fixture));
+      // DPF-022: the write, submit, approval and Admin paths all go through evaluateMedia.
+      expect(evaluateMedia('residential_rooms', fixture, []).requiredPhotoSlots).toEqual(referenceRequiredPhotoSlots(fixture));
     }
   });
 

@@ -1,5 +1,6 @@
 import { PropertiesService } from '../src/properties/properties.service';
 import { PropertyErrorCode } from '../src/common/errors/property-error-codes';
+import { FormDefinitionStore } from './support/form-definition-store';
 
 const propertyId = '64b000000000000000000099';
 const revisionId = '64b000000000000000000088';
@@ -38,12 +39,19 @@ describe('MAZAD-019 property revision lifecycle', () => {
     Object.assign(service, {
       purposeCategories: { findOne: jest.fn().mockReturnValue(activeQuery({ _id: { toString: () => 'category' } })) },
       propertyTypes: { findOne: jest.fn().mockReturnValue(activeQuery({ purposeCategoryId: { toString: () => 'category' } })) },
-      options: { countDocuments: jest.fn().mockReturnValue(countQuery(1)) },
+      options: {
+        countDocuments: jest.fn().mockReturnValue(countQuery(1)),
+        find: jest.fn(() => { const query: any = { session: () => query, lean: () => query, exec: async () => [{ group: 'finishing_status', code: 'fully_finished' }, { group: 'delivery_status', code: 'immediate' }] }; return query; }),
+      },
+      // Every type has the seeded legacy v1 (migration 026).
+      ...new FormDefinitionStore().models(),
     });
     return service;
   };
 
+  // A legacy (pre-pinning) draft, as the legacy DTO always stored it.
   const submissionCandidate = (overrides: Record<string, unknown> = {}) => ({
+    operationType: 'sale', floor: 2, totalFloors: 5, buildingYear: 2020, finishingStatusCode: 'fully_finished', deliveryStatusCode: 'immediate',
     totalPriceMinor: 100, currency: 'EGP', marketingMode: 'SELF_SERVICE', paymentMethodCodes: ['cash'],
     purposeCategoryId: '64b000000000000000000010', purposeSubcategoryId: '64b000000000000000000011',
     livingRooms: 1, bedrooms: 1, kitchens: 1, bathrooms: 1,

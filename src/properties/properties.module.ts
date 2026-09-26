@@ -21,6 +21,7 @@ import { PropertyAuctionLockService } from './property-auction-lock.service';
 import { IdempotencyModule } from '../common/idempotency/idempotency.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { PropertyFormDefinitionVersion, PropertyFormDefinitionVersionSchema } from '../property-form-definitions/schemas/property-form-definition-version.schema';
+import { PropertyFormDefinition, PropertyFormDefinitionSchema } from '../property-form-definitions/schemas/property-form-definition.schema';
 
 @Module({
   imports: [PassportModule, AuditModule, IdempotencyModule, OutboxModule, CloudinaryModule, PropertyPurposeCategoriesModule, UsersModule, MongooseModule.forFeature([
@@ -33,8 +34,10 @@ import { PropertyFormDefinitionVersion, PropertyFormDefinitionVersionSchema } fr
     // here (not by importing AuctionsModule) so PropertiesModule never depends
     // on AuctionsModule, which already depends on PropertiesModule.
     { name: Auction.name, schema: AuctionSchema },
-    // Read-only: pinned FormDefinitionVersions for `specifications` (DPF-016).
+    // Read-only here: pinned versions for `specifications` (DPF-016) and the
+    // form heads/versions that validate and pin writes (DPF-020..023).
     { name: PropertyFormDefinitionVersion.name, schema: PropertyFormDefinitionVersionSchema },
+    { name: PropertyFormDefinition.name, schema: PropertyFormDefinitionSchema },
   ])],
   controllers: [PropertiesController, AdminPropertiesController],
   providers: [PropertiesService, RolesGuard, PropertyAuctionLockService],

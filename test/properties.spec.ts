@@ -4,6 +4,7 @@ import { AssetClassification } from '../src/config/evidence-asset.types';
 import { AccountType, BrokerStatus } from '../src/users/identity.types';
 import { PropertyMarketingMode, PropertyMediaTagCode } from '../src/properties/property.types';
 import { PropertyErrorCode } from '../src/common/errors/property-error-codes';
+import { FormDefinitionStore } from './support/form-definition-store';
 
 const query = (value: unknown) => {
   const chain: any = { lean: () => ({ exec: jest.fn().mockResolvedValue(value) }) };
@@ -50,6 +51,8 @@ describe('property publishing validation', () => {
       options: { findOne: jest.fn().mockReturnValue(query({ code: 'valid' })), find: jest.fn().mockReturnValue(query([{ code: 'cash' }])) },
       amenities: { countDocuments: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(1) }) },
       auctionLock: { assertUnlocked: jest.fn().mockResolvedValue(undefined) },
+      // Every type has the seeded legacy v1 (migration 026).
+      ...new FormDefinitionStore().models(),
       properties: {}, cloudinary: {}, ...overrides,
     });
     return instance as PropertiesService;
@@ -77,20 +80,17 @@ describe('property publishing validation', () => {
     )).rejects.toMatchObject({ response: expect.objectContaining({ code: PropertyErrorCode.REVISION_VERSION_CONFLICT }) });
   });
 
+  // DPF-022: a draft may be saved without every presentation photo (see
+  // property-dynamic-form-writes.spec.ts); submission enforces the slots.
   it.each(requiredPhotoSlots)('rejects submission when required photo slot %s is missing', async (missingSlot) => {
     const suppliedSlots = requiredPhotoSlots.filter((slot) => slot !== missingSlot);
-    await expect(service().create(userId, {
-      ...dto,
-      imageLabels: suppliedSlots,
-      imageSlotIds: suppliedSlots,
-    }, {
-      images: suppliedSlots.map(() => ({ mimetype: 'image/png', buffer: validPng } as any)),
-    })).rejects.toMatchObject({
+    const revision = { ...dto, galleryMedia: suppliedSlots.map((slotId) => ({ slotId })) };
+    expect(() => (service() as any).assertPresentationMediaComplete(revision, undefined, 'submit')).toThrow(expect.objectContaining({
       response: expect.objectContaining({
         code: 'PROPERTY_REQUIRED_PHOTO_SLOTS_MISSING',
-        details: { missingPhotoSlots: [missingSlot], invalidPhotoSlots: [] },
+        details: { missingPhotoSlots: [missingSlot] },
       }),
-    });
+    }));
   });
 
   it('requires exterior and entrance to use distinct photo content', async () => {

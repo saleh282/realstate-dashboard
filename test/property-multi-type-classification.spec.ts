@@ -8,6 +8,7 @@ import { MAX_PROPERTY_TYPES, selectedPropertyTypeIds } from '../src/properties/p
 import { PropertiesService } from '../src/properties/properties.service';
 import { PropertyLifecycleStatus, PropertyMarketingMode } from '../src/properties/property.types';
 import { AccountType } from '../src/users/identity.types';
+import { FormDefinitionStore } from './support/form-definition-store';
 
 /**
  * DPF-005 — multi-property-type classification: purposeSubcategoryId stays the
@@ -117,6 +118,8 @@ function writeHarness(options: {
     connection: { startSession: jest.fn().mockResolvedValue(session) },
     audit: { logRequired: jest.fn(), logResourceAction: jest.fn(), logAdminResourceAction: jest.fn() },
     evidenceAssets: { deleteOrEnqueue: jest.fn() },
+    // Every type has the seeded legacy v1 (migration 026).
+    ...new FormDefinitionStore().models(),
   });
   const stored = () => createdRevisions.at(-1) ?? draftDocument;
   return { service: service as any, propertyTypes, revisions, properties, usage, createdRevisions, createdProperties, draftDocument, stored, session };
@@ -335,11 +338,18 @@ describe('DPF-005 submission re-checks every selected type', () => {
         findOne: jest.fn((filter: any) => chain(catalog.find((type) => matchesType(type, filter)) ?? null)),
         find: jest.fn((filter: any) => chain(catalog.filter((type) => matchesType(type, filter)))),
       },
-      options: { countDocuments: jest.fn(() => ({ session: () => ({ exec: async () => 1 }) })) },
+      options: {
+        countDocuments: jest.fn(() => ({ session: () => ({ exec: async () => 1 }) })),
+        find: jest.fn(() => chain([{ group: 'finishing_status', code: 'fully_finished' }, { group: 'delivery_status', code: 'immediate' }])),
+      },
+      ...new FormDefinitionStore().models(),
     });
     return service;
   }
+  // A legacy (pre-pinning) draft, as the legacy DTO always stored it.
   const candidate = (selected: string[]) => ({
+    operationType: 'sale', bedrooms: 3, livingRooms: 1, kitchens: 1, bathrooms: 2, floor: 2, totalFloors: 5, buildingYear: 2020,
+    finishingStatusCode: 'fully_finished', deliveryStatusCode: 'immediate',
     totalPriceMinor: 100, currency: 'EGP', marketingMode: PropertyMarketingMode.PLATFORM_MANAGED, paymentMethodCodes: ['cash'], galleryMedia: [{ slotId: 'exterior' }],
     purposeCategoryId: new Types.ObjectId(PURPOSE_A), purposeSubcategoryId: new Types.ObjectId(APARTMENT), purposeSubcategoryIds: selected.map((id) => new Types.ObjectId(id)),
   });

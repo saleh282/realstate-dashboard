@@ -1,5 +1,5 @@
 import { Transform, Type } from 'class-transformer';
-import { Allow, ArrayMaxSize, ArrayNotEmpty, ArrayUnique, IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsMongoId, IsNotEmpty, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { Allow, ArrayMaxSize, ArrayNotEmpty, ArrayUnique, IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsMongoId, IsNotEmpty, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { decodeMinorUnitTransport, EGP_CURRENCY, MONEY_MINOR_MAX } from '../../common/money/money';
 import { PropertyMarketingMode } from '../property.types';
 
@@ -30,15 +30,28 @@ export class CreatePropertyDto {
   @Type(() => Number) @IsNumber() @Min(-90) @Max(90) latitude: number;
   @Type(() => Number) @IsNumber() @Min(-180) @Max(180) longitude: number;
   @Type(() => Number) @IsNumber() @Min(1) area: number;
-  @Type(() => Number) @IsInt() @Min(1) @Max(100) bedrooms: number;
-  @Type(() => Number) @IsInt() @Min(1) @Max(100) livingRooms: number;
-  @Type(() => Number) @IsInt() @Min(1) @Max(100) kitchens: number;
-  @Type(() => Number) @IsInt() @Min(1) @Max(100) bathrooms: number;
-  @Type(() => Number) @IsInt() @Min(-10) @Max(300) floor: number;
-  @Type(() => Number) @IsInt() @Min(1) @Max(300) totalFloors: number;
-  @Type(() => Number) @IsInt() @Min(1800) @Max(2200) buildingYear: number;
-  @IsString() @IsNotEmpty() finishingStatusCode: string;
-  @IsString() @IsNotEmpty() deliveryStatusCode: string;
+  // Legacy flat spec fields (frozen §D #4): optional, used only by the legacy
+  // (pre-dynamic-form) write path, bounds unchanged. Rejected with a version id.
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) bedrooms?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) livingRooms?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) kitchens?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) bathrooms?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(-10) @Max(300) floor?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(300) totalFloors?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1800) @Max(2200) buildingYear?: number;
+  @IsOptional() @IsString() @IsNotEmpty() finishingStatusCode?: string;
+  @IsOptional() @IsString() @IsNotEmpty() deliveryStatusCode?: string;
+  /** Dynamic form (frozen §B1): the PRIMARY type's current published version. */
+  @IsOptional() @IsMongoId() formDefinitionVersionId?: string;
+  /**
+   * JSON string of the attribute map. Parsed and size-checked by the service
+   * so every malformation gets PROPERTY_ATTRIBUTES_MALFORMED with its reason.
+   */
+  @IsOptional() @Allow() attributes?: unknown;
+  /** Optional echo of the pin the client rendered; must match the stored version when sent. */
+  @IsOptional() @IsMongoId() formDefinitionId?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) formDefinitionVersion?: number;
+  @IsOptional() @Matches(/^[a-f0-9]{64}$/) formContentHash?: string;
   @Transform(jsonArray) @IsArray() @ArrayUnique() @ArrayMaxSize(100) @IsString({ each: true }) amenityCodes: string[];
   @Transform(({ value }) => decodeMinorUnitTransport(value)) @IsInt() @Min(1) @Max(MONEY_MINOR_MAX) totalPriceMinor: number;
   /** @deprecated Historical read field; rejected for new writes. */

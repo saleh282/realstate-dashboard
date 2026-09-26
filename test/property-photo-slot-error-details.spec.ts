@@ -11,6 +11,7 @@ import { PropertiesController } from '../src/properties/properties.controller';
 import { PropertiesService } from '../src/properties/properties.service';
 import { PropertyMarketingMode } from '../src/properties/property.types';
 import { AccountType, BrokerStatus } from '../src/users/identity.types';
+import { FormDefinitionStore } from './support/form-definition-store';
 
 /**
  * DPF-003 — photo-slot validation data travels under the standard `details`
@@ -34,19 +35,31 @@ const query = (value: unknown) => {
   return chain;
 };
 
-// The real PropertiesService producers, with catalog lookups faked the same way as properties.spec.ts.
+// The real PropertiesService producers, with catalog lookups faked the same way as properties.spec.ts
+// and just enough persistence for a draft save to complete.
+const matched = (count: number) => ({ exec: jest.fn().mockResolvedValue({ matchedCount: count }) });
+const createdRevisions: any[] = [];
 function realPropertiesService() {
   const instance = Object.create(PropertiesService.prototype) as any;
+  const session = { withTransaction: jest.fn(async (work: () => Promise<void>) => work()), endSession: jest.fn() };
   Object.assign(instance, {
     users: { find: jest.fn().mockReturnValue(query([{ _id: { toString: () => userId }, systemRole: 'USER', accountType: AccountType.USER, accountStatus: 'ACTIVE' }])) },
-    purposeCategories: { findOne: jest.fn().mockReturnValue(query({ _id: { toString: () => categoryId } })) },
-    propertyTypes: { findOne: jest.fn().mockReturnValue(query({ _id: { toString: () => subcategoryId }, code: 'apartment', purposeCategoryId: { toString: () => categoryId } })) },
-    governorates: { findOne: jest.fn().mockReturnValue(query({ code: 'cairo' })) },
-    cities: { findOne: jest.fn().mockReturnValue(query({ _id: '64b000000000000000000020', nameAr: 'القاهرة' })) },
-    options: { findOne: jest.fn().mockReturnValue(query({ code: 'valid' })), find: jest.fn().mockReturnValue(query([{ code: 'cash' }])) },
-    amenities: { countDocuments: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(1) }) },
+    purposeCategories: { findOne: jest.fn().mockReturnValue(query({ _id: { toString: () => categoryId } })), updateOne: jest.fn(() => matched(1)) },
+    propertyTypes: { findOne: jest.fn().mockReturnValue(query({ _id: { toString: () => subcategoryId }, code: 'apartment', purposeCategoryId: { toString: () => categoryId } })), updateMany: jest.fn(() => matched(1)) },
+    governorates: { findOne: jest.fn().mockReturnValue(query({ code: 'cairo' })), updateOne: jest.fn(() => matched(1)) },
+    cities: { findOne: jest.fn().mockReturnValue(query({ _id: '64b000000000000000000020', nameAr: 'القاهرة' })), updateOne: jest.fn(() => matched(1)) },
+    options: { findOne: jest.fn().mockReturnValue(query({ code: 'valid' })), find: jest.fn().mockReturnValue(query([{ code: 'cash' }])), updateMany: jest.fn(() => matched(3)) },
+    amenities: { countDocuments: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(1) }), updateMany: jest.fn(() => matched(1)) },
     auctionLock: { assertUnlocked: jest.fn().mockResolvedValue(undefined) },
-    properties: {}, evidenceAssets: { uploadPublicPropertyMedia: jest.fn() },
+    ...new FormDefinitionStore().models(),
+    properties: { create: jest.fn(async ([value]: any[]) => [{ ...value, toObject: () => ({ ...value, createdAt: new Date() }) }]), deleteOne: jest.fn(() => ({ exec: jest.fn().mockResolvedValue(undefined) })) },
+    revisions: { create: jest.fn(async ([value]: any[]) => { createdRevisions.push(value); return [value]; }), deleteOne: jest.fn(() => ({ exec: jest.fn().mockResolvedValue(undefined) })) },
+    connection: { startSession: jest.fn().mockResolvedValue(session) },
+    audit: { logRequired: jest.fn(), logResourceAction: jest.fn(), logAdminResourceAction: jest.fn() },
+    evidenceAssets: {
+      uploadPublicPropertyMedia: jest.fn(async () => ({ publicId: 'photo', secureUrl: 'https://cdn.example/photo.png', resourceType: 'image', deliveryType: 'upload', format: 'png', bytes: validPng.length })),
+      deleteOrEnqueue: jest.fn(),
+    },
   });
   return instance as PropertiesService;
 }
@@ -101,9 +114,11 @@ describe('DPF-003 photo-slot error details over HTTP (POST /properties)', () => 
     for (const key of ['missingPhotoSlots', 'invalidPhotoSlots', 'duplicatePhotoSlots']) expect(res.body).not.toHaveProperty(key);
   };
 
-  it('returns missing required photo slots under details.missingPhotoSlots', async () => {
+  it('saves a draft that is only missing required slots (DPF-022: completeness is enforced at submit)', async () => {
     const res = await createWithSlots(requiredPhotoSlots.filter((slot) => slot !== 'bathroom_2'));
-    expectEnvelope(res, 'PROPERTY_REQUIRED_PHOTO_SLOTS_MISSING', MISSING_MESSAGE, { missingPhotoSlots: ['bathroom_2'], invalidPhotoSlots: [] });
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(createdRevisions.at(-1).galleryMedia.map((asset: any) => asset.slotId)).toEqual(requiredPhotoSlots.filter((slot) => slot !== 'bathroom_2'));
   });
 
   it('returns unknown photo slots under details.invalidPhotoSlots', async () => {

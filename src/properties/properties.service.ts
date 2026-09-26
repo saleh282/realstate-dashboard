@@ -23,9 +23,45 @@ import { User, UserDocument } from '../users/schemas/user.schema';
 import { AccountType } from '../users/identity.types';
 import { PropertyLifecycleStatus, PropertyMarketingMode, PropertyMediaOrigin, PropertyMediaTagCode, PropertyRevisionModerationStatus } from './property.types';
 import { PropertyErrorCode } from '../common/errors/property-error-codes';
-import { requiredSlots, slotTag } from './media-profiles';
+import { slotTag } from './media-profiles';
 import { buildSpecifications, catalogReferences, deprecatedFlatFields, effectiveSpec, isPinnedRecord, type Specifications } from './property-specifications';
 import { PropertyFormDefinitionVersion, type PropertyFormDefinitionVersionDocument } from '../property-form-definitions/schemas/property-form-definition-version.schema';
+import { PropertyFormDefinition, type PropertyFormDefinitionDocument } from '../property-form-definitions/schemas/property-form-definition.schema';
+import { LEGACY_RESIDENTIAL_CONTENT_HASH, type FormOperationType, type MediaProfile } from '../property-form-definitions/property-form-definition.constants';
+import { LEGACY_ATTRIBUTE_KEYS, LEGACY_SPEC_FIELDS } from '../property-attributes/property-attribute.constants';
+import {
+  parseAttributes,
+  propertyAttributesInvalid,
+  propertyAttributesMalformed,
+  validateAgainstVersion,
+  type NormalizedAttributes,
+  type ParsedAttributes,
+} from '../common/validators/property-attributes';
+import {
+  FormDefinitionInvalidReason,
+  amenitiesNotEnabled,
+  approvedFacets,
+  assertDraftMedia,
+  assertDynamicPin,
+  assertListingEnabled,
+  assertMediaComplete,
+  assertUsableVersion,
+  carriedAttributes,
+  catalogCandidates,
+  classifyFormWrite,
+  clientUpgradeRequired,
+  currentPublishedForm,
+  evaluateMedia,
+  formDefinitionInvalid,
+  formVersionOutdated,
+  isListingEnabled,
+  legacyAttributeInput,
+  toParsedAttributes,
+  type FormState,
+  type FormVersionRecord,
+  type FormWriteMode,
+  type PropertyFacetValues,
+} from './property-form-write';
 import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
 import { PropertyAuctionLockService } from './property-auction-lock.service';
 import { IdempotencyService, canonicalize, sha256 } from '../common/idempotency/idempotency.service';
@@ -71,6 +107,21 @@ type PropertyCreateFiles = {
   titleDeed?: Express.Multer.File[];
 };
 
+/** The PRIMARY type's form a write is validated against and pinned to (DPF-020). */
+type ResolvedWriteForm = {
+  definitionId: Types.ObjectId;
+  versionId: Types.ObjectId;
+  version: number;
+  contentHash: string;
+  attributes: NormalizedAttributes;
+  mediaProfile: MediaProfile;
+  /** Catalog codes used by `attributes`, for the usage increment. */
+  catalogReferences: Array<{ group: string; code: string }>;
+};
+
+/** Media profile and effective attributes that drive photo completeness (DPF-022). */
+type MediaForm = { mediaProfile: MediaProfile; attributes: Readonly<Record<string, unknown>> };
+
 type PropertyAttribution = {
   actorId: Types.ObjectId;
   advertiserId: Types.ObjectId;
@@ -96,6 +147,7 @@ export class PropertiesService {
     private readonly outbox: OutboxService,
     @Optional() private readonly idempotency?: IdempotencyService,
     @Optional() @InjectModel(PropertyFormDefinitionVersion.name) private readonly formVersions?: Model<PropertyFormDefinitionVersionDocument>,
+    @Optional() @InjectModel(PropertyFormDefinition.name) private readonly formDefinitions?: Model<PropertyFormDefinitionDocument>,
   ) {}
 
   /** Digest of everything that defines a create/revision request, including file bytes. */
@@ -103,7 +155,13 @@ export class PropertiesService {
     const digest = (list?: Express.Multer.File[]) =>
       (list ?? []).map((file) => `${file.fieldname}:${file.mimetype}:${sha256(file.buffer)}`);
     // The selected-type set is order-insensitive: one logical selection, one fingerprint.
-    const identity = dto.purposeSubcategoryIds === undefined ? dto : { ...dto, purposeSubcategoryIds: canonicalPropertyTypeOrder(dto.purposeSubcategoryIds) };
+    const identity: Record<string, unknown> = dto.purposeSubcategoryIds === undefined ? { ...dto } : { ...dto, purposeSubcategoryIds: canonicalPropertyTypeOrder(dto.purposeSubcategoryIds) };
+    // The form pin is part of the DTO; the attribute map is fingerprinted by
+    // content, so key order and whitespace in the JSON do not change it.
+    if (dto.attributes !== undefined) {
+      const parsed = parseAttributes(dto.attributes);
+      identity.attributes = parsed.ok ? { parsed: { ...parsed.attributes } } : { raw: dto.attributes };
+    }
     return sha256(canonicalize({ target, dto: identity, images: digest(files?.images), titleDeed: digest(files?.titleDeed) }));
   }
 
@@ -173,53 +231,29 @@ export class PropertiesService {
     if (dto.downPaymentMinor !== undefined || dto.downPayment !== undefined || dto.paymentMethodCode !== undefined) {
       throw new BadRequestException({ message: 'حقول المقدم وطريقة السداد المفردة غير مقبولة في عقد العقار الجديد', code: PropertyErrorCode.LEGACY_INPUT_NOT_ACCEPTED });
     }
+    // Frozen §B1/§H5 form transport rules, before any database access.
+    const formMode = classifyFormWrite(dto as unknown as Record<string, unknown>);
     if (!Object.values(PropertyMarketingMode).includes(dto.marketingMode)) {
       throw new BadRequestException({ message: 'وضع التسويق غير صالح', code: PropertyErrorCode.MARKETING_MODE_INVALID });
     }
     if (!Array.isArray(dto.paymentMethodCodes) || dto.paymentMethodCodes.length === 0 || new Set(dto.paymentMethodCodes).size !== dto.paymentMethodCodes.length) {
       throw new BadRequestException({ message: 'يجب اختيار طرق سداد صالحة وغير مكررة', code: PropertyErrorCode.PAYMENT_METHODS_INVALID });
     }
+    // A draft may be saved without its presentation photos; completeness is
+    // enforced when it is submitted (DPF-022, frozen §I).
     const images = files?.images ?? [];
-    const customerPhotosRequired = dto.marketingMode === PropertyMarketingMode.SELF_SERVICE;
-    if (customerPhotosRequired && !images.length) {
-      throw new BadRequestException({ message: 'صور العقار مطلوبة عند اختيار التسويق الذاتي', code: PropertyErrorCode.REQUIRED_PHOTO_SLOTS_MISSING });
-    }
     if (images.length > 20) throw new BadRequestException({ message: 'عدد صور العقار يتجاوز الحد المسموح', code: EvidenceErrorCode.FILE_COUNT_EXCEEDED });
     if (dto.imageLabels.length !== images.length) throw new BadRequestException('عدد مسميات الصور لا يطابق عدد الصور');
     if (!Array.isArray(dto.imageSlotIds) || dto.imageSlotIds.length !== images.length || new Set(dto.imageSlotIds).size !== dto.imageSlotIds.length) {
       throw new BadRequestException({ message: 'تصنيفات صور العقار غير صالحة', code: EvidenceErrorCode.REQUIRED_PHOTO_SLOTS_MISSING });
     }
-    const requiredPhotoSlots = this.requiredPhotoSlots(dto);
-    const suppliedPhotoSlots = new Set(dto.imageSlotIds);
-    const missingPhotoSlots = requiredPhotoSlots.filter((slotId) => !suppliedPhotoSlots.has(slotId));
-    const invalidPhotoSlots = dto.imageSlotIds.filter((slotId) => !requiredPhotoSlots.includes(slotId) && !/^additional_[1-9]\d*$/.test(slotId));
-    if ((customerPhotosRequired && missingPhotoSlots.length) || invalidPhotoSlots.length) {
-      throw new BadRequestException({
-        message: 'يجب استكمال جميع فئات صور العقار المطلوبة',
-        code: EvidenceErrorCode.REQUIRED_PHOTO_SLOTS_MISSING,
-        details: { missingPhotoSlots, invalidPhotoSlots },
-      });
-    }
-    const seenRequiredPhotoContent = new Map<string, string>();
-    const duplicatePhotoSlots: string[] = [];
-    for (const slotId of requiredPhotoSlots.filter(slotId => suppliedPhotoSlots.has(slotId))) {
-      const index = dto.imageSlotIds.indexOf(slotId);
-      const digest = createHash('sha256').update(images[index].buffer).digest('hex');
-      const firstSlot = seenRequiredPhotoContent.get(digest);
-      if (firstSlot) duplicatePhotoSlots.push(firstSlot, slotId);
-      else seenRequiredPhotoContent.set(digest, slotId);
-    }
-    if (duplicatePhotoSlots.length) {
-      throw new BadRequestException({
-        message: 'يجب استخدام صورة مستقلة لكل قسم مطلوب',
-        code: EvidenceErrorCode.PHOTO_SLOT_MEDIA_DUPLICATED,
-        details: { duplicatePhotoSlots: [...new Set(duplicatePhotoSlots)] },
-      });
-    }
     if (images.length ? dto.coverImageIndex >= images.length : dto.coverImageIndex !== 0) {
       throw new BadRequestException('صورة الغلاف المحددة غير صالحة');
     }
-    if (dto.floor > dto.totalFloors) throw new BadRequestException('رقم الطابق لا يمكن أن يتجاوز عدد الطوابق');
+    // Legacy clients keep today's exact message; the form's cross-field rule also covers it.
+    if (formMode === 'legacy' && dto.floor !== undefined && dto.totalFloors !== undefined && dto.floor > dto.totalFloors) {
+      throw new BadRequestException('رقم الطابق لا يمكن أن يتجاوز عدد الطوابق');
+    }
     const detectedImages = images.map((image) => validateEvidenceFile(image, PROPERTY_IMAGE_POLICY));
     const deedFile = files.titleDeed?.[0];
     const detectedDeed = deedFile ? validateEvidenceFile(deedFile, PROPERTY_EVIDENCE_POLICY) : undefined;
@@ -228,8 +262,9 @@ export class PropertiesService {
       this.purposeCategories.findOne({ _id: dto.purposeCategoryId, isActive: true }).lean().exec(),
       this.propertyTypes.findOne({ _id: dto.purposeSubcategoryId, isActive: true }).lean().exec(),
       this.governorates.findOne({ code: dto.governorateCode, isActive: true }).lean().exec(),
-      this.options.findOne({ group: 'finishing_status', code: dto.finishingStatusCode, isActive: true }).lean().exec(),
-      this.options.findOne({ group: 'delivery_status', code: dto.deliveryStatusCode, isActive: true }).lean().exec(),
+      // Legacy clients keep today's catalog error; dynamic catalog values go through the form validator.
+      formMode === 'legacy' && dto.finishingStatusCode !== undefined ? this.options.findOne({ group: 'finishing_status', code: dto.finishingStatusCode, isActive: true }).lean().exec() : undefined,
+      formMode === 'legacy' && dto.deliveryStatusCode !== undefined ? this.options.findOne({ group: 'delivery_status', code: dto.deliveryStatusCode, isActive: true }).lean().exec() : undefined,
       this.options.find({ group: 'payment_method', code: { $in: dto.paymentMethodCodes }, isActive: true }).lean().exec(),
       this.amenities.countDocuments({ code: { $in: dto.amenityCodes }, isActive: true }).exec(),
     ]);
@@ -253,8 +288,21 @@ export class PropertiesService {
     if (payments.length !== dto.paymentMethodCodes.length) {
       throw new BadRequestException({ message: 'إحدى طرق السداد غير موجودة أو غير متاحة', code: PropertyErrorCode.PAYMENT_METHODS_INVALID });
     }
-    const invalid = [!governorate && 'المحافظة', !finishing && 'حالة التشطيب', !delivery && 'جاهزية التسليم'].filter(Boolean);
+    const invalid = [
+      !governorate && 'المحافظة',
+      formMode === 'legacy' && dto.finishingStatusCode !== undefined && !finishing && 'حالة التشطيب',
+      formMode === 'legacy' && dto.deliveryStatusCode !== undefined && !delivery && 'جاهزية التسليم',
+    ].filter(Boolean);
     if (invalid.length || amenityCount !== dto.amenityCodes.length) throw new BadRequestException(`بعض الاختيارات غير موجودة أو غير متاحة: ${invalid.join('، ')}${amenityCount !== dto.amenityCodes.length ? `${invalid.length ? '، ' : ''}المميزات والخدمات` : ''}`);
+    // The legacy lookups above already proved these codes active; the form validator reuses that.
+    const knownActiveCatalog = [
+      ...(finishing ? [{ group: 'finishing_status', code: dto.finishingStatusCode! }] : []),
+      ...(delivery ? [{ group: 'delivery_status', code: dto.deliveryStatusCode! }] : []),
+    ];
+    const form = await this.resolveWriteForm(dto, formMode, selectedTypeIds, type._id, knownActiveCatalog, existingProperty, existingDraft);
+    // Frozen §I draft rules for the primary form's media profile: valid slot ids,
+    // no reused content across required slots, no completeness requirement.
+    assertDraftMedia(evaluateMedia(form.mediaProfile, form.attributes, dto.imageSlotIds.map((slotId, index) => ({ slotId, digest: sha256(images[index].buffer) }))));
 
     const uploadedPublic: PropertyAsset[] = [];
     let titleDeed: PropertyAsset | undefined;
@@ -266,7 +314,7 @@ export class PropertiesService {
           ...(await this.uploadPublicImage(images[i], detectedImages[i])),
           label: dto.imageLabels[i],
           slotId: dto.imageSlotIds[i],
-          tagCode: this.mediaTagFromGuidedSlot(dto.imageSlotIds[i]),
+          tagCode: slotTag(form.mediaProfile, dto.imageSlotIds[i]),
           origin: PropertyMediaOrigin.ADVERTISER,
           sortOrder: i,
         });
@@ -304,15 +352,13 @@ export class PropertiesService {
         latitude: dto.latitude,
         longitude: dto.longitude,
         area: dto.area,
-        bedrooms: dto.bedrooms,
-        livingRooms: dto.livingRooms,
-        kitchens: dto.kitchens,
-        bathrooms: dto.bathrooms,
-        floor: dto.floor,
-        totalFloors: dto.totalFloors,
-        buildingYear: dto.buildingYear,
-        finishingStatusCode: dto.finishingStatusCode,
-        deliveryStatusCode: dto.deliveryStatusCode,
+        // Frozen §A5: every new revision is pinned to its PRIMARY type's form;
+        // the legacy flat spec fields are never written on pinned revisions.
+        formDefinitionId: form.definitionId,
+        formDefinitionVersionId: form.versionId,
+        formDefinitionVersion: form.version,
+        formContentHash: form.contentHash,
+        attributes: form.attributes,
         amenityCodes: dto.amenityCodes,
         totalPriceMinor: dto.totalPriceMinor,
         currency: EGP_CURRENCY,
@@ -350,16 +396,8 @@ export class PropertiesService {
         additionalAddressDetails: dto.additionalAddressDetails,
         latitude: dto.latitude,
         longitude: dto.longitude,
+        // New aggregates no longer carry the legacy spec fields (frozen §A5); reads use the revision.
         area: dto.area,
-        bedrooms: dto.bedrooms,
-        livingRooms: dto.livingRooms,
-        kitchens: dto.kitchens,
-        bathrooms: dto.bathrooms,
-        floor: dto.floor,
-        totalFloors: dto.totalFloors,
-        buildingYear: dto.buildingYear,
-        finishingStatusCode: dto.finishingStatusCode,
-        deliveryStatusCode: dto.deliveryStatusCode,
         amenityCodes: dto.amenityCodes,
         totalPriceMinor: dto.totalPriceMinor,
         currency: EGP_CURRENCY,
@@ -394,6 +432,8 @@ export class PropertiesService {
             delete replacement.revisionNumber;
             delete replacement.createdByActorId;
             delete replacement.decisionVersion;
+            // A legacy draft re-saved as a pinned one drops its flat spec fields.
+            for (const field of LEGACY_SPEC_FIELDS) replacement[field] = undefined;
             const draftDocument = await this.revisions.findOne({ _id: revisionId, propertyId, moderationStatus: PropertyRevisionModerationStatus.DRAFT, decisionVersion: existingDraft.decisionVersion ?? 0 }).session(session).exec();
             if (!draftDocument) throw new ConflictException({ message: 'تغيرت المسودة أثناء الحفظ', code: PropertyErrorCode.REVISION_VERSION_CONFLICT });
             draftDocument.supersededAssets.push(...(draftDocument.galleryMedia ?? []), ...(draftDocument.privateEvidenceAssets ?? []));
@@ -411,9 +451,9 @@ export class PropertiesService {
             city
               ? this.cities.updateOne({ _id: city._id, governorateId: governorate!._id, isActive: true }, { $inc: { usageCount: 1 } }, { session }).exec()
               : Promise.resolve({ matchedCount: legacyCityAllowed ? 1 : 0 }),
+            // Catalog-backed attribute values (the form's finishing/delivery codes) plus payment methods.
             this.options.updateMany({ $or: [
-              { group: 'finishing_status', code: dto.finishingStatusCode, isActive: true },
-              { group: 'delivery_status', code: dto.deliveryStatusCode, isActive: true },
+              ...form.catalogReferences.map(({ group, code }) => ({ group, code, isActive: true })),
               { group: 'payment_method', code: { $in: dto.paymentMethodCodes }, isActive: true },
             ] }, { $inc: { usageCount: 1 } }, { session }).exec(),
             dto.amenityCodes.length ? this.amenities.updateMany({ code: { $in: dto.amenityCodes }, isActive: true }, { $inc: { usageCount: 1 } }, { session }).exec() : Promise.resolve({ matchedCount: 0 }),
@@ -421,7 +461,7 @@ export class PropertiesService {
           if (purposeUsage.matchedCount !== 1 || typeUsage.matchedCount !== selectedTypeIds.length) {
             throw new BadRequestException({ message: 'تم تغيير تصنيف غرض العقار؛ أعد تحميل الخيارات', code: PropertyErrorCode.PURPOSE_HIERARCHY_MISMATCH });
           }
-          if (governorateUsage.matchedCount !== 1 || cityUsage.matchedCount !== 1 || optionUsage.matchedCount !== dto.paymentMethodCodes.length + 2 || amenityUsage.matchedCount !== dto.amenityCodes.length) {
+          if (governorateUsage.matchedCount !== 1 || cityUsage.matchedCount !== 1 || optionUsage.matchedCount !== dto.paymentMethodCodes.length + form.catalogReferences.length || amenityUsage.matchedCount !== dto.amenityCodes.length) {
             throw new BadRequestException({ message: 'تم تغيير أحد خيارات العقار؛ أعد تحميل الخيارات', code: PropertyErrorCode.CATALOG_VALUE_INVALID });
           }
           if (!existingProperty) await this.audit.logRequired({ action: AuditAction.PROPERTY_CREATED, actorUserId: attribution.actorId.toString(), targetResourceId: propertyId.toString(), reason: 'property aggregate created', ip, metadata: { advertiserAccountId: attribution.advertiserId.toString(), revisionId: revisionId.toString(), revisionNumber } }, session);
@@ -489,7 +529,185 @@ export class PropertiesService {
     const stillValid = carried.length
       ? new Set((await this.propertyTypes.find({ _id: { $in: carried }, isActive: true, purposeCategoryId: purposeId }).lean().exec()).map((item) => item._id.toString()))
       : new Set<string>();
-    return toObjectIds(canonicalPropertyTypeOrder([primaryId, ...carried.filter((id) => stillValid.has(id))]));
+    // Amendment §5.9: carried types must still pass rules 3-4 (rule 4: listing-enabled).
+    const carriedValid = carried.filter((id) => stillValid.has(id));
+    const formState = carriedValid.length ? await this.loadFormState(carriedValid) : undefined;
+    return toObjectIds(canonicalPropertyTypeOrder([primaryId, ...carriedValid.filter((id) => isListingEnabled(id, formState!))]));
+  }
+
+  /**
+   * FormDefinition heads of the given property types and the versions they
+   * point to, plus any extra version ids (a pinned or submitted version).
+   */
+  private async loadFormState(typeIds: readonly string[], versionIds: readonly string[] = [], session?: ClientSession): Promise<FormState> {
+    if (!this.formDefinitions || !this.formVersions) throw new Error('PropertyFormDefinition models are not registered');
+    const inSession = <T extends { session(value: ClientSession): T }>(query: T): T => (session ? query.session(session) : query);
+    const heads = typeIds.length
+      ? await inSession(this.formDefinitions.find({ purposeSubcategoryId: { $in: toObjectIds([...new Set(typeIds.map((value) => value.toLowerCase()))]) } })).lean().exec()
+      : [];
+    const ids = [...new Set([
+      ...heads.map((head) => head.currentVersionId).filter(Boolean).map((value) => String(value).toLowerCase()),
+      ...versionIds.map((value) => String(value).toLowerCase()),
+    ])].filter((value) => /^[a-f0-9]{24}$/.test(value));
+    const versions = ids.length ? await inSession(this.formVersions.find({ _id: { $in: toObjectIds(ids) } })).lean().exec() : [];
+    return {
+      headByType: new Map(heads.map((head) => [String(head.purposeSubcategoryId).toLowerCase(), head as any])),
+      versionById: new Map(versions.map((version) => [String(version._id).toLowerCase(), version as unknown as FormVersionRecord])),
+    };
+  }
+
+  /** `group:code` of every candidate that is an active catalog option now; `known` needs no lookup. */
+  private async activeCatalogCodes(candidates: Array<{ group: string; code: string }>, known: Array<{ group: string; code: string }> = [], session?: ClientSession): Promise<Set<string>> {
+    const active = new Set(known.map(({ group, code }) => `${group}:${code}`));
+    const unknown = candidates.filter(({ group, code }) => !active.has(`${group}:${code}`));
+    if (unknown.length) {
+      const lookup = this.options.find({ isActive: true, $or: unknown.map(({ group, code }) => ({ group, code })) });
+      if (session) lookup.session(session);
+      for (const option of await lookup.lean().exec()) active.add(`${option.group}:${option.code}`);
+    }
+    return active;
+  }
+
+  /**
+   * DPF-020: the PRIMARY type's form for a create or draft save, and the
+   * validated attributes to pin. Dynamic writes must name the current
+   * published version (frozen §B1, §C); legacy writes are mapped onto the
+   * current version when it is legacy-writable (frozen §H4). Every other
+   * selected type must be listing-enabled (amendment rule 4) and never
+   * contributes fields.
+   */
+  private async resolveWriteForm(
+    dto: CreatePropertyDto,
+    mode: FormWriteMode,
+    selectedTypeIds: readonly Types.ObjectId[],
+    primaryTypeId: unknown,
+    knownActiveCatalog: Array<{ group: string; code: string }>,
+    existingProperty?: any,
+    existingDraft?: any,
+  ): Promise<ResolvedWriteForm> {
+    const primary = String(primaryTypeId).toLowerCase();
+    const selected = canonicalPropertyTypeOrder(selectedTypeIds);
+    const operationType = dto.operationType as FormOperationType;
+    const state = await this.loadFormState(selected, mode === 'dynamic' ? [dto.formDefinitionVersionId!] : []);
+    let current;
+    let input: ParsedAttributes;
+    let carried: ParsedAttributes = Object.create(null);
+    if (mode === 'dynamic') {
+      current = assertDynamicPin(dto, state.versionById.get(String(dto.formDefinitionVersionId).toLowerCase()), primary, state);
+      const parsed = parseAttributes(dto.attributes);
+      if ('reason' in parsed) throw propertyAttributesMalformed(parsed.reason);
+      input = parsed.attributes;
+    } else {
+      current = currentPublishedForm(primary, state);
+      if (current.version.legacyWritable !== true) throw clientUpgradeRequired(primary);
+      assertUsableVersion(current.version, primary);
+      input = legacyAttributeInput(dto as unknown as Record<string, unknown>, current.version);
+      carried = carriedAttributes(await this.carryForwardSource(primary, current.head._id, current.version, existingProperty, existingDraft), current.version, operationType, input);
+    }
+    assertListingEnabled(selected.filter((typeId) => typeId !== primary), state);
+    if (!current.version.amenitiesEnabled && dto.amenityCodes.length) throw amenitiesNotEnabled();
+
+    const validate = async (attributes: ParsedAttributes) => {
+      const active = await this.activeCatalogCodes(catalogCandidates(current.version, attributes), knownActiveCatalog);
+      return validateAgainstVersion(current.version, operationType, attributes, (group, code) => active.has(`${group}:${code}`));
+    };
+    const merged = (extra: ParsedAttributes) => Object.assign(Object.create(null), extra, input) as ParsedAttributes;
+    let result = await validate(merged(carried));
+    if ('fieldErrors' in result) {
+      // A carried value the old client cannot see is dropped rather than blocking the write.
+      const failedCarried = result.fieldErrors.map((error) => error.key).filter((key) => Object.prototype.hasOwnProperty.call(carried, key));
+      if (failedCarried.length) {
+        for (const key of failedCarried) delete carried[key];
+        result = await validate(merged(carried));
+      }
+    }
+    if ('fieldErrors' in result) throw propertyAttributesInvalid(String(current.version._id), result.fieldErrors);
+    return {
+      definitionId: new Types.ObjectId(String(current.head._id)),
+      versionId: new Types.ObjectId(String(current.version._id)),
+      version: current.version.version!,
+      contentHash: current.version.contentHash!,
+      attributes: result.attributes,
+      mediaProfile: current.version.mediaProfile,
+      catalogReferences: catalogCandidates(current.version, result.attributes),
+    };
+  }
+
+  /**
+   * Frozen §H4 carry-forward source: the property's draft, else its current
+   * public revision, when it is pinned to the same primary type's definition.
+   * Only loaded when the current version has non-legacy fields to carry.
+   */
+  private async carryForwardSource(primary: string, definitionId: unknown, version: FormVersionRecord, existingProperty?: any, existingDraft?: any): Promise<Record<string, unknown> | undefined> {
+    if (!existingProperty || !version.fields.some((field) => !LEGACY_ATTRIBUTE_KEYS.includes(field.key))) return undefined;
+    const previous = existingDraft ?? (existingProperty.currentPublicRevisionId
+      ? await this.revisions.findOne({ _id: existingProperty.currentPublicRevisionId, propertyId: existingProperty._id }).select({ purposeSubcategoryId: 1, formDefinitionId: 1, formDefinitionVersionId: 1, attributes: 1 }).lean().exec()
+      : undefined);
+    if (!previous || !isPinnedRecord(previous) || String(previous.purposeSubcategoryId).toLowerCase() !== primary || String(previous.formDefinitionId).toLowerCase() !== String(definitionId).toLowerCase()) return undefined;
+    return previous.attributes as Record<string, unknown>;
+  }
+
+  /**
+   * DPF-021 submit: every selected type still listing-enabled, the PRIMARY
+   * type's pinned version still current (409 otherwise, never an automatic
+   * upgrade), and the attributes re-validated against it with live catalog
+   * codes. A legacy draft saved before pinning submits only while the current
+   * version is still the legacy form it was written for.
+   */
+  private async submissionForm(revision: any, session: ClientSession): Promise<MediaForm> {
+    const primary = String(revision.purposeSubcategoryId).toLowerCase();
+    const selected = canonicalPropertyTypeOrder(selectedPropertyTypeIds(revision));
+    const pinned = isPinnedRecord(revision);
+    const state = await this.loadFormState(selected, pinned ? [String(revision.formDefinitionVersionId)] : [], session);
+    const current = currentPublishedForm(primary, state);
+    assertListingEnabled(selected.filter((typeId) => typeId !== primary), state);
+    let stored: Record<string, unknown>;
+    if (pinned) {
+      if (String(revision.formDefinitionId).toLowerCase() !== String(current.head._id).toLowerCase()) {
+        throw formDefinitionInvalid(FormDefinitionInvalidReason.DEFINITION_MISMATCH, { purposeSubcategoryId: primary });
+      }
+      if (String(revision.formDefinitionVersionId).toLowerCase() !== String(current.version._id).toLowerCase()) {
+        throw formVersionOutdated(current, { versionId: revision.formDefinitionVersionId, version: revision.formDefinitionVersion });
+      }
+      if (revision.formContentHash !== current.version.contentHash || revision.formDefinitionVersion !== current.version.version) {
+        throw formDefinitionInvalid(FormDefinitionInvalidReason.CONTENT_HASH_MISMATCH, { purposeSubcategoryId: primary });
+      }
+      stored = revision.attributes ?? {};
+    } else {
+      if (current.version.contentHash !== LEGACY_RESIDENTIAL_CONTENT_HASH) throw formVersionOutdated(current, null);
+      stored = effectiveSpec(revision).attributes;
+    }
+    assertUsableVersion(current.version, primary);
+    const parsed = toParsedAttributes(stored);
+    const active = await this.activeCatalogCodes(catalogCandidates(current.version, parsed), [], session);
+    const result = validateAgainstVersion(current.version, revision.operationType, parsed, (group, code) => active.has(`${group}:${code}`));
+    if ('fieldErrors' in result) throw propertyAttributesInvalid(String(current.version._id), result.fieldErrors);
+    if (!current.version.amenitiesEnabled && (revision.amenityCodes ?? []).length) throw amenitiesNotEnabled();
+    return { mediaProfile: current.version.mediaProfile, attributes: result.attributes };
+  }
+
+  /**
+   * Frozen §C approve: structure only, against the pinned version, which may
+   * have been superseded meanwhile (no currency or catalog-active check). A
+   * legacy revision is read through the legacy adapter, as today.
+   */
+  private async approvalForm(revision: any, session: ClientSession): Promise<MediaForm> {
+    if (!isPinnedRecord(revision)) return { mediaProfile: 'residential_rooms', attributes: effectiveSpec(revision).attributes };
+    const primary = String(revision.purposeSubcategoryId).toLowerCase();
+    const state = await this.loadFormState([], [String(revision.formDefinitionVersionId)], session);
+    const version = state.versionById.get(String(revision.formDefinitionVersionId).toLowerCase());
+    if (!version) throw formDefinitionInvalid(FormDefinitionInvalidReason.VERSION_NOT_FOUND, { purposeSubcategoryId: primary });
+    if (version.state === 'draft') throw formDefinitionInvalid(FormDefinitionInvalidReason.VERSION_NOT_PUBLISHED, { purposeSubcategoryId: primary });
+    if (String(version.purposeSubcategoryId).toLowerCase() !== primary) throw formDefinitionInvalid(FormDefinitionInvalidReason.SUBCATEGORY_MISMATCH, { purposeSubcategoryId: primary });
+    if (String(version.definitionId).toLowerCase() !== String(revision.formDefinitionId).toLowerCase()) throw formDefinitionInvalid(FormDefinitionInvalidReason.DEFINITION_MISMATCH, { purposeSubcategoryId: primary });
+    if (revision.formContentHash !== version.contentHash || revision.formDefinitionVersion !== version.version) {
+      throw formDefinitionInvalid(FormDefinitionInvalidReason.CONTENT_HASH_MISMATCH, { purposeSubcategoryId: primary });
+    }
+    assertUsableVersion(version, primary);
+    const result = validateAgainstVersion(version, revision.operationType, toParsedAttributes(revision.attributes), () => true);
+    if ('fieldErrors' in result) throw propertyAttributesInvalid(String(version._id), result.fieldErrors);
+    if (!version.amenitiesEnabled && (revision.amenityCodes ?? []).length) throw amenitiesNotEnabled();
+    return { mediaProfile: version.mediaProfile, attributes: effectiveSpec(revision).attributes };
   }
 
   /** Non-primary selected types must exist, be active and belong to the listing's purpose. */
@@ -523,11 +741,6 @@ export class PropertiesService {
     if (accountType === AccountType.BROKER) return 'broker';
     if (accountType === AccountType.COMPANY) return 'office';
     return 'owner';
-  }
-
-  /** Legacy guided photography: the `residential_rooms` profile over the legacy room counts (DPF-012). */
-  private requiredPhotoSlots(dto: Pick<CreatePropertyDto, 'livingRooms' | 'bedrooms' | 'kitchens' | 'bathrooms'>): string[] {
-    return requiredSlots('residential_rooms', dto);
   }
 
   async listMine(ownerId: string, options: { page?: number; limit?: number } = {}) {
@@ -919,12 +1132,19 @@ export class PropertiesService {
     const primaryTypeId = String(revision.purposeSubcategoryId).toLowerCase();
     await this.assertAdditionalPropertyTypes(canonicalPropertyTypeOrder(selectedPropertyTypeIds(revision)).filter((id) => id !== primaryTypeId), purpose._id, session);
     if (paymentCount !== paymentMethodCodes.length) throw new BadRequestException({ message: 'إحدى طرق السداد غير متاحة', code: PropertyErrorCode.PAYMENT_METHODS_INVALID });
+    const form = await this.submissionForm(revision, session);
     if (revision.marketingMode === PropertyMarketingMode.SELF_SERVICE) {
-      this.assertPresentationMediaComplete(revision);
+      this.assertPresentationMediaComplete(revision, form, 'submit');
     }
   }
 
-  private assertPresentationMediaComplete(revision: any) {
+  /**
+   * Presentation completeness (frozen §I): SELF_SERVICE against the PRIMARY
+   * form's media profile and the revision's effective attributes;
+   * PLATFORM_MANAGED needs one photo, unchanged. Without `form` the revision
+   * is a legacy one (residential_rooms over its flat fields).
+   */
+  private assertPresentationMediaComplete(revision: any, form?: MediaForm, stage: 'submit' | 'approval' = 'approval') {
     if (revision.marketingMode === PropertyMarketingMode.PLATFORM_MANAGED) {
       if (!(revision.galleryMedia ?? []).length) {
         throw new BadRequestException({
@@ -935,16 +1155,10 @@ export class PropertiesService {
       }
       return;
     }
-    const required = this.requiredPhotoSlots(revision);
-    const supplied = new Set((revision.galleryMedia ?? []).map((asset: PropertyAsset) => asset.slotId));
-    const missingPhotoSlots = required.filter(slot => !supplied.has(slot));
-    if (missingPhotoSlots.length) {
-      throw new BadRequestException({
-        message: 'لا يمكن نشر العقار قبل استكمال صور العرض المطلوبة',
-        code: PropertyErrorCode.REQUIRED_PHOTO_SLOTS_MISSING,
-        details: { missingPhotoSlots },
-      });
-    }
+    if (!form && isPinnedRecord(revision)) throw new Error('A pinned revision needs its form to check media completeness');
+    const resolved = form ?? { mediaProfile: 'residential_rooms' as MediaProfile, attributes: effectiveSpec(revision).attributes };
+    const entries = (revision.galleryMedia ?? []).map((asset: PropertyAsset) => ({ slotId: asset.slotId, digest: asset.contentDigest }));
+    assertMediaComplete(evaluateMedia(resolved.mediaProfile, resolved.attributes, entries), stage);
   }
 
   async addPlatformMediaForAdmin(id: string, revisionId: string, tagCode: PropertyMediaTagCode, version: number, file: Express.Multer.File | undefined, actor: string, ip?: string) {
@@ -1115,10 +1329,13 @@ export class PropertiesService {
       this.properties.countDocuments(filter).exec(),
     ]);
     const classified = items.map(item => this.populatedRevision(item.pendingRevisionId) ?? this.effectiveRevision(item, true));
-    const types = await this.propertyTypes.find({ _id: { $in: classified.flatMap(revision => selectedPropertyTypeIds(revision)) } }).lean().exec();
+    const [types, mediaProfiles] = await Promise.all([
+      this.propertyTypes.find({ _id: { $in: classified.flatMap(revision => selectedPropertyTypeIds(revision)) } }).lean().exec(),
+      this.mediaProfilesFor(items.map(item => this.populatedRevision(item.pendingRevisionId))),
+    ]);
     const typesById = new Map(types.map(value => [value._id.toString(), value]));
     return {
-      items: items.map((item, index) => ({ ...this.toAdmin(item), propertyTypes: this.propertyTypesView(classified[index], typesById) })),
+      items: items.map((item, index) => ({ ...this.toAdmin(item, false, mediaProfiles), propertyTypes: this.propertyTypesView(classified[index], typesById) })),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -1136,10 +1353,13 @@ export class PropertiesService {
     const purposeNames = new Map(purposes.map(value => [value._id.toString(), value.nameAr]));
     const typesById = new Map(types.map(value => [value._id.toString(), value]));
     const paymentNames = new Map(payments.map(value => [value.code, value.nameAr]));
-    const revisionSpecifications = await this.specificationsFor(revisions);
+    const [revisionSpecifications, mediaProfiles] = await Promise.all([
+      this.specificationsFor(revisions),
+      this.mediaProfilesFor([...revisions, this.populatedRevision(item.pendingRevisionId)]),
+    ]);
     const specificationsById = new Map(revisions.map((revision, index) => [revision._id.toString(), revisionSpecifications[index]]));
     const present = (revision: any) => {
-      const result = this.revisionAdmin(revision);
+      const result = this.revisionAdmin(revision, mediaProfiles);
       if (!result) return undefined;
       return {
         ...result,
@@ -1151,7 +1371,7 @@ export class PropertiesService {
       };
     };
     const reviewed = this.populatedRevision(item.pendingRevisionId) ?? this.effectiveRevision(item, true);
-    return { property: { ...this.toAdmin(item, true), propertyTypes: this.propertyTypesView(reviewed, typesById), revisions: revisions.map(present), currentPublicRevision: present(this.populatedRevision(item.currentPublicRevisionId)), pendingRevision: present(this.populatedRevision(item.pendingRevisionId)) } };
+    return { property: { ...this.toAdmin(item, true, mediaProfiles), propertyTypes: this.propertyTypesView(reviewed, typesById), revisions: revisions.map(present), currentPublicRevision: present(this.populatedRevision(item.currentPublicRevisionId)), pendingRevision: present(this.populatedRevision(item.pendingRevisionId)) } };
   }
 
   async reviewForAdmin(id: string, revisionId: string, version: number, status: 'approved' | 'rejected', reason: string | undefined, actor: string, ip?: string) {
@@ -1163,10 +1383,14 @@ export class PropertiesService {
       await session.withTransaction(async () => {
         const property = await this.properties.findOne({ _id: id, pendingRevisionId: new Types.ObjectId(revisionId) }).session(session).exec();
         if (!property) throw new ConflictException({ message: 'هذه النسخة ليست النسخة الحالية قيد المراجعة', code: PropertyErrorCode.REVISION_NOT_PENDING });
+        let facets: PropertyFacetValues = {};
         if (status === 'approved') {
           const approvalCandidate = await this.revisions.findOne({ _id: revisionId, propertyId: property._id, moderationStatus: PropertyRevisionModerationStatus.PENDING_REVIEW, decisionVersion: version }).session(session).lean().exec();
           if (!approvalCandidate) throw new ConflictException({ message: 'سبق اتخاذ قرار أو تغير إصدار النسخة', code: PropertyErrorCode.REVISION_VERSION_CONFLICT });
-          this.assertPresentationMediaComplete(approvalCandidate);
+          const form = await this.approvalForm(approvalCandidate, session);
+          this.assertPresentationMediaComplete(approvalCandidate, form);
+          // DPF-023: promoted facets of the approved revision's effective attributes (primary form only).
+          facets = approvedFacets(form.attributes);
         }
         const now = new Date();
         const revision = await this.revisions.findOneAndUpdate(
@@ -1197,6 +1421,9 @@ export class PropertiesService {
           aggregateUpdate.$set.area = revision.area;
           aggregateUpdate.$set.totalPriceMinor = revision.totalPriceMinor;
           aggregateUpdate.$set.currency = revision.currency;
+          // Frozen §A6/§G4: the whole facets object is replaced; nothing applicable means no facets.
+          if (Object.keys(facets).length) aggregateUpdate.$set.facets = facets;
+          else aggregateUpdate.$unset.facets = 1;
         } else if (property.currentPublicRevisionId) aggregateUpdate.$set.status = 'approved';
         const aggregate = await this.properties.updateOne({ _id: property._id, pendingRevisionId: revision._id }, aggregateUpdate, { session }).exec();
         if (aggregate.modifiedCount !== 1) throw new ConflictException({ message: 'تغيرت حالة العقار أثناء المراجعة', code: PropertyErrorCode.STATE_CONFLICT });
@@ -1378,12 +1605,41 @@ export class PropertiesService {
     };
   }
 
-  private revisionAdmin(revision: any) {
+  /** Media profile of each pinned revision's version, keyed by version id (legacy revisions need none). */
+  private async mediaProfilesFor(revisions: any[]): Promise<Map<string, MediaProfile>> {
+    const ids = [...new Set(revisions.filter(isPinnedRecord).map((revision) => String(revision.formDefinitionVersionId)))];
+    if (!ids.length || !this.formVersions) return new Map();
+    const versions = await this.formVersions.find({ _id: { $in: ids } }, { mediaProfile: 1 }).lean().exec();
+    return new Map(versions.map((version: any) => [String(version._id), version.mediaProfile as MediaProfile]));
+  }
+
+  /**
+   * Admin review completeness (frozen §D #12) for the PRIMARY form's media
+   * profile. SELF_SERVICE: the profile's required slots and minimum;
+   * PLATFORM_MANAGED: one photo, as today.
+   */
+  private mediaCompletenessView(revision: any, mediaProfiles?: ReadonlyMap<string, MediaProfile>) {
+    const media = revision.galleryMedia ?? [];
+    const photoCount = media.length;
+    const mediaProfile = isPinnedRecord(revision) ? mediaProfiles?.get(String(revision.formDefinitionVersionId)) ?? null : 'residential_rooms';
+    if (revision.marketingMode !== PropertyMarketingMode.SELF_SERVICE) {
+      return { mediaProfile, requiredPhotoSlots: [], missingPhotoSlots: [], minimumPhotoCount: 1, photoCount, complete: photoCount >= 1 };
+    }
+    // The pinned version could not be loaded (an integrity failure): never report complete.
+    if (!mediaProfile) return { mediaProfile: null, requiredPhotoSlots: [], missingPhotoSlots: [], minimumPhotoCount: null, photoCount, complete: false };
+    const evaluation = evaluateMedia(mediaProfile, effectiveSpec(revision).attributes, media.map((asset: PropertyAsset) => ({ slotId: asset.slotId, digest: asset.contentDigest })));
+    return {
+      mediaProfile,
+      requiredPhotoSlots: evaluation.requiredPhotoSlots,
+      missingPhotoSlots: evaluation.missingPhotoSlots,
+      minimumPhotoCount: Math.max(evaluation.requiredPhotoSlots.length, evaluation.minPhotos),
+      photoCount,
+      complete: !evaluation.missingPhotoSlots.length && photoCount >= evaluation.minPhotos,
+    };
+  }
+
+  private revisionAdmin(revision: any, mediaProfiles?: ReadonlyMap<string, MediaProfile>) {
     if (!revision) return undefined;
-    const guided = revision.marketingMode === PropertyMarketingMode.SELF_SERVICE;
-    const requiredPhotoSlots = guided ? this.requiredPhotoSlots(revision) : [];
-    const suppliedPhotoSlots = new Set((revision.galleryMedia ?? []).map((asset: PropertyAsset) => asset.slotId));
-    const photoCount = (revision.galleryMedia ?? []).length;
     const flat = deprecatedFlatFields(revision);
     const spec = effectiveSpec(revision);
     return {
@@ -1410,13 +1666,7 @@ export class PropertiesService {
       paymentMethodCodes: revision.paymentMethodCodes,
       marketingMode: revision.marketingMode,
       images: this.publicImages(this.revisionPublicImages(revision)),
-      mediaCompleteness: {
-        requiredPhotoSlots,
-        missingPhotoSlots: requiredPhotoSlots.filter(slotId => !suppliedPhotoSlots.has(slotId)),
-        minimumPhotoCount: guided ? requiredPhotoSlots.length : 1,
-        photoCount,
-        complete: guided ? requiredPhotoSlots.every(slotId => suppliedPhotoSlots.has(slotId)) : photoCount >= 1,
-      },
+      mediaCompleteness: this.mediaCompletenessView(revision, mediaProfiles),
       privateEvidence: this.privateEvidenceDescriptors(revision, {}),
     };
   }
@@ -1524,14 +1774,14 @@ export class PropertiesService {
       createdAt: item.createdAt,
     };
   }
-  private toAdmin(item: any, detailed = false) {
+  private toAdmin(item: any, detailed = false, mediaProfiles?: ReadonlyMap<string, MediaProfile>) {
     const account = item.advertiserAccountId && typeof item.advertiserAccountId === 'object' && item.advertiserAccountId.fullName ? item.advertiserAccountId : item.ownerId;
     const populatedOwner = account && typeof account === 'object' && account.fullName;
     const owner = populatedOwner ? { id: account._id.toString(), fullName: account.fullName, email: account.email, phone: account.phone } : undefined;
     const revision = this.effectiveRevision(item, true);
     const pending = this.populatedRevision(item.pendingRevisionId);
     const source = pending ?? revision ?? item;
-    const pendingProjection = pending ? this.revisionAdmin(pending) : undefined;
+    const pendingProjection = pending ? this.revisionAdmin(pending, mediaProfiles) : undefined;
     const base = { ...this.toOwner(item), ...(pendingProjection ? { ...pendingProjection, revisionId: pendingProjection.id } : {}), id: item._id.toString(), owner, status: pending ? PropertyRevisionModerationStatus.PENDING_REVIEW : (revision?.moderationStatus ?? item.status), reviewReason: pending?.reviewReason ?? item.reviewReason, reviewedAt: pending?.reviewedAt ?? item.reviewedAt };
     const flat = deprecatedFlatFields(source);
     return detailed ? { ...base, street: source.street, additionalAddressDetails: source.additionalAddressDetails, latitude: source.latitude, longitude: source.longitude, bedrooms: flat.bedrooms, livingRooms: flat.livingRooms, kitchens: flat.kitchens, bathrooms: flat.bathrooms, floor: flat.floor, totalFloors: flat.totalFloors, buildingYear: flat.buildingYear, finishingStatusCode: flat.finishingStatusCode, deliveryStatusCode: flat.deliveryStatusCode, amenityCodes: source.amenityCodes, isPriceNegotiable: source.isPriceNegotiable, paymentMethodCodes: revision?.paymentMethodCodes, paymentMethodCode: item.paymentMethodCode, advertiserType: item.advertiserType, hidePhone: source.hidePhone } : base;

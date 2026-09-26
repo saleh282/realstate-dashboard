@@ -101,7 +101,7 @@ describe('DPF-002 approval syncs Property.area', () => {
     expect(ctx.updateOneCalls[0].filter).toEqual({ _id: propertyId, pendingRevisionId: ctx.approvedRevision._id });
   });
 
-  it('keeps every existing approval field update exactly as before, with area as the only addition', async () => {
+  it('keeps every existing approval field update exactly as before, with area (DPF-002) and facets (DPF-023) as the only additions', async () => {
     const ctx = approvalHarness();
     await ctx.service.reviewForAdmin(propertyId, revisionId, 0, 'approved', undefined, actorId);
     const { update } = ctx.updateOneCalls[0];
@@ -116,6 +116,8 @@ describe('DPF-002 approval syncs Property.area', () => {
         purposeSubcategoryIds: [revision.purposeSubcategoryId],
         propertyTypeCode: 'duplex', governorateCode: 'giza', city: 'الشيخ زايد', district: 'الحي الأول',
         area: 220, totalPriceMinor: 250_000_000, currency: 'EGP',
+        // DPF-023: the approved (legacy) revision's promoted facet.
+        facets: { bedrooms: 1 },
       },
     });
     // publishedAt is only set on first publication (unchanged rule).

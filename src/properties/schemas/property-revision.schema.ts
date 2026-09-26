@@ -30,7 +30,10 @@ const immutableOutsideDraft = function (this: { moderationStatus?: PropertyRevis
   return this.moderationStatus !== PropertyRevisionModerationStatus.DRAFT;
 };
 
-@Schema({ timestamps: true, collection: 'property_revisions', versionKey: 'version' })
+// `minimize: false`: a pinned revision whose form has only optional fields stores
+// `attributes: {}`; Mongoose would otherwise drop the empty object and break the
+// all-or-nothing pin invariant (frozen §A5). No other revision path holds an object.
+@Schema({ timestamps: true, collection: 'property_revisions', versionKey: 'version', minimize: false })
 export class PropertyRevision {
   @Prop({ type: Types.ObjectId, ref: 'Property', required: true, immutable: true, index: true }) propertyId: Types.ObjectId;
   @Prop({ required: true, min: 1, immutable: true }) revisionNumber: number;
