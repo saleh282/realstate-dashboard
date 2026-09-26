@@ -1,6 +1,7 @@
 import type { Collection, Db, Document } from 'mongodb';
 import { SystemRole } from '../auth/roles.enum';
 import { AccountStatus, AccountType, BrokerStatus, PrimaryIdentifierType, VerificationTrustState } from '../users/identity.types';
+import { EFFECTIVE_TYPE_SELECTION, PROPERTY_TYPE_SELECTION_BACKFILL_FILTER, SELECTION_MISSING_PRIMARY_FILTER } from './022-property-type-selection';
 
 export type IntegrityFinding = {
   code: string;
@@ -80,6 +81,65 @@ async function catalogDriftFinding(db: Db, collectionName: string, propertyField
   return { code, severity: 'warning', count, sampleIds: (rows[0].samples as Document[]).map((row) => String(row._id)), message: `${collectionName}.usageCount differs from property references` };
 }
 
+async function filterFinding(collection: Collection, filter: Document, code: string, severity: IntegrityFinding['severity'], message: string): Promise<IntegrityFinding | null> {
+  const count = await collection.countDocuments(filter);
+  if (!count) return null;
+  const samples = await collection.find(filter, { projection: { _id: 1 } }).limit(SAMPLE_LIMIT).toArray();
+  return { code, severity, count, sampleIds: samples.map((row) => String(row._id)), message };
+}
+
+/**
+ * Per selected type (the stored array, or [primary] for pre-DPF-005 rows):
+ * `dangling` finds references to missing property_types; `mixedPurpose` finds
+ * selected types whose parent purpose differs from the record's purpose.
+ */
+export function selectedTypeCheckPipeline(mode: 'dangling' | 'mixedPurpose'): Document[] {
+  return [
+    { $project: { purposeCategoryId: 1, _selection: EFFECTIVE_TYPE_SELECTION } },
+    { $unwind: '$_selection' },
+    { $lookup: { from: 'property_types', localField: '_selection', foreignField: '_id', as: '_type' } },
+    mode === 'dangling'
+      ? { $match: { '_type.0': { $exists: false } } }
+      : { $match: { purposeCategoryId: { $ne: null }, '_type.0': { $exists: true }, $expr: { $ne: [{ $arrayElemAt: ['$_type.purposeCategoryId', 0] }, '$purposeCategoryId'] } } },
+    { $group: { _id: '$_id' } },
+    { $facet: { count: [{ $count: 'value' }], samples: [{ $limit: SAMPLE_LIMIT }] } },
+  ];
+}
+
+async function selectedTypeFinding(db: Db, collectionName: string, mode: 'dangling' | 'mixedPurpose', code: string, message: string): Promise<IntegrityFinding | null> {
+  const rows = await db.collection(collectionName).aggregate(selectedTypeCheckPipeline(mode)).toArray();
+  const count = Number(rows[0]?.count?.[0]?.value ?? 0);
+  if (!count) return null;
+  return { code, severity: 'error', count, sampleIds: (rows[0].samples as Document[]).map((row) => String(row._id)), message };
+}
+
+/**
+ * A property references a type when the type is in its effective selection;
+ * pre-revision legacy rows without purposeSubcategoryId still count by code.
+ */
+export const PROPERTY_REFERENCES_TYPE: Document = {
+  $or: [
+    { $in: ['$$typeId', EFFECTIVE_TYPE_SELECTION] },
+    { $and: [{ $not: [{ $ifNull: ['$purposeSubcategoryId', false] }] }, { $eq: ['$propertyTypeCode', '$$typeCode'] }] },
+  ],
+};
+
+export function propertyTypeUsageDriftPipeline(): Document[] {
+  return [
+    { $lookup: { from: 'properties', let: { typeId: '$_id', typeCode: '$code' }, pipeline: [{ $match: { $expr: PROPERTY_REFERENCES_TYPE } }, { $count: 'value' }], as: '_actual' } },
+    { $set: { _actualUsage: { $ifNull: [{ $arrayElemAt: ['$_actual.value', 0] }, 0] } } },
+    { $match: { $expr: { $ne: [{ $ifNull: ['$usageCount', 0] }, '$_actualUsage'] } } },
+    { $facet: { count: [{ $count: 'value' }], samples: [{ $limit: SAMPLE_LIMIT }, { $project: { _id: 1 } }] } },
+  ];
+}
+
+async function propertyTypeUsageDriftFinding(db: Db): Promise<IntegrityFinding | null> {
+  const rows = await db.collection('property_types').aggregate(propertyTypeUsageDriftPipeline()).toArray();
+  const count = Number(rows[0]?.count?.[0]?.value ?? 0);
+  if (!count) return null;
+  return { code: 'PROPERTY_TYPE_USAGE_DRIFT', severity: 'warning', count, sampleIds: (rows[0].samples as Document[]).map((row) => String(row._id)), message: 'property_types.usageCount differs from properties selecting the type' };
+}
+
 async function danglingPropertyOptionFinding(db: Db, propertyField: string, group: string, code: string): Promise<IntegrityFinding | null> {
   const rows = await db.collection('properties').aggregate([
     { $match: { [propertyField]: { $exists: true, $ne: null } } },
@@ -111,6 +171,7 @@ async function propertyOptionDriftFinding(db: Db): Promise<IntegrityFinding | nu
 export async function runIntegrityChecks(db: Db, now: Date = new Date()): Promise<IntegrityReport> {
   const users = db.collection('users');
   const properties = db.collection('properties');
+  const revisions = db.collection('property_revisions');
   const candidates = await Promise.all([
     duplicateFinding(users, 'email', 'DUPLICATE_USER_EMAIL'),
     duplicateFinding(users, 'phone', 'DUPLICATE_USER_PHONE'),
@@ -132,7 +193,17 @@ export async function runIntegrityChecks(db: Db, now: Date = new Date()): Promis
     danglingPropertyOptionFinding(db, 'finishingStatusCode', 'finishing_status', 'DANGLING_FINISHING_STATUS'),
     danglingPropertyOptionFinding(db, 'deliveryStatusCode', 'delivery_status', 'DANGLING_DELIVERY_STATUS'),
     danglingPropertyOptionFinding(db, 'paymentMethodCode', 'payment_method', 'DANGLING_PAYMENT_METHOD'),
-    catalogDriftFinding(db, 'property_types', 'propertyTypeCode', 'PROPERTY_TYPE_USAGE_DRIFT'),
+    propertyTypeUsageDriftFinding(db),
+    filterFinding(properties, PROPERTY_TYPE_SELECTION_BACKFILL_FILTER, 'PROPERTY_TYPE_SELECTION_BACKFILL_MISSING', 'error', 'Properties with a primary type lack purposeSubcategoryIds (run migration 022)'),
+    filterFinding(properties, SELECTION_MISSING_PRIMARY_FILTER, 'PROPERTY_TYPE_SELECTION_MISSING_PRIMARY', 'error', 'Property purposeSubcategoryIds does not contain the primary type'),
+    filterFinding(revisions, SELECTION_MISSING_PRIMARY_FILTER, 'REVISION_TYPE_SELECTION_MISSING_PRIMARY', 'error', 'Revision purposeSubcategoryIds does not contain the primary type'),
+    selectedTypeFinding(db, 'properties', 'mixedPurpose', 'PROPERTY_TYPE_SELECTION_MIXED_PURPOSE', 'Properties select a type that belongs to another purpose'),
+    selectedTypeFinding(db, 'property_revisions', 'mixedPurpose', 'REVISION_TYPE_SELECTION_MIXED_PURPOSE', 'Revisions select a type that belongs to another purpose'),
+    selectedTypeFinding(db, 'properties', 'dangling', 'DANGLING_SELECTED_PROPERTY_TYPE', 'Properties select property types that no longer exist'),
+    selectedTypeFinding(db, 'property_revisions', 'dangling', 'DANGLING_REVISION_SELECTED_PROPERTY_TYPE', 'Revisions select property types that no longer exist'),
+    filterFinding(db.collection('property_types'), { isActive: true, purposeCategoryId: null }, 'ACTIVE_PROPERTY_TYPE_WITHOUT_PURPOSE', 'warning', 'Active property types have no purpose category and cannot be selected'),
+    filterFinding(properties, { purposeSubcategoryId: null }, 'PROPERTY_MISSING_PRIMARY_TYPE', 'warning', 'Properties have no purposeSubcategoryId (historical data; reported, not corrected)'),
+    filterFinding(revisions, { purposeSubcategoryId: null }, 'REVISION_MISSING_PRIMARY_TYPE', 'warning', 'Revisions have no purposeSubcategoryId (historical data; reported, not corrected)'),
     catalogDriftFinding(db, 'governorates', 'governorateCode', 'GOVERNORATE_USAGE_DRIFT'),
     catalogDriftFinding(db, 'amenities', 'amenityCodes', 'AMENITY_USAGE_DRIFT', true),
     propertyOptionDriftFinding(db),

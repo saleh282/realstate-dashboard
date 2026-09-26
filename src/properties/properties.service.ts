@@ -587,7 +587,9 @@ export class PropertiesService {
       if (query.purposeCategoryId && (!subcategory.purposeCategoryId || subcategory.purposeCategoryId.toString() !== query.purposeCategoryId)) {
         throw new BadRequestException({ message: 'نوع العقار الفرعي لا يتبع غرض العقار المحدد', code: PropertyErrorCode.PURPOSE_HIERARCHY_MISMATCH });
       }
-      filter.purposeSubcategoryId = subcategory._id;
+      // DPF-007: matches listings that selected this type as primary or additional.
+      // Relies on migration 022 having backfilled purposeSubcategoryIds.
+      filter.purposeSubcategoryIds = subcategory._id;
       if (!query.purposeCategoryId && subcategory.purposeCategoryId) filter.purposeCategoryId = subcategory.purposeCategoryId;
     } else if (query.purposeCategoryId) {
       const exists = await this.purposeCategories.exists({ _id: query.purposeCategoryId }).exec();
@@ -1111,7 +1113,13 @@ export class PropertiesService {
       this.properties.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).populate('ownerId', 'fullName email phone').populate('advertiserAccountId', 'fullName email phone accountType').populate('pendingRevisionId').populate('currentPublicRevisionId').lean().exec(),
       this.properties.countDocuments(filter).exec(),
     ]);
-    return { items: items.map(item => this.toAdmin(item)), pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    const classified = items.map(item => this.populatedRevision(item.pendingRevisionId) ?? this.effectiveRevision(item, true));
+    const types = await this.propertyTypes.find({ _id: { $in: classified.flatMap(revision => selectedPropertyTypeIds(revision)) } }).lean().exec();
+    const typesById = new Map(types.map(value => [value._id.toString(), value]));
+    return {
+      items: items.map((item, index) => ({ ...this.toAdmin(item), propertyTypes: this.propertyTypesView(classified[index], typesById) })),
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async getForAdmin(id: string) {
@@ -1138,7 +1146,8 @@ export class PropertiesService {
         paymentMethodNamesAr: (revision.paymentMethodCodes ?? []).map((code: string) => paymentNames.get(code)).filter(Boolean),
       };
     };
-    return { property: { ...this.toAdmin(item, true), revisions: revisions.map(present), currentPublicRevision: present(this.populatedRevision(item.currentPublicRevisionId)), pendingRevision: present(this.populatedRevision(item.pendingRevisionId)) } };
+    const reviewed = this.populatedRevision(item.pendingRevisionId) ?? this.effectiveRevision(item, true);
+    return { property: { ...this.toAdmin(item, true), propertyTypes: this.propertyTypesView(reviewed, typesById), revisions: revisions.map(present), currentPublicRevision: present(this.populatedRevision(item.currentPublicRevisionId)), pendingRevision: present(this.populatedRevision(item.pendingRevisionId)) } };
   }
 
   async reviewForAdmin(id: string, revisionId: string, version: number, status: 'approved' | 'rejected', reason: string | undefined, actor: string, ip?: string) {

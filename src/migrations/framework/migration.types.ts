@@ -35,6 +35,8 @@ export type MigrationDefinition = {
   version: number;
   description: string;
   dependencies?: string[];
+  /** Runs only when explicitly selected with `--migration=<id>`, never as part of a full apply. */
+  manualOnly?: boolean;
   rollback:
     | { kind: 'automatic'; instructions: string }
     | { kind: 'none'; remediation: string; restoreProcedure: string };

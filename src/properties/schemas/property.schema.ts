@@ -4,6 +4,7 @@ import { EGP_CURRENCY, isMoneyMinorAmount } from '../../common/money/money';
 import { AssetClassification, EvidenceDeliveryType } from '../../config/evidence-asset.types';
 import { AccountType } from '../../users/identity.types';
 import { PropertyLifecycleStatus, PropertyMediaOrigin, PropertyMediaTagCode } from '../property.types';
+import { PROPERTY_PURPOSE_CATEGORY_LISTING_INDEX, PROPERTY_TYPE_LISTING_INDEX } from '../property-listing-indexes';
 
 export type PropertyDocument = HydratedDocument<Property>;
 
@@ -129,10 +130,12 @@ PropertySchema.index(
   { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, governorateCode: 1, createdAt: -1 },
   { name: 'property_public_listing_governorate' },
 );
-PropertySchema.index(
-  { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, purposeCategoryId: 1, purposeSubcategoryId: 1, createdAt: -1 },
-  { name: 'property_public_listing_purpose' },
-);
+// DPF-007: purpose-only and any-selected-type queries use separate indexes
+// (created by migration 023). The replaced `property_public_listing_purpose`
+// is deliberately no longer declared, so autoIndex never re-creates it after
+// the manual migration 024 retires it.
+PropertySchema.index(PROPERTY_PURPOSE_CATEGORY_LISTING_INDEX.key, PROPERTY_PURPOSE_CATEGORY_LISTING_INDEX.options);
+PropertySchema.index(PROPERTY_TYPE_LISTING_INDEX.key, PROPERTY_TYPE_LISTING_INDEX.options);
 // Ascending on price; MongoDB can walk this index in reverse to satisfy a
 // descending price sort too, so one index covers both `price_asc`/`price_desc`.
 PropertySchema.index(

@@ -1,6 +1,6 @@
 import type { Db } from 'mongodb';
 import { MigrationBlockedError, MigrationLockError, MigrationRunner } from '../src/migrations/framework/migration.runner';
-import type { MigrationStore } from '../src/migrations/framework/migration.store';
+import { MongoMigrationStore, type MigrationStore } from '../src/migrations/framework/migration.store';
 import type { MigrationDefinition, MigrationLedgerRecord } from '../src/migrations/framework/migration.types';
 import { CORE_MIGRATIONS, validateMigrationRegistry } from '../src/migrations/framework/core-migrations';
 import { parseMigrationCliArgs } from '../src/migrations/cli';
@@ -121,5 +121,70 @@ describe('MAZAD-011 migration framework', () => {
     expect(parseMigrationCliArgs(['--apply', '--migration=006-property-money-minor-units', '--batch-size=50'])).toMatchObject({ mode: 'apply', migrationId: '006-property-money-minor-units', batchSize: 50 });
     expect(() => parseMigrationCliArgs(['--apply', '--dry-run'])).toThrow();
     expect(() => parseMigrationCliArgs(['--batch-size=0'])).toThrow();
+  });
+});
+
+/**
+ * MongoDB refuses an update in which one path (or a parent/child of it) is set by
+ * two operators, e.g. `attempts` in both $setOnInsert and $inc (code 40,
+ * "Updating the path 'attempts' would create a conflict at 'attempts'"). Neither
+ * the in-memory stores nor Mongoose's update casting enforce that, so the rule
+ * is checked here on the exact update document the real store sends.
+ */
+function conflictingUpdatePaths(update: Record<string, Record<string, unknown>>): string[] {
+  const owners = Object.entries(update).flatMap(([operator, fields]) => Object.keys(fields).map((path) => ({ operator, path })));
+  return owners.flatMap((a, i) => owners.slice(i + 1)
+    .filter((b) => a.operator !== b.operator && (a.path === b.path || a.path.startsWith(`${b.path}.`) || b.path.startsWith(`${a.path}.`)))
+    .map((b) => `${a.operator}.${a.path} vs ${b.operator}.${b.path}`));
+}
+
+/** Records MongoMigrationStore's ledger writes and applies them with upsert semantics after the conflict check. */
+function recordingLedgerDb() {
+  const documents = new Map<string, Record<string, any>>();
+  const updates: Array<Record<string, Record<string, unknown>>> = [];
+  const ledger = {
+    async updateOne(filter: { migrationId: string }, update: Record<string, Record<string, unknown>>, options?: { upsert?: boolean }) {
+      updates.push(update);
+      const conflicts = conflictingUpdatePaths(update);
+      if (conflicts.length) throw Object.assign(new Error(`Updating the path would create a conflict: ${conflicts.join(', ')}`), { code: 40 });
+      const existing = documents.get(filter.migrationId);
+      if (!existing && !options?.upsert) return { matchedCount: 0 };
+      const doc: Record<string, any> = existing ?? { ...filter, ...(update.$setOnInsert ?? {}) };
+      Object.assign(doc, update.$set ?? {});
+      for (const [path, by] of Object.entries(update.$inc ?? {})) doc[path] = (doc[path] ?? 0) + (by as number);
+      for (const path of Object.keys(update.$unset ?? {})) delete doc[path];
+      documents.set(filter.migrationId, doc);
+      return { matchedCount: existing ? 1 : 0, upsertedCount: existing ? 0 : 1 };
+    },
+    async findOne(filter: { migrationId: string }) { return documents.get(filter.migrationId) ?? null; },
+  };
+  const db = { collection: (name: string) => (name === 'migration_ledger' ? ledger : {}) } as unknown as Db;
+  return { db, updates, documents };
+}
+
+describe('MongoMigrationStore.begin ledger update (real-MongoDB update rules)', () => {
+  const now = new Date('2026-09-26T12:00:00Z');
+
+  it('sends an update with no path claimed by two operators: attempts only through $inc', async () => {
+    const { db, updates } = recordingLedgerDb();
+    await new MongoMigrationStore(db, () => now).begin(definition(), 'run-1');
+    const [update] = updates;
+    expect(conflictingUpdatePaths(update)).toEqual([]);
+    expect(update.$setOnInsert).not.toHaveProperty('attempts');
+    expect(update.$inc).toEqual({ attempts: 1 });
+    expect(update.$setOnInsert).toEqual({ migrationId: '011-test', version: 1, checkpoint: undefined, batches: 0, scanned: 0, modified: 0, startedAt: now });
+    expect(update.$set).toEqual({ status: 'running', runId: 'run-1', updatedAt: now });
+    expect(update.$unset).toEqual({ failure: '' });
+  });
+
+  it('inserts the ledger with attempts 1 on the first begin and increments it on a retry', async () => {
+    const { db, documents } = recordingLedgerDb();
+    const store = new MongoMigrationStore(db, () => now);
+    expect(await store.begin(definition(), 'run-1')).toMatchObject({ migrationId: '011-test', version: 1, status: 'running', runId: 'run-1', attempts: 1, batches: 0, scanned: 0, modified: 0, startedAt: now });
+    documents.get('011-test')!.status = 'failed';
+    documents.get('011-test')!.failure = { phase: 'apply', message: 'boom', at: now };
+    const retried = await store.begin(definition(), 'run-2');
+    expect(retried).toMatchObject({ status: 'running', runId: 'run-2', attempts: 2, startedAt: now });
+    expect(retried).not.toHaveProperty('failure');
   });
 });

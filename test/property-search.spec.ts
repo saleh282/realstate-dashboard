@@ -38,6 +38,8 @@ function matchesCondition(value: unknown, condition: unknown): boolean {
       }
     });
   }
+  // MongoDB equality on an array field matches when any element is equal.
+  if (Array.isArray(value)) return value.some((element) => coerce(element) === coerce(condition));
   return coerce(value) === coerce(condition);
 }
 
@@ -109,6 +111,8 @@ function makeProperty(overrides: Record<string, any> = {}) {
     propertyTypeCode: 'apartment',
     purposeCategoryId: CATEGORY_A,
     purposeSubcategoryId: SUBCATEGORY_A1,
+    // Backfilled by migration 022 (DPF-006): [primary] unless a fixture selects more types.
+    purposeSubcategoryIds: [overrides.purposeSubcategoryId ?? SUBCATEGORY_A1],
     title: 'شقة للبيع',
     description: 'وصف العقار',
     governorateCode: 'cairo',

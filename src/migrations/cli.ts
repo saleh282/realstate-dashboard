@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { CORE_MIGRATIONS, validateMigrationRegistry } from './framework/core-migrations';
 import { MongoMigrationStore } from './framework/migration.store';
 import { MigrationRunner } from './framework/migration.runner';
+import type { MigrationDefinition } from './framework/migration.types';
 
 type CliOptions = { mode: 'dry-run' | 'apply'; migrationId?: string; batchSize: number; list: boolean };
 
@@ -17,17 +18,22 @@ export function parseMigrationCliArgs(args: string[]): CliOptions {
   return { mode: apply ? 'apply' : 'dry-run', migrationId: migrationFlag?.split('=')[1], batchSize, list: args.includes('--list') };
 }
 
+/** A full run skips manual-only migrations; an explicit `--migration=<id>` may select any. */
+export function selectMigrations(migrations: MigrationDefinition[], migrationId?: string): MigrationDefinition[] {
+  return migrationId ? migrations.filter((migration) => migration.id === migrationId) : migrations.filter((migration) => !migration.manualOnly);
+}
+
 export async function runMigrationCli(args: string[]): Promise<void> {
   const options = parseMigrationCliArgs(args);
   validateMigrationRegistry();
   if (options.list) {
-    console.log(JSON.stringify({ migrations: CORE_MIGRATIONS.map(({ id, version, description, dependencies, rollback }) => ({ id, version, description, dependencies: dependencies ?? [], rollback })) }, null, 2));
+    console.log(JSON.stringify({ migrations: CORE_MIGRATIONS.map(({ id, version, description, dependencies, manualOnly, rollback }) => ({ id, version, description, dependencies: dependencies ?? [], manualOnly: manualOnly ?? false, rollback })) }, null, 2));
     return;
   }
   ConfigModule.forRoot();
   const uri = process.env.MONGO_URI;
   if (!uri) throw new Error('MONGO_URI is required');
-  const selected = options.migrationId ? CORE_MIGRATIONS.filter((migration) => migration.id === options.migrationId) : CORE_MIGRATIONS;
+  const selected = selectMigrations(CORE_MIGRATIONS, options.migrationId);
   if (!selected.length) throw new Error(`Unknown migration: ${options.migrationId}`);
   await mongoose.connect(uri, { maxPoolSize: 5 });
   const db = mongoose.connection.db;

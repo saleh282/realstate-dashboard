@@ -7,6 +7,14 @@ import {
 } from '../006-property-money-minor-units';
 import type { MigrationDefinition, MigrationContext } from './migration.types';
 import { legacyRevisionPointer, planLegacyPropertyRevision, scanLegacyPropertyRevisionMigration } from '../015-property-attribution-revisions';
+import {
+  PROPERTY_TYPE_SELECTION_BACKFILL_FILTER,
+  SELECTION_MISSING_PRIMARY_FILTER,
+  listingIndexProblems,
+  scanPropertyTypeSelection,
+  type ExistingIndex,
+} from '../022-property-type-selection';
+import { PROPERTY_TYPE_LISTING_INDEXES, RETIRED_PURPOSE_LISTING_INDEX } from '../../properties/property-listing-indexes';
 
 function afterCheckpoint(checkpoint?: string): Record<string, unknown> {
   if (!checkpoint) return {};
@@ -566,6 +574,142 @@ export const cityCatalogIndexesMigration: MigrationDefinition = {
   },
 };
 
+async function existingIndexes(db: MigrationContext['db'], collectionName: string): Promise<ExistingIndex[]> {
+  try {
+    return await db.collection(collectionName).indexes() as ExistingIndex[];
+  } catch (error) {
+    if ((error as { code?: number })?.code === 26) return [];
+    throw error;
+  }
+}
+
+export const propertyTypeSelectionBackfillMigration: MigrationDefinition = {
+  id: '022-property-type-selection-backfill',
+  version: 1,
+  description: 'DPF-006 M-F: backfill Property.purposeSubcategoryIds = [purposeSubcategoryId] where the array is missing; revisions are never rewritten',
+  dependencies: ['015-property-attribution-revisions'],
+  rollback: {
+    kind: 'none',
+    remediation: 'The backfill only adds [purposeSubcategoryId] where the array was absent and never changes the primary. Inspect migration_ledger and the integrity report before any reviewed repair.',
+    restoreProcedure: 'Restore the verified pre-migration snapshot to a separate database and compare purposeSubcategoryIds before any production remediation.',
+  },
+  async preflight({ db }) {
+    const scan = await scanPropertyTypeSelection(db);
+    return { eligible: scan.eligible, alreadyApplied: scan.alreadyApplied, blockers: [], summary: scan.report };
+  },
+  async migrateBatch(context) {
+    const properties = context.db.collection('properties');
+    const batch = await properties.find({ ...PROPERTY_TYPE_SELECTION_BACKFILL_FILTER, ...afterCheckpoint(context.checkpoint) }, { projection: { _id: 1, purposeSubcategoryId: 1 } })
+      .sort({ _id: 1 }).limit(context.batchSize).toArray();
+    if (!batch.length) return { scanned: 0, modified: 0, done: true };
+    // Guarded per document: a row written meanwhile by the application (which
+    // always sets the array) or re-pointed to another primary is left untouched.
+    const result = await properties.bulkWrite(batch.map((property) => ({
+      updateOne: {
+        filter: { _id: property._id, purposeSubcategoryIds: { $exists: false }, purposeSubcategoryId: property.purposeSubcategoryId },
+        update: { $set: { purposeSubcategoryIds: [property.purposeSubcategoryId] } },
+      },
+    })), { ordered: false });
+    return { scanned: batch.length, modified: result.modifiedCount, checkpoint: String(batch[batch.length - 1]._id), done: batch.length < context.batchSize };
+  },
+  async validate({ db }) {
+    const properties = db.collection('properties');
+    const [notBackfilled, missingPrimary] = await Promise.all([
+      properties.countDocuments(PROPERTY_TYPE_SELECTION_BACKFILL_FILTER),
+      properties.countDocuments(SELECTION_MISSING_PRIMARY_FILTER),
+    ]);
+    return {
+      valid: notBackfilled === 0 && missingPrimary === 0,
+      errors: [
+        ...(notBackfilled ? [{ code: 'PROPERTY_TYPE_SELECTION_BACKFILL_INCOMPLETE', message: `${notBackfilled} properties with a primary type still lack purposeSubcategoryIds` }] : []),
+        ...(missingPrimary ? [{ code: 'PROPERTY_TYPE_SELECTION_MISSING_PRIMARY', message: `${missingPrimary} properties have a purposeSubcategoryIds that does not contain the primary type` }] : []),
+      ],
+      summary: { notBackfilled, missingPrimary },
+    };
+  },
+};
+
+export const propertyTypeListingIndexesMigration: MigrationDefinition = {
+  id: '023-property-type-listing-indexes',
+  version: 1,
+  description: 'DPF-007 M-G: create the purpose-only and multikey any-selected-type public listing indexes',
+  dependencies: ['022-property-type-selection-backfill'],
+  rollback: {
+    kind: 'none',
+    remediation: 'The indexes are additive; the retired purpose index stays in place until the manual migration 024 is run.',
+    restoreProcedure: 'Drop only the two indexes named by this migration if a reviewed rollback of the search switch requires it.',
+  },
+  async preflight({ db }) {
+    const { missing, conflicting } = listingIndexProblems(await existingIndexes(db, 'properties'));
+    return {
+      eligible: missing.length,
+      alreadyApplied: PROPERTY_TYPE_LISTING_INDEXES.length - missing.length - conflicting.length,
+      blockers: conflicting.length ? [{ code: 'PROPERTY_LISTING_INDEX_CONFLICT', message: `An index named ${conflicting.join(', ')} exists with a different key` }] : [],
+      summary: { indexNames: PROPERTY_TYPE_LISTING_INDEXES.map((index) => index.options.name) },
+    };
+  },
+  async migrateBatch({ db }) {
+    for (const index of PROPERTY_TYPE_LISTING_INDEXES) await db.collection('properties').createIndex(index.key, index.options);
+    return { scanned: PROPERTY_TYPE_LISTING_INDEXES.length, modified: PROPERTY_TYPE_LISTING_INDEXES.length, done: true };
+  },
+  async validate({ db }) {
+    const { missing, conflicting } = listingIndexProblems(await existingIndexes(db, 'properties'));
+    const problems = [...missing, ...conflicting];
+    return {
+      valid: problems.length === 0,
+      errors: problems.map((name) => ({ code: 'PROPERTY_LISTING_INDEX_MISSING', message: `Required listing index ${name} is missing or has a different key` })),
+      summary: { missingIndexes: missing, conflictingIndexes: conflicting },
+    };
+  },
+};
+
+/**
+ * Manual-only: run with `--migration=024-retire-property-purpose-listing-index`
+ * once the any-type search is live and verified. Never part of a full apply.
+ */
+export const retirePurposeListingIndexMigration: MigrationDefinition = {
+  id: '024-retire-property-purpose-listing-index',
+  version: 1,
+  description: 'DPF-007 M-G: drop the replaced property_public_listing_purpose index after the any-type search is verified',
+  dependencies: ['023-property-type-listing-indexes'],
+  manualOnly: true,
+  rollback: {
+    kind: 'automatic',
+    instructions: `Recreate ${RETIRED_PURPOSE_LISTING_INDEX.options.name} with key ${JSON.stringify(RETIRED_PURPOSE_LISTING_INDEX.key)}.`,
+  },
+  async preflight({ db }) {
+    const indexes = await existingIndexes(db, 'properties');
+    const { missing, conflicting } = listingIndexProblems(indexes);
+    const notBackfilled = await db.collection('properties').countDocuments(PROPERTY_TYPE_SELECTION_BACKFILL_FILTER);
+    const present = indexes.some((index) => index.name === RETIRED_PURPOSE_LISTING_INDEX.options.name);
+    return {
+      eligible: present ? 1 : 0,
+      alreadyApplied: present ? 0 : 1,
+      blockers: [
+        ...(missing.length || conflicting.length ? [{ code: 'PROPERTY_LISTING_REPLACEMENT_INDEX_MISSING', message: `Replacement listing indexes are not in place: ${[...missing, ...conflicting].join(', ')}` }] : []),
+        ...(notBackfilled ? [{ code: 'PROPERTY_TYPE_SELECTION_BACKFILL_INCOMPLETE', message: `${notBackfilled} properties still lack purposeSubcategoryIds` }] : []),
+      ],
+    };
+  },
+  async migrateBatch({ db }) {
+    const present = (await existingIndexes(db, 'properties')).some((index) => index.name === RETIRED_PURPOSE_LISTING_INDEX.options.name);
+    if (present) await db.collection('properties').dropIndex(RETIRED_PURPOSE_LISTING_INDEX.options.name);
+    return { scanned: 1, modified: present ? 1 : 0, done: true };
+  },
+  async validate({ db }) {
+    const indexes = await existingIndexes(db, 'properties');
+    const retiredPresent = indexes.some((index) => index.name === RETIRED_PURPOSE_LISTING_INDEX.options.name);
+    const { missing, conflicting } = listingIndexProblems(indexes);
+    return {
+      valid: !retiredPresent && !missing.length && !conflicting.length,
+      errors: [
+        ...(retiredPresent ? [{ code: 'PROPERTY_RETIRED_LISTING_INDEX_PRESENT', message: `${RETIRED_PURPOSE_LISTING_INDEX.options.name} still exists` }] : []),
+        ...[...missing, ...conflicting].map((name) => ({ code: 'PROPERTY_LISTING_INDEX_MISSING', message: `Required listing index ${name} is missing or has a different key` })),
+      ],
+    };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
@@ -576,6 +720,9 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyLifecycleMigration,
   managedMarketingRequestIndexesMigration,
   cityCatalogIndexesMigration,
+  propertyTypeSelectionBackfillMigration,
+  propertyTypeListingIndexesMigration,
+  retirePurposeListingIndexMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {

@@ -76,9 +76,10 @@ export class MongoMigrationStore implements MigrationStore {
           batches: 0,
           scanned: 0,
           modified: 0,
-          attempts: 0,
           startedAt: now,
         },
+        // `attempts` must not also appear in $setOnInsert: MongoDB rejects the
+        // update (code 40, path conflict). An upsert's $inc starts it at 1.
         $set: { status: 'running', runId, updatedAt: now },
         $inc: { attempts: 1 },
         $unset: { failure: '' },

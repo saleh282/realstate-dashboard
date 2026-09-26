@@ -469,16 +469,15 @@ describe('DPF-005 reads: legacy fallback, projections and anchoring', () => {
   });
 });
 
-describe('DPF-005 leaves search on the primary type', () => {
-  it('still filters purposeSubcategoryId=X on the single primary field, never on the array', async () => {
+describe('DPF-007 search matches any selected type (superseding the DPF-005 primary-only stage)', () => {
+  it('filters purposeSubcategoryId=X on the selected-type array, not on the primary field', async () => {
     const service = Object.create(PropertiesService.prototype) as any;
     Object.assign(service, {
       propertyTypes: { findById: jest.fn(() => ({ lean: () => ({ exec: async () => ({ _id: new Types.ObjectId(DUPLEX), purposeCategoryId: new Types.ObjectId(PURPOSE_A) }) }) })) },
     });
     const { filter } = await service.buildPublicListingQuery({ purposeSubcategoryId: DUPLEX });
-    expect(String(filter.purposeSubcategoryId)).toBe(DUPLEX);
+    expect(String(filter.purposeSubcategoryIds)).toBe(DUPLEX);
     expect(String(filter.purposeCategoryId)).toBe(PURPOSE_A);
-    expect(filter).not.toHaveProperty('purposeSubcategoryIds');
-    expect(JSON.stringify(filter)).not.toContain('purposeSubcategoryIds');
+    expect(filter).not.toHaveProperty('purposeSubcategoryId');
   });
 });
