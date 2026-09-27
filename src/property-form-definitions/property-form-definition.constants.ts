@@ -35,12 +35,25 @@ export const FORM_OPERATION_TYPES = ['sale', 'rent'] as const;
 export type FormOperationType = (typeof FORM_OPERATION_TYPES)[number];
 export const FORM_FIELD_WIDGETS = ['stepper', 'input', 'chips', 'dropdown'] as const;
 export type FormFieldWidget = (typeof FORM_FIELD_WIDGETS)[number];
+/** Widget hints a field of each data type may carry (DPF-031); boolean and date render one fixed control. */
+export const FORM_WIDGETS_BY_DATA_TYPE: Readonly<Record<PropertyAttributeDataType, readonly FormFieldWidget[]>> = {
+  integer: ['stepper', 'input'],
+  decimal: ['input'],
+  text: ['input'],
+  textarea: ['input'],
+  boolean: [],
+  singleSelect: ['chips', 'dropdown'],
+  multiSelect: ['chips', 'dropdown'],
+  date: [],
+};
 /** FieldDefinition properties reserved for later contract versions; rejected in V1. */
 export const RESERVED_FIELD_DEFINITION_PROPERTIES = ['visibleWhen', 'sectionKey', 'regex', 'pattern', 'facet', 'indexed', 'sortable', 'filterable', 'searchable', 'default'] as const;
 
 export const PROPERTY_FORM_LIMITS = {
   maxFields: 60,
   maxVersionBytes: 64 * 1024,
+  /** Serialized size of one field definition (DPF-031). */
+  maxFieldBytes: 16 * 1024,
   changeNoteMaxLength: 500,
   archiveReasonMaxLength: 500,
   fieldOrderMin: 0,
@@ -59,6 +72,13 @@ export enum FormDefinitionErrorCode {
   NOT_DRAFT = 'FORM_DEFINITION_NOT_DRAFT',
   PUBLISH_INVALID = 'FORM_DEFINITION_PUBLISH_INVALID',
   NO_CHANGES = 'FORM_DEFINITION_NO_CHANGES',
+  /** DPF-030..032 Admin lifecycle. */
+  DRAFT_NOT_FOUND = 'FORM_DEFINITION_DRAFT_NOT_FOUND',
+  DRAFT_INVALID = 'FORM_DEFINITION_DRAFT_INVALID',
+  ARCHIVED = 'FORM_DEFINITION_ARCHIVED',
+  NOT_ARCHIVED = 'FORM_DEFINITION_NOT_ARCHIVED',
+  TYPE_NOT_ELIGIBLE = 'FORM_DEFINITION_TYPE_NOT_ELIGIBLE',
+  CURRENT_VERSION_INVALID = 'FORM_DEFINITION_CURRENT_VERSION_INVALID',
 }
 
 export type FieldValidation = {

@@ -16,6 +16,8 @@ import { AdminGovernoratesController } from '../src/governorates/admin-governora
 import { AdminPropertyOptionsController } from '../src/property-options/admin-property-options.controller';
 import { AdminPropertyPurposeCategoriesController } from '../src/property-purpose-categories/admin-property-purpose-categories.controller';
 import { AdminPropertyTypesController } from '../src/property-types/admin-property-types.controller';
+import { AdminPropertyAttributesController } from '../src/property-form-definitions/admin-property-attributes.controller';
+import { AdminPropertyFormDefinitionsController } from '../src/property-form-definitions/admin-property-form-definitions.controller';
 
 function capabilities(target: object, method?: string): Capability[] | undefined {
   return Reflect.getMetadata(
@@ -38,6 +40,8 @@ describe('MAZAD-016 endpoint policy contract', () => {
     [AdminPropertyOptionsController, Capability.ADMIN_CATALOG_MANAGE],
     [AdminPropertyPurposeCategoriesController, Capability.ADMIN_CATALOG_MANAGE],
     [AdminPropertyTypesController, Capability.ADMIN_CATALOG_MANAGE],
+    [AdminPropertyFormDefinitionsController, Capability.ADMIN_CATALOG_MANAGE],
+    [AdminPropertyAttributesController, Capability.ADMIN_CATALOG_MANAGE],
   ])('declares a default policy on %p', (controller, expected) => {
     expect(capabilities(controller)).toContain(expected);
   });
@@ -51,6 +55,12 @@ describe('MAZAD-016 endpoint policy contract', () => {
     ]);
     expect(capabilities(AdminPropertiesController, 'addPlatformMedia')).toBeUndefined();
     expect(capabilities(AdminPropertiesController)).toContain(Capability.ADMIN_PROPERTY_REVIEW);
+    for (const method of ['publish', 'archive', 'restore']) {
+      expect(capabilities(AdminPropertyFormDefinitionsController, method)).toEqual([Capability.ADMIN_FORM_DEFINITION_PUBLISH]);
+    }
+    for (const method of ['options', 'list', 'create', 'get', 'getVersion', 'createDraft', 'updateDraft', 'discardDraft', 'validateDraft', 'diffDraft']) {
+      expect(capabilities(AdminPropertyFormDefinitionsController, method)).toBeUndefined();
+    }
   });
 
   it('declares policies for every current property command/read boundary', () => {

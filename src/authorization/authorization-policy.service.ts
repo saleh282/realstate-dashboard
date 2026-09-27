@@ -90,7 +90,10 @@ export class AuthorizationPolicyService {
     if (capability === Capability.ACCOUNT_SELF_READ || capability === Capability.ACCOUNT_SELF_MANAGE) {
       return true;
     }
-    if (capability === Capability.SUPER_ADMIN_ROLE_MANAGE) {
+    if (capability === Capability.SUPER_ADMIN_ROLE_MANAGE || capability === Capability.ADMIN_FORM_DEFINITION_PUBLISH) {
+      // Publishing, archiving or restoring a property form changes what every
+      // client may write, so it is SUPER_ADMIN governance (DPF-030); Admins
+      // read and prepare drafts through ADMIN_CATALOG_MANAGE.
       return principal.systemRole === SystemRole.SUPER_ADMIN && principal.accountStatus === AccountStatus.ACTIVE;
     }
     if (capability === Capability.GEOCODING_USE) {

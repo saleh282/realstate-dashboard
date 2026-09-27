@@ -25,6 +25,8 @@ This inventory freezes the V1 authorization classification. Capability responses
 | `/admin/properties*` | Admin review/proxy | `ADMIN_PROPERTY_REVIEW`; proxy creation overrides with `ADMIN_PROPERTY_PROXY_CREATE` and validates target account |
 | `/admin/broker*`, broker requirements | Admin review | `ADMIN_BROKER_REVIEW`; optimistic state/version transitions remain authoritative |
 | Admin catalog endpoints | Admin-only | `ADMIN_CATALOG_MANAGE` |
+| `/admin/property-attributes` (read), `/admin/property-form-definitions` reads, definition creation, draft open/save/validate/diff/discard | Admin-only | `ADMIN_CATALOG_MANAGE`; draft commands carry `expectedVersion` / `expectedDraftRevision` |
+| `/admin/property-form-definitions/:id/publish`, `/archive`, `/restore` | SUPER_ADMIN-only | `ADMIN_FORM_DEFINITION_PUBLISH` (DPF-030); optimistic tokens and one audited transaction |
 | `/admin/audit-logs` | Admin-only read | `ADMIN_AUDIT_READ` |
 | `/admin/dashboard/metrics` | Admin-only read | `ADMIN_DASHBOARD_READ` |
 

@@ -142,6 +142,27 @@ describe('MAZAD-016 authorization policy matrix', () => {
       .toMatchObject({ code: AuthorizationErrorCode.ADMIN_MARKETPLACE_FORBIDDEN });
   });
 
+  it('grants form-definition publishing (publish, archive, restore) to an ACTIVE SUPER_ADMIN only (DPF-030)', () => {
+    const admin = principal({ userId: id.admin, systemRole: SystemRole.ADMIN });
+    const superAdmin = principal({ userId: id.admin, systemRole: SystemRole.SUPER_ADMIN });
+    expect(AuthorizationPolicyService.can(superAdmin, Capability.ADMIN_FORM_DEFINITION_PUBLISH)).toBe(true);
+    expect(AuthorizationPolicyService.can(admin, Capability.ADMIN_FORM_DEFINITION_PUBLISH)).toBe(false);
+    // Admins read and prepare drafts through the existing catalog capability.
+    expect(AuthorizationPolicyService.can(admin, Capability.ADMIN_CATALOG_MANAGE)).toBe(true);
+    expect(codeOf(() => AuthorizationPolicyService.assert(admin, Capability.ADMIN_FORM_DEFINITION_PUBLISH))).toMatchObject({ code: AuthorizationErrorCode.FORBIDDEN });
+    for (const accountStatus of [AccountStatus.SUSPENDED, AccountStatus.BLOCKED, AccountStatus.PERMANENTLY_BANNED]) {
+      expect(AuthorizationPolicyService.can({ ...superAdmin, accountStatus }, Capability.ADMIN_FORM_DEFINITION_PUBLISH)).toBe(false);
+    }
+    expect(codeOf(() => AuthorizationPolicyService.assert({ ...superAdmin, accountStatus: AccountStatus.SUSPENDED }, Capability.ADMIN_FORM_DEFINITION_PUBLISH)))
+      .toMatchObject({ code: AuthorizationErrorCode.ACCOUNT_SUSPENDED });
+    for (const marketplace of [principal(), principal({ accountType: AccountType.COMPANY }), principal({ accountType: AccountType.BROKER, brokerStatus: BrokerStatus.APPROVED })]) {
+      expect(AuthorizationPolicyService.can(marketplace, Capability.ADMIN_FORM_DEFINITION_PUBLISH)).toBe(false);
+      expect(AuthorizationPolicyService.can(marketplace, Capability.ADMIN_CATALOG_MANAGE)).toBe(false);
+    }
+    expect(AuthorizationPolicyService.capabilitiesFor(superAdmin)).toContain(Capability.ADMIN_FORM_DEFINITION_PUBLISH);
+    expect(AuthorizationPolicyService.capabilitiesFor(admin)).not.toContain(Capability.ADMIN_FORM_DEFINITION_PUBLISH);
+  });
+
   it('default-denies privileged operations for a suspended staff account', () => {
     const suspendedAdmin = principal({
       userId: id.admin,
