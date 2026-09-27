@@ -24,6 +24,9 @@ import { scanPropertyTypeSelection } from './022-property-type-selection';
 export const ATTRIBUTES = 'property_attributes';
 export const DEFINITIONS = 'property_form_definitions';
 export const VERSIONS = 'property_form_definition_versions';
+export const PURPOSE_CATEGORIES = 'property_purpose_categories';
+/** The legacy residential form (M-B) may only ever attach to this purpose. */
+export const RESIDENTIAL_PURPOSE_CODE = 'residential';
 const SCAN_BATCH = 1000;
 
 /** Pages through a collection by `_id` (no cursor state survives between pages). */
@@ -132,32 +135,64 @@ export function storedContentHash(version: Document): string {
   return computeFormContentHash({ rendererVersion: version.rendererVersion, fields: version.fields, mediaProfile: version.mediaProfile, amenitiesEnabled: version.amenitiesEnabled });
 }
 
-export async function scanLegacyDefinitions(db: Db) {
+/**
+ * Resolves residential eligibility through the actual purpose relationship
+ * (never by type name/code): the ids of every `property_purpose_categories`
+ * document whose `code` is exactly `residential`.
+ */
+export async function resolveResidentialPurposeCategoryIds(db: Db): Promise<ObjectId[]> {
+  const purposes = await db.collection(PURPOSE_CATEGORIES).find({ code: RESIDENTIAL_PURPOSE_CODE }, { projection: { _id: 1 } }).toArray();
+  return purposes.map((purpose) => purpose._id as ObjectId);
+}
+
+export type LegacyDefinitionsScan = {
+  types: number;
+  residentialTypes: number;
+  withoutHead: number;
+  seededHeadsMissingVersion: number;
+  invalidSeededVersions: string[];
+  /** BUG GUARD (never expected): a non-residential type carrying a seeded legacy-residential head. */
+  invalidNonResidentialLegacy: string[];
+};
+
+/**
+ * The legacy residential form is RESIDENTIAL ONLY: a property type is only
+ * ever eligible when its `purposeCategoryId` resolves to the `residential`
+ * purpose. Non-residential types are left alone even when they have no head
+ * at all; an Admin-authored head (on any purpose) is never touched or judged.
+ */
+export async function scanLegacyDefinitions(db: Db): Promise<LegacyDefinitionsScan> {
+  const residentialIds = new Set((await resolveResidentialPurposeCategoryIds(db)).map((id) => String(id)));
   let types = 0;
-  let withHead = 0;
+  let residentialTypes = 0;
   let withoutHead = 0;
   let seededHeadsMissingVersion = 0;
   const invalidSeededVersions: string[] = [];
+  const invalidNonResidentialLegacy: string[] = [];
   const definitions = db.collection(DEFINITIONS);
   const versions = db.collection(VERSIONS);
-  for await (const type of scan(db.collection('property_types'), {}, { _id: 1 })) {
+  for await (const type of scan(db.collection('property_types'), {}, { _id: 1, purposeCategoryId: 1 })) {
     types += 1;
+    const isResidential = type.purposeCategoryId != null && residentialIds.has(String(type.purposeCategoryId));
+    if (isResidential) residentialTypes += 1;
     const head = await definitions.findOne({ purposeSubcategoryId: type._id });
-    if (!head) { withoutHead += 1; continue; }
-    withHead += 1;
+    if (!head) { if (isResidential) withoutHead += 1; continue; }
     if (!isSeededLegacyHead(head)) continue;
+    if (!isResidential) { invalidNonResidentialLegacy.push(String(type._id)); continue; }
     const version = await versions.findOne({ _id: head.currentVersionId });
     if (!version) seededHeadsMissingVersion += 1;
     else if (version.state !== 'published' || version.contentHash !== LEGACY_RESIDENTIAL_CONTENT_HASH || storedContentHash(version) !== LEGACY_RESIDENTIAL_CONTENT_HASH) invalidSeededVersions.push(String(version._id));
   }
-  return { types, withHead, withoutHead, seededHeadsMissingVersion, invalidSeededVersions };
+  return { types, residentialTypes, withoutHead, seededHeadsMissingVersion, invalidSeededVersions, invalidNonResidentialLegacy };
 }
 
 /**
  * Creates head + published legacy v1 for one property type if it has no head.
  * The head is written first with pre-assigned ids, so an interrupted run leaves
  * a seeded head whose version is missing, which the next run repairs with the
- * same ids; nothing is ever orphaned.
+ * same ids; nothing is ever orphaned. Callers must only pass residential-purpose
+ * type ids (see `resolveResidentialPurposeCategoryIds`) — this function itself
+ * does not re-check purpose, so it stays a plain per-id repair primitive.
  */
 export async function seedLegacyDefinition(db: Db, purposeSubcategoryId: ObjectId, now: Date): Promise<{ headInserted: boolean; versionInserted: boolean }> {
   const definitions = db.collection(DEFINITIONS);

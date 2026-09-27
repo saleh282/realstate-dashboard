@@ -84,7 +84,7 @@ export function sortDocs(docs: Doc[], spec: Record<string, 1 | -1>) {
 
 export class MemoryDb {
   data = new Map<string, Doc[]>();
-  indexes = new Map<string, Array<{ name: string; key: Doc }>>();
+  indexes = new Map<string, Array<{ name: string; key: Doc; unique?: boolean }>>();
   writes: Array<{ collection: string; op: string }> = [];
   seed(name: string, docs: Doc[]) { this.data.set(name, docs); return this; }
   docs(name: string) { if (!this.data.has(name)) this.data.set(name, []); return this.data.get(name)!; }

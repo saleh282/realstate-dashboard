@@ -76,11 +76,33 @@ export async function scanPropertyTypeSelection(db: Db): Promise<PropertyTypeSel
   };
 }
 
-export type ExistingIndex = { name?: string; key?: Record<string, unknown> };
+export type ExistingIndex = { name?: string; key?: Record<string, unknown>; unique?: boolean };
 
 /** Exact compound-key comparison: field order and direction both matter. */
 export function indexKeyMatches(existing: ExistingIndex | undefined, key: Record<string, unknown>): boolean {
   return Boolean(existing?.key) && JSON.stringify(existing!.key) === JSON.stringify(key);
+}
+
+export type IndexReconciliation = 'satisfied-by-name' | 'satisfied-by-equivalent-key' | 'incompatible-key' | 'missing';
+
+/**
+ * Whether an expected named+unique index is already satisfied: by its intended
+ * name, or by an equivalent index under a different name (same key, same
+ * uniqueness) — e.g. one preserved across an environment reset. A same-key
+ * index with different uniqueness is `incompatible-key`: never silently
+ * accepted as equivalent, and never dropped/renamed to force a match.
+ */
+export function reconcileIndex(
+  existing: ExistingIndex[],
+  expected: { key: Record<string, unknown>; options: { name: string; unique?: boolean } },
+): { outcome: IndexReconciliation; existingName?: string } {
+  const byName = existing.find((index) => index.name === expected.options.name);
+  if (byName) return { outcome: 'satisfied-by-name', existingName: byName.name };
+  const byKey = existing.find((index) => indexKeyMatches(index, expected.key));
+  if (!byKey) return { outcome: 'missing' };
+  return Boolean(byKey.unique) === Boolean(expected.options.unique)
+    ? { outcome: 'satisfied-by-equivalent-key', existingName: byKey.name }
+    : { outcome: 'incompatible-key', existingName: byKey.name };
 }
 
 /** Replacement listing indexes that are missing or exist under their name with a different key. */

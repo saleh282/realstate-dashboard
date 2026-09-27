@@ -11,6 +11,7 @@ import {
   PROPERTY_TYPE_SELECTION_BACKFILL_FILTER,
   SELECTION_MISSING_PRIMARY_FILTER,
   listingIndexProblems,
+  reconcileIndex,
   scanPropertyTypeSelection,
   type ExistingIndex,
 } from '../022-property-type-selection';
@@ -20,6 +21,7 @@ import {
   buildLegacyPropertyDataReport,
   ensureFormDefinitionIndexes,
   pairWithPublicRevisions,
+  resolveResidentialPurposeCategoryIds,
   scanAreaBackfill,
   scanLegacyDefinitions,
   scanRegistrySeed,
@@ -547,6 +549,19 @@ const cityCatalogIndexes = [
   { key: { governorateId: 1, isActive: 1, sortOrder: 1, nameAr: 1 }, options: { name: 'city_public_catalog_order' } },
 ] as const;
 
+/**
+ * A reset that preserves indexes can leave an equivalent index for one of
+ * these keys already present under a different name (e.g. from before the
+ * migration's intended names existed). Such an index satisfies the migration
+ * as-is: it is never dropped or renamed, and a new one is never created
+ * alongside it. Only a same-key index with different uniqueness is treated as
+ * a real conflict (fail closed) rather than silently accepted.
+ */
+async function planCityCatalogIndexes(db: MigrationContext['db']) {
+  const existing = await existingIndexes(db, 'cities');
+  return cityCatalogIndexes.map((index) => ({ index, ...reconcileIndex(existing, index) }));
+}
+
 export const cityCatalogIndexesMigration: MigrationDefinition = {
   id: '021-city-catalog-indexes',
   version: 1,
@@ -568,21 +583,42 @@ export const cityCatalogIndexesMigration: MigrationDefinition = {
       { $match: { count: { $gt: 1 } } },
       { $limit: 20 },
     ]).toArray();
-    const names = await existingIndexNames(db, 'cities');
-    const missing = cityCatalogIndexes.filter(index => !names.has(index.options.name));
-    const blockers = [...duplicates, ...duplicateNames].length
-      ? [{ code: 'CITY_CATALOG_DUPLICATES', message: 'Duplicate city codes or Arabic names require manual reconciliation before unique indexes can be created', sampleIds: [...duplicates, ...duplicateNames].map(item => JSON.stringify(item._id)) }]
-      : [];
-    return { eligible: missing.length, alreadyApplied: cityCatalogIndexes.length - missing.length, blockers };
+    const plans = await planCityCatalogIndexes(db);
+    const missing = plans.filter((plan) => plan.outcome === 'missing');
+    const incompatible = plans.filter((plan) => plan.outcome === 'incompatible-key');
+    const blockers = [
+      ...([...duplicates, ...duplicateNames].length
+        ? [{ code: 'CITY_CATALOG_DUPLICATES', message: 'Duplicate city codes or Arabic names require manual reconciliation before unique indexes can be created', sampleIds: [...duplicates, ...duplicateNames].map(item => JSON.stringify(item._id)) }]
+        : []),
+      ...(incompatible.length
+        ? [{ code: 'CITY_CATALOG_INDEX_INCOMPATIBLE', message: `An index on the same keys as ${incompatible.map(plan => plan.index.options.name).join(', ')} already exists (as ${incompatible.map(plan => plan.existingName).join(', ')}) with incompatible options and must be reconciled manually before this migration can run`, sampleIds: incompatible.map(plan => plan.existingName!) }]
+        : []),
+    ];
+    return { eligible: missing.length, alreadyApplied: cityCatalogIndexes.length - missing.length - incompatible.length, blockers, summary: { incompatible: incompatible.length } };
   },
   async migrateBatch({ db }) {
-    for (const index of cityCatalogIndexes) await db.collection('cities').createIndex(index.key, index.options);
-    return { scanned: cityCatalogIndexes.length, modified: cityCatalogIndexes.length, done: true };
+    const plans = await planCityCatalogIndexes(db);
+    let modified = 0;
+    for (const plan of plans) {
+      if (plan.outcome === 'missing') { await db.collection('cities').createIndex(plan.index.key, plan.index.options); modified += 1; }
+      else if (plan.outcome === 'incompatible-key') throw new Error(`Cannot create ${plan.index.options.name}: an equivalent-key index "${plan.existingName}" exists with incompatible options`);
+      // 'satisfied-by-name' / 'satisfied-by-equivalent-key': already correct, left untouched.
+    }
+    return { scanned: cityCatalogIndexes.length, modified, done: true };
   },
   async validate({ db }) {
-    const names = await existingIndexNames(db, 'cities');
-    const missing = cityCatalogIndexes.filter(index => !names.has(index.options.name)).map(index => index.options.name);
-    return { valid: missing.length === 0, errors: missing.map(name => ({ code: 'CITY_CATALOG_INDEX_MISSING', message: `Required city catalog index ${name} is missing` })), summary: { missingIndexes: missing } };
+    const plans = await planCityCatalogIndexes(db);
+    const unsatisfied = plans.filter((plan) => plan.outcome === 'missing' || plan.outcome === 'incompatible-key');
+    return {
+      valid: unsatisfied.length === 0,
+      errors: unsatisfied.map((plan) => ({
+        code: plan.outcome === 'incompatible-key' ? 'CITY_CATALOG_INDEX_INCOMPATIBLE' : 'CITY_CATALOG_INDEX_MISSING',
+        message: plan.outcome === 'incompatible-key'
+          ? `Required city catalog index ${plan.index.options.name} is blocked by an incompatible equivalent-key index (${plan.existingName})`
+          : `Required city catalog index ${plan.index.options.name} is missing`,
+      })),
+      summary: { unsatisfied: unsatisfied.map((plan) => plan.index.options.name) },
+    };
   },
 };
 
@@ -755,11 +791,19 @@ export const propertyAttributeRegistryMigration: MigrationDefinition = {
   },
 };
 
-/** M-B (DPF-013): a head plus published legacy v1 for every existing property type. */
+/**
+ * M-B (DPF-013): a head plus published legacy v1 for every existing RESIDENTIAL
+ * property type only. The legacy form (bedrooms/bathrooms/…, `residential_rooms`
+ * media) is residential-only content; eligibility is resolved through the actual
+ * `purposeCategoryId` -> `property_purpose_categories.code === 'residential'`
+ * relationship, never inferred from type name/code. Non-residential types are
+ * left without a form (until Phase 8 authors real ones); an Admin-authored head
+ * on any type, residential or not, is never touched.
+ */
 export const legacyPropertyFormDefinitionsMigration: MigrationDefinition = {
   id: '026-legacy-property-form-definitions',
   version: 1,
-  description: 'DPF-013 M-B: create a FormDefinition head and an immutable published legacy residential v1 for every existing property type',
+  description: 'DPF-013 M-B: create a FormDefinition head and an immutable published legacy residential v1 for every existing residential-purpose property type',
   dependencies: ['025-property-attribute-registry'],
   rollback: {
     kind: 'none',
@@ -770,19 +814,24 @@ export const legacyPropertyFormDefinitionsMigration: MigrationDefinition = {
     const registry = await scanRegistrySeed(db);
     const scanResult = await scanLegacyDefinitions(db);
     const registryProblems = [...registry.missing, ...registry.conflicting, ...registry.inactive];
+    const eligible = scanResult.withoutHead + scanResult.seededHeadsMissingVersion;
     return {
-      eligible: scanResult.withoutHead + scanResult.seededHeadsMissingVersion,
-      alreadyApplied: scanResult.withHead - scanResult.seededHeadsMissingVersion,
+      eligible,
+      alreadyApplied: scanResult.types - eligible,
       blockers: [
         ...(registryProblems.length ? [{ code: 'PROPERTY_ATTRIBUTE_REGISTRY_INCOMPLETE', message: `Legacy registry keys are missing, conflicting or inactive: ${registryProblems.join(', ')}` }] : []),
         ...(scanResult.invalidSeededVersions.length ? [{ code: 'LEGACY_FORM_VERSION_MISMATCH', message: 'Seeded legacy versions do not match the legacy content hash', sampleIds: scanResult.invalidSeededVersions.slice(0, 20) }] : []),
+        ...(scanResult.invalidNonResidentialLegacy.length ? [{ code: 'LEGACY_FORM_DEFINITION_INVALID_PURPOSE', message: `Non-residential property types incorrectly carry a seeded legacy-residential form and must be reconciled manually before this migration can run: ${scanResult.invalidNonResidentialLegacy.join(', ')}`, sampleIds: scanResult.invalidNonResidentialLegacy.slice(0, 20) }] : []),
       ],
-      summary: { propertyTypes: scanResult.types, legacyContentHash: LEGACY_RESIDENTIAL_CONTENT_HASH },
+      summary: { propertyTypes: scanResult.types, residentialTypes: scanResult.residentialTypes, legacyContentHash: LEGACY_RESIDENTIAL_CONTENT_HASH },
     };
   },
   async migrateBatch(context) {
     if (!context.checkpoint) await ensureFormDefinitionIndexes(context.db);
-    const types = await context.db.collection('property_types').find(afterCheckpoint(context.checkpoint), { projection: { _id: 1 } }).sort({ _id: 1 }).limit(context.batchSize).toArray();
+    const residentialIds = await resolveResidentialPurposeCategoryIds(context.db);
+    const types = await context.db.collection('property_types')
+      .find({ ...afterCheckpoint(context.checkpoint), purposeCategoryId: { $in: residentialIds } }, { projection: { _id: 1 } })
+      .sort({ _id: 1 }).limit(context.batchSize).toArray();
     if (!types.length) return { scanned: 0, modified: 0, done: true };
     const now = new Date();
     let modified = 0;
@@ -794,10 +843,17 @@ export const legacyPropertyFormDefinitionsMigration: MigrationDefinition = {
   },
   async validate({ db }) {
     const scanResult = await scanLegacyDefinitions(db);
-    const valid = scanResult.withoutHead === 0 && scanResult.seededHeadsMissingVersion === 0 && scanResult.invalidSeededVersions.length === 0;
+    const valid = scanResult.withoutHead === 0 && scanResult.seededHeadsMissingVersion === 0 && scanResult.invalidSeededVersions.length === 0 && scanResult.invalidNonResidentialLegacy.length === 0;
     return {
       valid,
-      errors: valid ? [] : [{ code: 'LEGACY_FORM_DEFINITIONS_INCOMPLETE', message: `${scanResult.withoutHead} types without a head, ${scanResult.seededHeadsMissingVersion} seeded heads without their version, ${scanResult.invalidSeededVersions.length} mismatched versions` }],
+      errors: valid ? [] : [
+        ...(scanResult.withoutHead || scanResult.seededHeadsMissingVersion || scanResult.invalidSeededVersions.length
+          ? [{ code: 'LEGACY_FORM_DEFINITIONS_INCOMPLETE', message: `${scanResult.withoutHead} residential types without a head, ${scanResult.seededHeadsMissingVersion} seeded heads without their version, ${scanResult.invalidSeededVersions.length} mismatched versions` }]
+          : []),
+        ...(scanResult.invalidNonResidentialLegacy.length
+          ? [{ code: 'LEGACY_FORM_DEFINITION_INVALID_PURPOSE', message: `${scanResult.invalidNonResidentialLegacy.length} non-residential property types incorrectly carry a seeded legacy-residential form: ${scanResult.invalidNonResidentialLegacy.join(', ')}` }]
+          : []),
+      ],
       summary: scanResult,
     };
   },

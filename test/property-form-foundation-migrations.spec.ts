@@ -60,14 +60,23 @@ describe('DPF-013 M-A registry seed (025-property-attribute-registry)', () => {
 });
 
 describe('DPF-013 M-B legacy definitions (026-legacy-property-form-definitions)', () => {
-  const PURPOSE = oid(900);
+  const RESIDENTIAL = oid(900);
+  const COMMERCIAL = oid(901);
+  const INDUSTRIAL = oid(902);
+  const AGRICULTURAL = oid(903);
   const adminHeadId = oid(800);
+  const purposeCategories = [
+    { _id: RESIDENTIAL, code: 'residential', nameAr: 'سكني' },
+    { _id: COMMERCIAL, code: 'commercial', nameAr: 'تجاري' },
+  ];
   const legacyDb = () => new MemoryDb()
+    .seed('property_purpose_categories', purposeCategories)
     .seed('property_types', [
-      { _id: oid(101), code: 'apartment', isActive: true, purposeCategoryId: PURPOSE },
-      { _id: oid(102), code: 'old_type', isActive: false, purposeCategoryId: PURPOSE },
-      { _id: oid(103), code: 'unmapped', isActive: true },
-      { _id: oid(104), code: 'admin_managed', isActive: true, purposeCategoryId: PURPOSE },
+      { _id: oid(101), code: 'apartment', isActive: true, purposeCategoryId: RESIDENTIAL },
+      { _id: oid(102), code: 'old_type', isActive: false, purposeCategoryId: RESIDENTIAL },
+      { _id: oid(103), code: 'unmapped', isActive: true }, // no purposeCategoryId at all: not residential
+      { _id: oid(104), code: 'admin_managed', isActive: true, purposeCategoryId: RESIDENTIAL },
+      { _id: oid(105), code: 'shop', isActive: true, purposeCategoryId: COMMERCIAL },
     ])
     .seed('property_form_definitions', [{ _id: adminHeadId, purposeSubcategoryId: oid(104), status: 'active', currentVersionId: oid(801), currentVersion: 3, nextVersionNumber: 4, version: 7, createdBy: oid(1) }])
     .seed('properties', [{ _id: oid(500), purposeSubcategoryId: oid(101) }])
@@ -79,19 +88,21 @@ describe('DPF-013 M-B legacy definitions (026-legacy-property-form-definitions)'
     await expect(runner(legacyDb(), completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply')).rejects.toThrow(/PROPERTY_ATTRIBUTE_REGISTRY_INCOMPLETE/);
   });
 
-  it('creates a head plus an identical published legacy v1 for every type without one (inactive and unmapped included)', async () => {
+  it('creates a head plus an identical published legacy v1 for every RESIDENTIAL type without one, and leaves every non-residential type (mapped or not) formless', async () => {
     const db = await withRegistry(legacyDb());
     const dryRun = await runner(db).run(legacyPropertyFormDefinitionsMigration, 'dry-run');
-    expect(dryRun.preflight).toMatchObject({ eligible: 3, alreadyApplied: 1, blockers: [], summary: { propertyTypes: 4, legacyContentHash: LEGACY_RESIDENTIAL_CONTENT_HASH } });
+    expect(dryRun.preflight).toMatchObject({ eligible: 2, alreadyApplied: 3, blockers: [], summary: { propertyTypes: 5, residentialTypes: 3, legacyContentHash: LEGACY_RESIDENTIAL_CONTENT_HASH } });
     expect(db.writes).toEqual([]);
 
     const report = await runner(db, completed('025-property-attribute-registry'), 2).run(legacyPropertyFormDefinitionsMigration, 'apply');
-    expect(report).toMatchObject({ status: 'complete', modified: 6, batches: 3 });
+    expect(report).toMatchObject({ status: 'complete', modified: 4, batches: 2 });
     const heads = db.docs('property_form_definitions');
     const versions = db.docs('property_form_definition_versions');
-    expect(heads).toHaveLength(4);
-    expect(versions).toHaveLength(3);
-    for (const typeId of [oid(101), oid(102), oid(103)]) {
+    // 1 pre-existing admin head (104) + 2 newly-seeded residential heads (101, 102). Neither
+    // the purposeless type (103) nor the commercial type (105) ever get a head.
+    expect(heads).toHaveLength(3);
+    expect(versions).toHaveLength(2);
+    for (const typeId of [oid(101), oid(102)]) {
       const head = heads.find((entry) => String(entry.purposeSubcategoryId) === String(typeId))!;
       const version = versions.find((entry) => String(entry._id) === String(head.currentVersionId))!;
       expect(head).toMatchObject({ status: 'active', currentVersion: 1, nextVersionNumber: 2, version: 1 });
@@ -103,6 +114,8 @@ describe('DPF-013 M-B legacy definitions (026-legacy-property-form-definitions)'
       expect(version.fields).toEqual(LEGACY_RESIDENTIAL_CONTENT.fields);
       expect(storedContentHash(version)).toBe(LEGACY_RESIDENTIAL_CONTENT_HASH);
     }
+    expect(heads.find((head) => String(head.purposeSubcategoryId) === String(oid(103)))).toBeUndefined();
+    expect(heads.find((head) => String(head.purposeSubcategoryId) === String(oid(105)))).toBeUndefined();
     expect(new Set(versions.map((version) => version.contentHash)).size).toBe(1);
     expect(heads.find((head) => String(head._id) === String(adminHeadId))).toMatchObject({ currentVersion: 3, version: 7 });
     expect(db.indexes.get('property_form_definitions')!.map((index) => index.name)).toEqual(expect.arrayContaining(['property_form_definition_subcategory_unique']));
@@ -116,6 +129,84 @@ describe('DPF-013 M-B legacy definitions (026-legacy-property-form-definitions)'
     expect(snapshot(db, 'property_form_definitions') + snapshot(db, 'property_form_definition_versions')).toBe(before);
   });
 
+  it('is inactive-agnostic: an inactive residential type is just as eligible as an active one (only purpose gates it)', async () => {
+    const db = await withRegistry(legacyDb());
+    await runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply');
+    const oldTypeHead = db.docs('property_form_definitions').find((entry) => String(entry.purposeSubcategoryId) === String(oid(102)));
+    expect(oldTypeHead).toBeDefined();
+    expect(oldTypeHead).toMatchObject({ status: 'active', currentVersion: 1 });
+  });
+
+  it('resolves residential purely through the purpose relationship, never by type or purpose name/code text', async () => {
+    // The COMMERCIAL purpose's nameAr is literally "تجاري" (Arabic for commercial) and its
+    // code is "commercial" — nothing about it should ever be mistaken for residential text.
+    const db = await withRegistry(legacyDb());
+    await runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply');
+    expect(db.docs('property_form_definitions').find((entry) => String(entry.purposeSubcategoryId) === String(oid(105)))).toBeUndefined();
+  });
+
+  it('treats a type with no purposeCategoryId at all as non-residential (never defaults it to residential)', async () => {
+    const db = await withRegistry(legacyDb());
+    const dryRun = await runner(db).run(legacyPropertyFormDefinitionsMigration, 'dry-run');
+    expect((dryRun.preflight!.summary as Doc).residentialTypes).toBe(3); // 101, 102, 104 — never 103
+    await runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply');
+    expect(db.docs('property_form_definitions').find((entry) => String(entry.purposeSubcategoryId) === String(oid(103)))).toBeUndefined();
+  });
+
+  it('is a no-op on a residential-only database when every type already has its legacy form', async () => {
+    const db = await withRegistry(new MemoryDb()
+      .seed('property_purpose_categories', [{ _id: RESIDENTIAL, code: 'residential', nameAr: 'سكني' }])
+      .seed('property_types', [
+        { _id: oid(201), code: 'villa', isActive: true, purposeCategoryId: RESIDENTIAL },
+        { _id: oid(202), code: 'studio', isActive: true, purposeCategoryId: RESIDENTIAL },
+      ]));
+    expect(await runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply')).toMatchObject({ status: 'complete', modified: 4 });
+    const before = snapshot(db, 'property_form_definitions') + snapshot(db, 'property_form_definition_versions');
+    expect(await runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply')).toMatchObject({ status: 'complete', modified: 0 });
+    expect(snapshot(db, 'property_form_definitions') + snapshot(db, 'property_form_definition_versions')).toBe(before);
+  });
+
+  it('spans all four purposes: only the residential ones ever receive the legacy form', async () => {
+    const db = await withRegistry(new MemoryDb()
+      .seed('property_purpose_categories', [
+        { _id: RESIDENTIAL, code: 'residential', nameAr: 'سكني' }, { _id: COMMERCIAL, code: 'commercial', nameAr: 'تجاري' },
+        { _id: INDUSTRIAL, code: 'industrial', nameAr: 'صناعي' }, { _id: AGRICULTURAL, code: 'agricultural', nameAr: 'زراعي' },
+      ])
+      .seed('property_types', [
+        { _id: oid(301), code: 'apartment', isActive: true, purposeCategoryId: RESIDENTIAL },
+        { _id: oid(302), code: 'villa', isActive: true, purposeCategoryId: RESIDENTIAL },
+        { _id: oid(303), code: 'shop', isActive: true, purposeCategoryId: COMMERCIAL },
+        { _id: oid(304), code: 'factory', isActive: true, purposeCategoryId: INDUSTRIAL },
+        { _id: oid(305), code: 'farm', isActive: true, purposeCategoryId: AGRICULTURAL },
+      ]));
+    await runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply');
+    const seededFor = (typeId: any) => db.docs('property_form_definitions').find((entry) => String(entry.purposeSubcategoryId) === String(typeId));
+    expect(seededFor(oid(301))).toBeDefined();
+    expect(seededFor(oid(302))).toBeDefined();
+    expect(seededFor(oid(303))).toBeUndefined();
+    expect(seededFor(oid(304))).toBeUndefined();
+    expect(seededFor(oid(305))).toBeUndefined();
+    expect(db.docs('property_form_definitions')).toHaveLength(2);
+  });
+
+  it('never overwrites an existing NON-residential head/version, even one authored to look exactly like a seeded legacy v1', async () => {
+    const realFactoryHead = { _id: oid(850), purposeSubcategoryId: oid(105), status: 'active', currentVersionId: oid(851), currentVersion: 1, nextVersionNumber: 2, version: 1, createdBy: oid(1) };
+    const realFactoryVersion = { _id: oid(851), definitionId: oid(850), purposeSubcategoryId: oid(105), version: 1, state: 'published', mediaProfile: 'generic', amenitiesEnabled: true, fields: [{ key: 'deliveryStatus' }], contentHash: 'not-the-legacy-hash' };
+    const db = await withRegistry(legacyDb()
+      .seed('property_form_definitions', [
+        { _id: adminHeadId, purposeSubcategoryId: oid(104), status: 'active', currentVersionId: oid(801), currentVersion: 3, nextVersionNumber: 4, version: 7, createdBy: oid(1) },
+        realFactoryHead,
+      ])
+      .seed('property_form_definition_versions', [realFactoryVersion]));
+    const before = JSON.stringify(realFactoryHead) + JSON.stringify(realFactoryVersion);
+    const dryRun = await runner(db).run(legacyPropertyFormDefinitionsMigration, 'dry-run');
+    expect(dryRun.preflight!.blockers).toEqual([]);
+    await runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply');
+    const headAfter = db.docs('property_form_definitions').find((entry) => String(entry._id) === String(oid(850)));
+    const versionAfter = db.docs('property_form_definition_versions').find((entry) => String(entry._id) === String(oid(851)));
+    expect(JSON.stringify(headAfter) + JSON.stringify(versionAfter)).toBe(before);
+  });
+
   it('repairs an interrupted run with the head\'s own version id, orphaning nothing', async () => {
     const db = await withRegistry(legacyDb());
     await runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply');
@@ -124,12 +215,13 @@ describe('DPF-013 M-B legacy definitions (026-legacy-property-form-definitions)'
     await expect(runner(db).run(legacyPropertyFormDefinitionsMigration, 'dry-run')).resolves.toMatchObject({ preflight: { eligible: 1 } });
     expect(await runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply')).toMatchObject({ status: 'complete', modified: 1 });
     expect(db.docs('property_form_definition_versions').find((version) => String(version._id) === String(head.currentVersionId))).toMatchObject({ definitionId: head._id, contentHash: LEGACY_RESIDENTIAL_CONTENT_HASH });
-    expect(db.docs('property_form_definition_versions')).toHaveLength(3);
+    expect(db.docs('property_form_definition_versions')).toHaveLength(2);
   });
 
   it('never writes the legacy form into a head an Admin authored, even one shaped like a seeded v1', async () => {
     const db = await withRegistry(new MemoryDb()
-      .seed('property_types', [{ _id: oid(101), code: 'apartment', isActive: true, purposeCategoryId: PURPOSE }])
+      .seed('property_purpose_categories', [{ _id: RESIDENTIAL, code: 'residential', nameAr: 'سكني' }])
+      .seed('property_types', [{ _id: oid(101), code: 'apartment', isActive: true, purposeCategoryId: RESIDENTIAL }])
       .seed('property_form_definitions', [{ _id: oid(810), purposeSubcategoryId: oid(101), status: 'active', currentVersionId: oid(811), currentVersion: 1, nextVersionNumber: 2, version: 1, createdBy: oid(1) }]));
     await expect(runner(db).run(legacyPropertyFormDefinitionsMigration, 'dry-run')).resolves.toMatchObject({ preflight: { eligible: 0, alreadyApplied: 1 } });
     expect(await runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply')).toMatchObject({ status: 'complete', modified: 0 });
@@ -141,6 +233,22 @@ describe('DPF-013 M-B legacy definitions (026-legacy-property-form-definitions)'
     await runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply');
     db.docs('property_form_definition_versions')[0].fields[0].labelAr = 'مختلف';
     await expect(runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply')).rejects.toThrow(/LEGACY_FORM_VERSION_MISMATCH/);
+  });
+
+  it('blocks at preflight, and fails validate() directly, when a non-residential type already carries a seeded-legacy-shaped head (bug-guard regression check)', async () => {
+    const invalidHead = { _id: oid(870), purposeSubcategoryId: oid(105), status: 'active', currentVersionId: oid(871), currentVersion: 1, nextVersionNumber: 2, version: 1 };
+    const invalidVersion = { _id: oid(871), definitionId: oid(870), purposeSubcategoryId: oid(105), version: 1, state: 'published', fields: LEGACY_RESIDENTIAL_CONTENT.fields, mediaProfile: LEGACY_RESIDENTIAL_CONTENT.mediaProfile, amenitiesEnabled: LEGACY_RESIDENTIAL_CONTENT.amenitiesEnabled, rendererVersion: LEGACY_RESIDENTIAL_CONTENT.rendererVersion, contentHash: LEGACY_RESIDENTIAL_CONTENT_HASH };
+    const db = await withRegistry(legacyDb().seed('property_form_definitions', [
+      { _id: adminHeadId, purposeSubcategoryId: oid(104), status: 'active', currentVersionId: oid(801), currentVersion: 3, nextVersionNumber: 4, version: 7, createdBy: oid(1) },
+      invalidHead,
+    ]).seed('property_form_definition_versions', [invalidVersion]));
+
+    await expect(runner(db).run(legacyPropertyFormDefinitionsMigration, 'dry-run')).rejects.toThrow(/LEGACY_FORM_DEFINITION_INVALID_PURPOSE/);
+    await expect(runner(db, completed('025-property-attribute-registry')).run(legacyPropertyFormDefinitionsMigration, 'apply')).rejects.toThrow(/LEGACY_FORM_DEFINITION_INVALID_PURPOSE/);
+
+    const validation = await legacyPropertyFormDefinitionsMigration.validate({ db: db as any, runId: 'direct-check', batchSize: 250 });
+    expect(validation.valid).toBe(false);
+    expect(validation.errors).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'LEGACY_FORM_DEFINITION_INVALID_PURPOSE' })]));
   });
 });
 
