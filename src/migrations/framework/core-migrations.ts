@@ -30,6 +30,8 @@ import {
 } from '../025-property-form-foundation';
 import { LEGACY_RESIDENTIAL_CONTENT_HASH } from '../../property-form-definitions/property-form-definition.constants';
 import { scanPhase8RegistrySeed, seedPhase8Registry } from '../029-non-residential-attribute-registry';
+import { PHASE9_PROMOTED_FACET_KEYS, promotePhase9Facets, scanPhase9FacetPromotion } from '../030-phase9-facet-promotion';
+import { backfillPhase9FacetsBatch, scanPhase9FacetBackfill } from '../031-phase9-facet-backfill';
 
 function afterCheckpoint(checkpoint?: string): Record<string, unknown> {
   if (!checkpoint) return {};
@@ -964,6 +966,88 @@ export const phase8AttributeRegistryMigration: MigrationDefinition = {
   },
 };
 
+/**
+ * Phase 9: promotes 7 approved Phase 8 non-residential attributes to typed
+ * search facets by setting `facetKey` (== key). Never touches migration 025,
+ * 029 or any attribute identity field; only ever moves `facetKey` from unset
+ * to `key`, once. See ../030-phase9-facet-promotion.ts.
+ */
+export const phase9FacetPromotionMigration: MigrationDefinition = {
+  id: '030-phase9-facet-promotion',
+  version: 1,
+  description: 'Phase 9: promote 7 approved Phase 8 non-residential attributes to typed search facets (facetKey == key; existing facetKey values never overwritten)',
+  dependencies: ['029-phase8-attribute-registry'],
+  rollback: {
+    kind: 'none',
+    remediation: 'facetKey is immutable once set and may already be relied on by live search queries; never unset it. Inspect migration_ledger and property_attributes before any reviewed repair.',
+    restoreProcedure: 'Restore the verified pre-migration snapshot to a separate database and compare property_attributes before any production remediation.',
+  },
+  async preflight({ db }) {
+    const { missing, eligible, alreadyPromoted, conflicting } = await scanPhase9FacetPromotion(db);
+    const blockers: Array<{ code: string; message: string; sampleIds?: string[] }> = [];
+    if (missing.length) {
+      blockers.push({
+        code: 'PROPERTY_ATTRIBUTE_MISSING',
+        message: `Attributes to promote are missing from the registry (run 029-phase8-attribute-registry first): ${missing.join(', ')}`,
+        sampleIds: missing,
+      });
+    }
+    if (conflicting.length) {
+      blockers.push({
+        code: 'PROPERTY_ATTRIBUTE_FACET_KEY_CONFLICT',
+        message: `facetKey is already set to an unexpected value for: ${conflicting.join(', ')}`,
+        sampleIds: conflicting,
+      });
+    }
+    return { eligible: eligible.length, alreadyApplied: alreadyPromoted.length, blockers, summary: { missing, eligible, alreadyPromoted, conflicting, keys: PHASE9_PROMOTED_FACET_KEYS } };
+  },
+  async migrateBatch({ db }) {
+    const modified = await promotePhase9Facets(db);
+    return { scanned: PHASE9_PROMOTED_FACET_KEYS.length, modified, done: true };
+  },
+  async validate({ db }) {
+    const { missing, eligible, conflicting } = await scanPhase9FacetPromotion(db);
+    const problems = [...missing, ...eligible, ...conflicting];
+    return {
+      valid: problems.length === 0,
+      errors: problems.map((key) => ({ code: 'PROPERTY_ATTRIBUTE_FACET_KEY_NOT_PROMOTED', message: `Attribute ${key} does not have facetKey set to its own key` })),
+    };
+  },
+};
+
+/**
+ * Phase 9: backfills `Property.facets` for every already-approved property so
+ * existing listings are not permanently invisible to facet search. Never
+ * rewrites `property_revisions`; only ever updates `Property.facets`, guarded
+ * per document against a concurrent re-approval. See ../031-phase9-facet-backfill.ts.
+ */
+export const phase9FacetBackfillMigration: MigrationDefinition = {
+  id: '031-phase9-facet-backfill',
+  version: 1,
+  description: 'Phase 9: backfill Property.facets for existing approved properties from their current public revision (visible and archived/admin-hidden alike)',
+  dependencies: ['030-phase9-facet-promotion'],
+  rollback: {
+    kind: 'none',
+    remediation: 'facets is a derived projection; re-running this migration or a normal re-approval always recomputes it correctly. Inspect migration_ledger and PROPERTY_FACET_DRIFT before any reviewed repair.',
+    restoreProcedure: 'Restore the verified pre-migration snapshot to a separate database and compare Property.facets before any production remediation.',
+  },
+  async preflight({ db }) {
+    const { totalTargets, eligible, alreadyCorrect } = await scanPhase9FacetBackfill(db);
+    return { eligible, alreadyApplied: alreadyCorrect, blockers: [], summary: { totalTargets, eligible, alreadyCorrect } };
+  },
+  async migrateBatch(context) {
+    return backfillPhase9FacetsBatch(context.db, context.checkpoint, context.batchSize);
+  },
+  async validate({ db }) {
+    const { eligible } = await scanPhase9FacetBackfill(db);
+    return {
+      valid: eligible === 0,
+      errors: eligible ? [{ code: 'PROPERTY_FACET_BACKFILL_INCOMPLETE', message: `${eligible} properties still have facets that do not match their current public revision` }] : [],
+      summary: { eligible },
+    };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
@@ -982,6 +1066,8 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   legacyPropertyDataReportMigration,
   propertyAreaBackfillMigration,
   phase8AttributeRegistryMigration,
+  phase9FacetPromotionMigration,
+  phase9FacetBackfillMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {

@@ -300,9 +300,11 @@ describe('DPF-010 PropertyRevision and Property additions', () => {
     }
   });
 
-  it('types Property.facets: integer bedrooms 0-100 only, never arbitrary keys', async () => {
+  it('types Property.facets: bedrooms plus the 7 Phase 9 promoted keys only, never arbitrary keys', async () => {
     const facets = PropertySchema.path('facets') as any;
-    expect(Object.keys(facets.schema.paths)).toEqual(['bedrooms']);
+    expect(Object.keys(facets.schema.paths).sort()).toEqual(
+      ['bedrooms', 'shopFloorLevel', 'commercialUseTypes', 'builtAreaSqm', 'powerSource', 'industrialUseType', 'soilType', 'waterSource'].sort(),
+    );
     await expect(new PropertyModel({ facets: { bedrooms: 2, floorArea: 10 } }).validate(['facets'])).rejects.toThrow(/StrictModeError/);
     const invalid = new PropertyModel({ ownerId: new Types.ObjectId(), operationType: 'sale', propertyTypeCode: 'x', title: 't', description: 'd', governorateCode: 'g', city: 'c', district: 'd', latitude: 1, longitude: 1, area: 1, totalPriceMinor: 1, images: [], coverImageIndex: 0, facets: { bedrooms: 2.5 } });
     await expect(invalid.validate()).rejects.toThrow(/facets.bedrooms must be an integer/);

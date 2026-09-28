@@ -5,6 +5,7 @@ import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { ListPublishedPropertiesDto } from './dto/list-published-properties.dto';
+import { GetFilterMetadataDto } from './dto/get-filter-metadata.dto';
 import { PropertiesService } from './properties.service';
 import { UpdatePropertyVisibilityDto } from './dto/update-property-visibility.dto';
 import { SubmitPropertyRevisionDto } from './dto/review-property.dto';
@@ -58,6 +59,12 @@ export class PropertiesController {
   @Get()
   listPublished(@Query() query: ListPublishedPropertiesDto) {
     return this.service.listPublished(query);
+  }
+
+  /** Phase 9 (Search & Facets): must be registered before `:propertyId` so it never gets swallowed by that route. */
+  @Get('filter-metadata')
+  getFilterMetadata(@Query() query: GetFilterMetadataDto) {
+    return this.service.getFilterMetadata(query);
   }
 
   @Get('mine')

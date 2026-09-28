@@ -2,6 +2,8 @@ import type { Collection, Db, Document } from 'mongodb';
 import { SystemRole } from '../auth/roles.enum';
 import { AccountStatus, AccountType, BrokerStatus, PrimaryIdentifierType, VerificationTrustState } from '../users/identity.types';
 import { EFFECTIVE_TYPE_SELECTION, PROPERTY_TYPE_SELECTION_BACKFILL_FILTER, SELECTION_MISSING_PRIMARY_FILTER } from './022-property-type-selection';
+import { approvedFacets } from '../properties/property-form-write';
+import { effectiveSpec } from '../properties/property-specifications';
 
 export type IntegrityFinding = {
   code: string;
@@ -168,6 +170,56 @@ async function propertyOptionDriftFinding(db: Db): Promise<IntegrityFinding | nu
   return { code: 'PROPERTY_OPTION_USAGE_DRIFT', severity: 'warning', count, sampleIds: (rows[0].samples as Document[]).map((row) => String(row._id)), message: 'property_options.usageCount differs from property references' };
 }
 
+/** Order-insensitive facet equality; array-valued facets (e.g. `commercialUseTypes`) compare as sets. Exported for the Phase 9 backfill migration, which uses the identical comparison to decide whether a write is needed. */
+export function facetsMatch(stored: Record<string, unknown> | undefined | null, expected: Record<string, unknown> | undefined | null): boolean {
+  const a = stored ?? {};
+  const b = expected ?? {};
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    const x = (a as Record<string, unknown>)[key];
+    const y = (b as Record<string, unknown>)[key];
+    if (Array.isArray(x) || Array.isArray(y)) {
+      const xs = Array.isArray(x) ? [...x].sort() : [];
+      const ys = Array.isArray(y) ? [...y].sort() : [];
+      if (JSON.stringify(xs) !== JSON.stringify(ys)) return false;
+    } else if (x !== y) return false;
+  }
+  return true;
+}
+
+/**
+ * Phase 9 (Search & Facets): compares each property's stored `facets` against
+ * a fresh recomputation (the same `approvedFacets()` derivation approval
+ * uses) from its current public revision's effective attributes. Read-only —
+ * never repairs anything; a mismatch means the Phase 9 backfill (or a normal
+ * re-approval) has not yet run for that property.
+ */
+async function propertyFacetDriftFinding(db: Db): Promise<IntegrityFinding | null> {
+  const properties = await db
+    .collection('properties')
+    .aggregate([{ $match: { currentPublicRevisionId: { $exists: true, $ne: null } } }, { $project: { _id: 1, facets: 1, currentPublicRevisionId: 1 } }])
+    .toArray();
+  if (!properties.length) return null;
+  const revisionIds = [...new Set(properties.map((property) => property.currentPublicRevisionId))];
+  const revisions = await db.collection('property_revisions').aggregate([{ $match: { _id: { $in: revisionIds } } }]).toArray();
+  const revisionById = new Map(revisions.map((revision) => [String(revision._id), revision]));
+  const drifting: string[] = [];
+  for (const property of properties) {
+    const revision = revisionById.get(String(property.currentPublicRevisionId));
+    if (!revision) continue; // a dangling currentPublicRevisionId is a separate, unrelated concern.
+    const expected = approvedFacets(effectiveSpec(revision).attributes);
+    if (!facetsMatch(property.facets, expected)) drifting.push(String(property._id));
+  }
+  if (!drifting.length) return null;
+  return {
+    code: 'PROPERTY_FACET_DRIFT',
+    severity: 'warning',
+    count: drifting.length,
+    sampleIds: drifting.slice(0, SAMPLE_LIMIT),
+    message: 'Property.facets does not match a fresh recomputation from the current public revision (run the Phase 9 facet backfill, or the property will self-correct on its next re-approval)',
+  };
+}
+
 export async function runIntegrityChecks(db: Db, now: Date = new Date()): Promise<IntegrityReport> {
   const users = db.collection('users');
   const properties = db.collection('properties');
@@ -207,6 +259,7 @@ export async function runIntegrityChecks(db: Db, now: Date = new Date()): Promis
     catalogDriftFinding(db, 'governorates', 'governorateCode', 'GOVERNORATE_USAGE_DRIFT'),
     catalogDriftFinding(db, 'amenities', 'amenityCodes', 'AMENITY_USAGE_DRIFT', true),
     propertyOptionDriftFinding(db),
+    propertyFacetDriftFinding(db),
   ]);
   const findings = candidates.filter((finding): finding is IntegrityFinding => finding !== null);
   const errorCount = findings.filter((finding) => finding.severity === 'error').reduce((sum, finding) => sum + finding.count, 0);

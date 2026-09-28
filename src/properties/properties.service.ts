@@ -9,6 +9,8 @@ import { PropertyOption, PropertyOptionDocument } from '../property-options/sche
 import { PropertyType, PropertyTypeDocument } from '../property-types/schemas/property-type.schema';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { ListPublishedPropertiesDto } from './dto/list-published-properties.dto';
+import { GetFilterMetadataDto } from './dto/get-filter-metadata.dto';
+import { facetMetadataForPropertyTypeCode } from './property-search-facets';
 import { Property, PropertyAsset, PropertyDocument } from './schemas/property.schema';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
@@ -784,6 +786,20 @@ export class PropertiesService {
   }
 
   /**
+   * `GET /properties/filter-metadata` (Phase 9). Returns only the promoted
+   * facets applicable to the given primary type, in a fixed deterministic
+   * order. No type given -> no non-residential facets (`[]`); an unknown
+   * type follows the same public-catalog error convention `buildPublicListingQuery`
+   * already uses for an invalid `purposeSubcategoryId`.
+   */
+  async getFilterMetadata(query: GetFilterMetadataDto) {
+    if (!query.purposeSubcategoryId) return { facets: [] };
+    const type = await this.propertyTypes.findById(query.purposeSubcategoryId).lean().exec();
+    if (!type) throw new BadRequestException({ message: 'نوع العقار الفرعي غير موجود', code: PropertyErrorCode.PURPOSE_SUBCATEGORY_INVALID });
+    return { facets: facetMetadataForPropertyTypeCode(type.code) };
+  }
+
+  /**
    * Parses and validates the public search/filter query (MAZAD-021) into a
    * Mongo filter fragment, sort spec and clamped pagination. Kept separate
    * from `listPublished` so the pure parts (bounds clamping, price-range and
@@ -829,6 +845,27 @@ export class PropertiesService {
     if (query.q) {
       const escaped = this.escapeRegExp(query.q);
       filter.$or = ['title', 'city', 'district'].map(field => ({ [field]: { $regex: escaped, $options: 'i' } }));
+    }
+
+    // Phase 9 (Search & Facets): explicit predicates on `Property.facets` for
+    // the 7 approved promoted keys only — never a generic attr.*/JSON filter.
+    // A facet irrelevant to the resolved type is not rejected; it simply
+    // matches nothing (no listing of another type ever has that facet key).
+    if (query.shopFloorLevel) filter['facets.shopFloorLevel'] = query.shopFloorLevel;
+    if (query.commercialUseTypes?.length) filter['facets.commercialUseTypes'] = { $in: query.commercialUseTypes };
+    if (query.powerSource) filter['facets.powerSource'] = query.powerSource;
+    if (query.industrialUseType) filter['facets.industrialUseType'] = query.industrialUseType;
+    if (query.soilType) filter['facets.soilType'] = query.soilType;
+    if (query.waterSource) filter['facets.waterSource'] = query.waterSource;
+
+    if (query.minBuiltAreaSqm !== undefined || query.maxBuiltAreaSqm !== undefined) {
+      if (query.minBuiltAreaSqm !== undefined && query.maxBuiltAreaSqm !== undefined && query.minBuiltAreaSqm > query.maxBuiltAreaSqm) {
+        throw new BadRequestException({ message: 'الحد الأدنى للمساحة المبنية أكبر من الحد الأقصى المحدد', code: PropertyErrorCode.FACET_RANGE_INVALID });
+      }
+      filter['facets.builtAreaSqm'] = {
+        ...(query.minBuiltAreaSqm !== undefined ? { $gte: query.minBuiltAreaSqm } : {}),
+        ...(query.maxBuiltAreaSqm !== undefined ? { $lte: query.maxBuiltAreaSqm } : {}),
+      };
     }
 
     const sort: Record<string, 1 | -1> =
@@ -976,7 +1013,15 @@ export class PropertiesService {
   async buildPublicPropertyMatchForAuctions(
     filters: Pick<ListPublishedPropertiesDto, 'governorateCode' | 'city' | 'purposeCategoryId' | 'purposeSubcategoryId'> = {},
   ): Promise<Record<string, unknown>> {
-    const { filter } = await this.buildPublicListingQuery(filters as ListPublishedPropertiesDto);
+    // Phase 9 (Search & Facets): explicitly whitelist only these 4 catalog
+    // fields at runtime, never the caller's object as-is — a TypeScript `Pick<>`
+    // on the parameter type is erased at runtime and would not stop extra
+    // properties (e.g. facet params) from reaching `buildPublicListingQuery`
+    // if ever spread onto the input. Auction discovery must never filter on
+    // `Property.facets` (a mutable, always-current projection) or it could
+    // disagree with a terminal auction's anchored display later.
+    const { governorateCode, city, purposeCategoryId, purposeSubcategoryId } = filters;
+    const { filter } = await this.buildPublicListingQuery({ governorateCode, city, purposeCategoryId, purposeSubcategoryId } as ListPublishedPropertiesDto);
     return { ...this.publicVisibilityFilter(), ...filter };
   }
 

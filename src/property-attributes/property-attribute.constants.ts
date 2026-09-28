@@ -24,8 +24,22 @@ export const PROPERTY_ATTRIBUTE_STATUSES = ['active', 'deprecated'] as const;
 export type PropertyAttributeStatus = (typeof PROPERTY_ATTRIBUTE_STATUSES)[number];
 export const PROPERTY_ATTRIBUTE_OPTION_STATUSES = ['active', 'deprecated'] as const;
 export const PROPERTY_ATTRIBUTE_ORIGINS = ['system'] as const;
-/** Registry keys that may feed `Property.facets`; V1 promotes only bedrooms. */
-export const PROPERTY_ATTRIBUTE_FACET_KEYS = ['bedrooms'] as const;
+/**
+ * Registry keys that may feed `Property.facets`. V1 (DPF-023) promoted only
+ * `bedrooms`; Phase 9 (Search & Facets) adds exactly 7 approved non-residential
+ * keys. Adding a key here is a deliberate engineering promotion, never
+ * automatic — see `030-phase9-facet-promotion.ts`.
+ */
+export const PROPERTY_ATTRIBUTE_FACET_KEYS = [
+  'bedrooms',
+  'shopFloorLevel',
+  'commercialUseTypes',
+  'builtAreaSqm',
+  'powerSource',
+  'industrialUseType',
+  'soilType',
+  'waterSource',
+] as const;
 
 export const PROPERTY_ATTRIBUTE_KEY_PATTERN = /^[a-z][a-zA-Z0-9]{1,39}$/;
 export const PROPERTY_ATTRIBUTE_KEY_DENYLIST: readonly string[] = ['constructor', 'prototype', 'toString', 'valueOf', 'hasOwnProperty'];

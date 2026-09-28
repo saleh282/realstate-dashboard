@@ -8,7 +8,10 @@ import {
   LEGACY_SPEC_FIELD_TO_ATTRIBUTE,
   LEGACY_SPEC_FIELDS,
   PROPERTY_ATTRIBUTE_FACET_KEYS,
+  type PropertyAttributeHardBounds,
 } from '../property-attributes/property-attribute.constants';
+import { PHASE8_NON_RESIDENTIAL_ATTRIBUTE_SEED, type Phase8AttributeSeed } from '../migrations/029-non-residential-attribute-registry';
+import { PHASE9_PROMOTED_FACET_KEYS } from '../migrations/030-phase9-facet-promotion';
 import {
   CURRENT_RENDERER_VERSION,
   SHIPPED_MEDIA_PROFILES,
@@ -298,26 +301,107 @@ export function catalogCandidates(version: Pick<FormVersionRecord, 'fields'>, at
   return [...pairs.values()];
 }
 
-/** Attribute key -> facet key, from the engineering-owned registry seed (frozen §A1, §G2). */
-const FACET_KEY_BY_ATTRIBUTE: ReadonlyMap<string, string> = new Map(
-  LEGACY_PROPERTY_ATTRIBUTE_SEED.filter((entry) => entry.facetKey).map((entry) => [entry.key, entry.facetKey!]),
-);
+/**
+ * One engineering-promoted facet's derivation contract: which registry
+ * dataType it is, and (for numeric/select types) the bounds/option codes a
+ * source value must satisfy. Built once from the two static, engineering-owned
+ * seeds (never the live database, matching how this has always worked) so
+ * derivation stays synchronous and side-effect-free inside the approval
+ * transaction. `PHASE8_NON_RESIDENTIAL_ATTRIBUTE_SEED`/`PHASE9_PROMOTED_FACET_KEYS`
+ * are read-only imports from the Phase 8/9 registry migrations — neither
+ * migration file is modified by this.
+ */
+type PromotedFacetDefinition =
+  | { facetKey: string; dataType: 'integer' | 'decimal'; hardBounds: PropertyAttributeHardBounds }
+  | { facetKey: string; dataType: 'boolean' }
+  | { facetKey: string; dataType: 'singleSelect'; optionCodes: readonly string[] }
+  | { facetKey: string; dataType: 'multiSelect'; optionCodes: readonly string[]; maxItems?: number };
 
-export type PropertyFacetValues = { bedrooms?: number };
+function phase9PromotedFacetDefinition(seed: Phase8AttributeSeed): PromotedFacetDefinition {
+  if (seed.dataType === 'singleSelect') return { facetKey: seed.key, dataType: 'singleSelect', optionCodes: (seed.options ?? []).map((option) => option.code) };
+  if (seed.dataType === 'multiSelect') return { facetKey: seed.key, dataType: 'multiSelect', optionCodes: (seed.options ?? []).map((option) => option.code), maxItems: seed.hardBounds.maxItems };
+  if (seed.dataType === 'boolean') return { facetKey: seed.key, dataType: 'boolean' };
+  return { facetKey: seed.key, dataType: seed.dataType as 'integer' | 'decimal', hardBounds: seed.hardBounds };
+}
+
+/** Attribute key -> promoted-facet derivation contract (frozen §A1, §G2; extended by Phase 9). */
+const PROMOTED_FACET_DEFINITIONS: ReadonlyMap<string, PromotedFacetDefinition> = new Map([
+  ...LEGACY_PROPERTY_ATTRIBUTE_SEED.filter((entry) => entry.facetKey).map(
+    (entry): [string, PromotedFacetDefinition] => [entry.key, { facetKey: entry.facetKey!, dataType: entry.dataType as 'integer' | 'decimal', hardBounds: entry.hardBounds }],
+  ),
+  ...PHASE8_NON_RESIDENTIAL_ATTRIBUTE_SEED.filter((entry) => (PHASE9_PROMOTED_FACET_KEYS as readonly string[]).includes(entry.key)).map(
+    (entry): [string, PromotedFacetDefinition] => [entry.key, phase9PromotedFacetDefinition(entry)],
+  ),
+]);
+
+export type PropertyFacetValues = {
+  bedrooms?: number;
+  shopFloorLevel?: string;
+  commercialUseTypes?: string[];
+  builtAreaSqm?: number;
+  powerSource?: string;
+  industrialUseType?: string;
+  soilType?: string;
+  waterSource?: string;
+};
+
+function normalizedFacetNumber(value: unknown, hardBounds: PropertyAttributeHardBounds, integer: boolean): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  if (integer && !Number.isSafeInteger(value)) return undefined;
+  if (hardBounds.min !== undefined && value < hardBounds.min) return undefined;
+  if (hardBounds.max !== undefined && value > hardBounds.max) return undefined;
+  return value;
+}
+
+/** Dedupe + drop anything not a currently-approved option code; canonical order is already the option-declared order the field validator stored (frozen §B4). */
+function normalizedFacetMultiSelect(value: unknown, optionCodes: readonly string[], maxItems: number | undefined): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string' || !optionCodes.includes(entry) || seen.has(entry)) continue;
+    seen.add(entry);
+    result.push(entry);
+  }
+  if (!result.length) return undefined;
+  if (maxItems !== undefined && result.length > maxItems) return undefined;
+  return result;
+}
 
 /**
- * Frozen §A6/§G4: the typed facets of an approved revision's effective
- * attributes. Only engineering-promoted keys; a value that is missing or not
- * a valid facet value is omitted, never defaulted.
+ * Frozen §A6/§G4 (extended by Phase 9 Search & Facets): the typed facets of
+ * an approved revision's effective attributes — PRIMARY form only, never an
+ * additional type's. Only engineering-promoted keys (`facetKey` set, which is
+ * always == the attribute's own key) are ever considered; a value that is
+ * missing, the wrong shape, or fails its registry-defined bounds/option check
+ * is omitted, never defaulted and never stored malformed.
  */
 export function approvedFacets(attributes: Readonly<Record<string, unknown>>): PropertyFacetValues {
-  const facets: Record<string, number> = {};
-  for (const [attributeKey, facetKey] of FACET_KEY_BY_ATTRIBUTE) {
-    if (!(PROPERTY_ATTRIBUTE_FACET_KEYS as readonly string[]).includes(facetKey)) continue;
+  const facets: Record<string, unknown> = {};
+  for (const [attributeKey, definition] of PROMOTED_FACET_DEFINITIONS) {
+    if (!(PROPERTY_ATTRIBUTE_FACET_KEYS as readonly string[]).includes(definition.facetKey)) continue;
     const value = attributes[attributeKey];
-    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 100) facets[facetKey] = value;
+    switch (definition.dataType) {
+      case 'integer':
+      case 'decimal': {
+        const normalized = normalizedFacetNumber(value, definition.hardBounds, definition.dataType === 'integer');
+        if (normalized !== undefined) facets[definition.facetKey] = normalized;
+        break;
+      }
+      case 'boolean':
+        if (typeof value === 'boolean') facets[definition.facetKey] = value;
+        break;
+      case 'singleSelect':
+        if (typeof value === 'string' && definition.optionCodes.includes(value)) facets[definition.facetKey] = value;
+        break;
+      case 'multiSelect': {
+        const normalized = normalizedFacetMultiSelect(value, definition.optionCodes, definition.maxItems);
+        if (normalized) facets[definition.facetKey] = normalized;
+        break;
+      }
+    }
   }
-  return facets;
+  return facets as PropertyFacetValues;
 }
 
 /** One stored or uploaded photo, as far as slot completeness is concerned. */

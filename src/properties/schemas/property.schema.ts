@@ -5,6 +5,20 @@ import { AssetClassification, EvidenceDeliveryType } from '../../config/evidence
 import { AccountType } from '../../users/identity.types';
 import { PropertyLifecycleStatus, PropertyMediaOrigin, PropertyMediaTagCode } from '../property.types';
 import { PROPERTY_PURPOSE_CATEGORY_LISTING_INDEX, PROPERTY_TYPE_LISTING_INDEX } from '../property-listing-indexes';
+import { PHASE8_NON_RESIDENTIAL_ATTRIBUTE_SEED } from '../../migrations/029-non-residential-attribute-registry';
+import { PHASE9_PROMOTED_FACET_KEYS } from '../../migrations/030-phase9-facet-promotion';
+
+/** Registry-mirrored option codes/bounds for the 7 Phase 9 promoted facets; read-only, never guesses beyond the seed. */
+const PHASE9_SEED_BY_KEY = new Map(PHASE8_NON_RESIDENTIAL_ATTRIBUTE_SEED.map((entry) => [entry.key, entry]));
+function phase9OptionCodes(key: string): readonly string[] {
+  return (PHASE9_SEED_BY_KEY.get(key)?.options ?? []).map((option) => option.code);
+}
+function phase9HardBounds(key: string) {
+  return PHASE9_SEED_BY_KEY.get(key)?.hardBounds ?? {};
+}
+if (!PHASE9_PROMOTED_FACET_KEYS.every((key) => PHASE9_SEED_BY_KEY.has(key))) {
+  throw new Error('Phase 9 promoted facet key missing from the Phase 8 registry seed');
+}
 
 export type PropertyDocument = HydratedDocument<Property>;
 
@@ -28,11 +42,52 @@ export class PropertyAsset {
 
 const PropertyAssetSchema = SchemaFactory.createForClass(PropertyAsset);
 
-/** Typed facet values; V1 promotes only `bedrooms` (integer 0-100). No dynamic keys. */
+/**
+ * Typed facet values. V1 (DPF-023) promoted only `bedrooms` (integer 0-100).
+ * Phase 9 (Search & Facets) adds exactly 7 non-residential facets, each
+ * explicitly typed and validated against the same registry-approved option
+ * codes/hard bounds `030-phase9-facet-promotion.ts` promoted. No dynamic keys
+ * (`strict: 'throw'`, no generic map) — a facet is only ever addable here by
+ * an engineering code change, never by data.
+ */
 @Schema({ _id: false, strict: 'throw' })
 export class PropertyFacets {
   @Prop({ min: 0, max: 100, validate: { validator: (value: unknown) => value === undefined || Number.isInteger(value), message: 'facets.bedrooms must be an integer' } })
   bedrooms?: number;
+
+  @Prop({ enum: phase9OptionCodes('shopFloorLevel') })
+  shopFloorLevel?: string;
+
+  @Prop({
+    type: [String],
+    default: undefined,
+    validate: {
+      validator: (value: unknown) =>
+        value === undefined
+        || (Array.isArray(value) && value.length > 0 && value.every((code) => phase9OptionCodes('commercialUseTypes').includes(code)) && new Set(value).size === value.length),
+      message: 'facets.commercialUseTypes must be a non-empty array of unique approved option codes',
+    },
+  })
+  commercialUseTypes?: string[];
+
+  @Prop({
+    min: phase9HardBounds('builtAreaSqm').min,
+    max: phase9HardBounds('builtAreaSqm').max,
+    validate: { validator: (value: unknown) => value === undefined || (typeof value === 'number' && Number.isFinite(value)), message: 'facets.builtAreaSqm must be a finite number' },
+  })
+  builtAreaSqm?: number;
+
+  @Prop({ enum: phase9OptionCodes('powerSource') })
+  powerSource?: string;
+
+  @Prop({ enum: phase9OptionCodes('industrialUseType') })
+  industrialUseType?: string;
+
+  @Prop({ enum: phase9OptionCodes('soilType') })
+  soilType?: string;
+
+  @Prop({ enum: phase9OptionCodes('waterSource') })
+  waterSource?: string;
 }
 export const PropertyFacetsSchema = SchemaFactory.createForClass(PropertyFacets);
 

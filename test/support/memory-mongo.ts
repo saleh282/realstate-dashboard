@@ -158,7 +158,10 @@ export class MemoryDb {
         let modifiedCount = 0;
         for (const { updateOne } of operations) {
           const target = db.docs(name).find((doc) => matches(doc, updateOne.filter));
-          if (target) { Object.assign(target, updateOne.update.$set); modifiedCount++; }
+          if (!target) continue;
+          if (updateOne.update.$set) Object.assign(target, updateOne.update.$set);
+          for (const key of Object.keys(updateOne.update.$unset ?? {})) delete target[key];
+          modifiedCount++;
         }
         return { modifiedCount };
       },
