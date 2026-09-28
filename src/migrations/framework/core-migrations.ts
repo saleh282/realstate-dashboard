@@ -32,6 +32,7 @@ import { LEGACY_RESIDENTIAL_CONTENT_HASH } from '../../property-form-definitions
 import { scanPhase8RegistrySeed, seedPhase8Registry } from '../029-non-residential-attribute-registry';
 import { PHASE9_PROMOTED_FACET_KEYS, promotePhase9Facets, scanPhase9FacetPromotion } from '../030-phase9-facet-promotion';
 import { backfillPhase9FacetsBatch, scanPhase9FacetBackfill } from '../031-phase9-facet-backfill';
+import { scanPhase10RegistrySeed, seedPhase10Registry } from '../032-phase10-unit-floor-level-registry';
 
 function afterCheckpoint(checkpoint?: string): Record<string, unknown> {
   if (!checkpoint) return {};
@@ -1048,6 +1049,45 @@ export const phase9FacetBackfillMigration: MigrationDefinition = {
   },
 };
 
+/**
+ * Phase 10 (Complete Remaining Property Types): seeds the single new
+ * engineering-owned registry entry `unitFloorLevel` (insert-only, no
+ * facetKey — Phase 10 does not expand search/facet scope). Never touches
+ * migrations 025/029/030/031. See ../032-phase10-unit-floor-level-registry.ts.
+ */
+export const phase10UnitFloorLevelRegistryMigration: MigrationDefinition = {
+  id: '032-phase10-unit-floor-level-registry',
+  version: 1,
+  description: 'Phase 10: seed the unitFloorLevel Attribute Registry entry for office/clinic/commercial_unit (insert-only; existing keys are never modified; no facetKey)',
+  dependencies: ['029-phase8-attribute-registry'],
+  rollback: {
+    kind: 'none',
+    remediation: 'Registry keys are immutable identity and may already be referenced by form versions; never delete them. Inspect migration_ledger and the registry before any reviewed repair.',
+    restoreProcedure: 'Restore the verified pre-migration snapshot to a separate database and compare property_attributes before any production remediation.',
+  },
+  async preflight({ db }) {
+    const { missing, matching, conflicting, inactive } = await scanPhase10RegistrySeed(db);
+    return {
+      eligible: missing.length,
+      alreadyApplied: matching.length,
+      blockers: conflicting.length ? [{ code: 'PROPERTY_ATTRIBUTE_SEED_CONFLICT', message: `Registry keys exist with a different identity or options: ${conflicting.join(', ')}` }] : [],
+      summary: { missing, conflicting, inactive },
+    };
+  },
+  async migrateBatch({ db }) {
+    const inserted = await seedPhase10Registry(db, new Date());
+    return { scanned: 1, modified: inserted, done: true };
+  },
+  async validate({ db }) {
+    const { missing, conflicting } = await scanPhase10RegistrySeed(db);
+    const problems = [...missing, ...conflicting];
+    return {
+      valid: problems.length === 0,
+      errors: problems.map((key) => ({ code: 'PROPERTY_ATTRIBUTE_SEED_MISSING', message: `Registry key ${key} is missing or has a different identity/options` })),
+    };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
@@ -1068,6 +1108,7 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   phase8AttributeRegistryMigration,
   phase9FacetPromotionMigration,
   phase9FacetBackfillMigration,
+  phase10UnitFloorLevelRegistryMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {

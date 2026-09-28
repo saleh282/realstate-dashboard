@@ -385,10 +385,10 @@ describe('DPF-014 M-D Property.area backfill (028-property-area-backfill)', () =
 });
 
 describe('DPF-013/014 migration registry', () => {
-  it('registers M-A -> M-B, the manual report, the area backfill and the Phase 8/9 registry seeds in order', () => {
+  it('registers M-A -> M-B, the manual report, the area backfill and the Phase 8/9/10 registry seeds in order', () => {
     validateMigrationRegistry();
     const ids = CORE_MIGRATIONS.map((migration) => migration.id);
-    expect(ids.slice(-7)).toEqual([
+    expect(ids.slice(-8)).toEqual([
       '025-property-attribute-registry',
       '026-legacy-property-form-definitions',
       '027-legacy-property-data-report',
@@ -396,6 +396,7 @@ describe('DPF-013/014 migration registry', () => {
       '029-phase8-attribute-registry',
       '030-phase9-facet-promotion',
       '031-phase9-facet-backfill',
+      '032-phase10-unit-floor-level-registry',
     ]);
     expect(legacyPropertyFormDefinitionsMigration.dependencies).toEqual(['025-property-attribute-registry']);
     expect(propertyAreaBackfillMigration.dependencies).toEqual(['015-property-attribution-revisions']);
