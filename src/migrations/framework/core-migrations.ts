@@ -29,6 +29,7 @@ import {
   seedRegistry,
 } from '../025-property-form-foundation';
 import { LEGACY_RESIDENTIAL_CONTENT_HASH } from '../../property-form-definitions/property-form-definition.constants';
+import { scanPhase8RegistrySeed, seedPhase8Registry } from '../029-non-residential-attribute-registry';
 
 function afterCheckpoint(checkpoint?: string): Record<string, unknown> {
   if (!checkpoint) return {};
@@ -923,6 +924,46 @@ export const propertyAreaBackfillMigration: MigrationDefinition = {
   },
 };
 
+/**
+ * DPF-044 (Phase 8): the engineering-owned registry entries for the first
+ * three real non-residential property types (shop, factory,
+ * agricultural_land). Insert-only, mirrors 025's M-A pattern exactly but
+ * lives in its own file/migration so 025 is never modified. No facet/search
+ * promotion: none of these keys carry a `facetKey`.
+ */
+export const phase8AttributeRegistryMigration: MigrationDefinition = {
+  id: '029-phase8-attribute-registry',
+  version: 1,
+  description: 'DPF-044 Phase 8: seed the shop/factory/agricultural_land Attribute Registry entries (insert-only; existing keys are never modified)',
+  dependencies: ['025-property-attribute-registry'],
+  rollback: {
+    kind: 'none',
+    remediation: 'Registry keys are immutable identity and may already be referenced by form versions; never delete them. Inspect migration_ledger and the registry before any reviewed repair.',
+    restoreProcedure: 'Restore the verified pre-migration snapshot to a separate database and compare property_attributes before any production remediation.',
+  },
+  async preflight({ db }) {
+    const { missing, matching, conflicting, inactive } = await scanPhase8RegistrySeed(db);
+    return {
+      eligible: missing.length,
+      alreadyApplied: matching.length,
+      blockers: conflicting.length ? [{ code: 'PROPERTY_ATTRIBUTE_SEED_CONFLICT', message: `Registry keys exist with a different identity or options: ${conflicting.join(', ')}` }] : [],
+      summary: { missing, conflicting, inactive },
+    };
+  },
+  async migrateBatch({ db }) {
+    const inserted = await seedPhase8Registry(db, new Date());
+    return { scanned: 1, modified: inserted, done: true };
+  },
+  async validate({ db }) {
+    const { missing, conflicting } = await scanPhase8RegistrySeed(db);
+    const problems = [...missing, ...conflicting];
+    return {
+      valid: problems.length === 0,
+      errors: problems.map((key) => ({ code: 'PROPERTY_ATTRIBUTE_SEED_MISSING', message: `Registry key ${key} is missing or has a different identity/options` })),
+    };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
@@ -940,6 +981,7 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   legacyPropertyFormDefinitionsMigration,
   legacyPropertyDataReportMigration,
   propertyAreaBackfillMigration,
+  phase8AttributeRegistryMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {
