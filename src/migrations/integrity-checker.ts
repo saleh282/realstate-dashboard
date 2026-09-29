@@ -278,6 +278,7 @@ export async function runIntegrityChecks(db: Db, now: Date = new Date()): Promis
     propertyOptionDriftFinding(db),
     propertyFacetDriftFinding(db),
     auctionAnchorFinding(db),
+    filterFinding(properties, { $or: [{ isOwnerVisible: { $exists: true, $nin: [true, false, null] } }, { lifecycleStatus: { $exists: true, $nin: ['active', 'archived', 'admin_hidden', null] } }] }, 'PROPERTY_VISIBILITY_FIELD_INVALID', 'error', 'Property isOwnerVisible/lifecycleStatus hold values the public listing predicates do not recognise (they would be silently hidden)'),
   ]);
   const findings = candidates.filter((finding): finding is IntegrityFinding => finding !== null);
   const errorCount = findings.filter((finding) => finding.severity === 'error').reduce((sum, finding) => sum + finding.count, 0);

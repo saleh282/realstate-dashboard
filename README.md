@@ -2,6 +2,10 @@
 
 NestJS + MongoDB backend for authentication and KYC. Phase 0 adds production-safe configuration, role authorization, secure OTP handling, real SMTP delivery, and request throttling.
 
+> **Phase 13 operations docs:** [environment safety](docs/PHASE-13-environment-safety.md) ·
+> [release and rollout runbook](docs/PHASE-13-release-runbook.md) ·
+> [operations runbooks](docs/PHASE-13-operations-runbooks.md)
+
 ## Local setup
 
 Use Node.js 22 LTS and npm 10. The supported ranges are enforced by

@@ -122,7 +122,7 @@ describe('AppThrottlerGuard tracker', () => {
 describe('production proxy configuration', () => {
   const production = {
     NODE_ENV: 'production',
-    MONGO_URI: 'mongodb://db/x',
+    MONGO_URI: 'mongodb://db/x', DEPLOYMENT_ENV: 'production', DB_ENV_ALLOWLIST: 'db/x',
     JWT_ACCESS_SECRET: 'a'.repeat(40),
     JWT_REFRESH_SECRET: 'b'.repeat(40),
     JWT_ACCESS_EXPIRES_IN: '15m',
@@ -151,7 +151,7 @@ describe('production proxy configuration', () => {
   });
 
   it('does not require TRUST_PROXY outside production', () => {
-    expect(() => validateEnvironment({ ...production, NODE_ENV: 'development' })).not.toThrow();
+    expect(() => validateEnvironment({ ...production, NODE_ENV: 'development', DEPLOYMENT_ENV: 'development' })).not.toThrow();
   });
 
   describe('boot-time warnings', () => {

@@ -4,6 +4,7 @@ import { CORE_MIGRATIONS, validateMigrationRegistry } from './framework/core-mig
 import { MongoMigrationStore } from './framework/migration.store';
 import { MigrationRunner } from './framework/migration.runner';
 import type { MigrationDefinition } from './framework/migration.types';
+import { guardAction } from '../config/deployment-environment';
 
 type CliOptions = { mode: 'dry-run' | 'apply'; migrationId?: string; batchSize: number; list: boolean };
 
@@ -38,6 +39,7 @@ export async function runMigrationCli(args: string[]): Promise<void> {
   await mongoose.connect(uri, { maxPoolSize: 5 });
   const db = mongoose.connection.db;
   if (!db) throw new Error('MongoDB connection has no database');
+  await guardAction(options.mode === 'apply' ? 'migration:apply' : 'migration:dry-run', process.env, db);
   const store = new MongoMigrationStore(db);
   if (options.mode === 'apply') await store.ensureIndexes();
   const runner = new MigrationRunner(db, store, { batchSize: options.batchSize });

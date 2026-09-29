@@ -4,7 +4,7 @@ import { EGP_CURRENCY, isMoneyMinorAmount } from '../../common/money/money';
 import { AssetClassification, EvidenceDeliveryType } from '../../config/evidence-asset.types';
 import { AccountType } from '../../users/identity.types';
 import { PropertyLifecycleStatus, PropertyMediaOrigin, PropertyMediaTagCode } from '../property.types';
-import { PROPERTY_PURPOSE_CATEGORY_LISTING_INDEX, PROPERTY_TYPE_LISTING_INDEX } from '../property-listing-indexes';
+import { PROPERTY_SORTABLE_LISTING_INDEXES } from '../property-listing-indexes';
 import { PHASE8_NON_RESIDENTIAL_ATTRIBUTE_SEED } from '../../migrations/029-non-residential-attribute-registry';
 import { PHASE9_PROMOTED_FACET_KEYS } from '../../migrations/030-phase9-facet-promotion';
 
@@ -186,30 +186,9 @@ PropertySchema.index({ advertiserAccountId: 1, createdAt: -1 }, { name: 'propert
 
 // Public marketplace search/discovery (MAZAD-021). `status`/`isOwnerVisible`/
 // `lifecycleStatus` gate every public query, so they lead each compound index;
-// the trailing field is whichever dimension most narrows that particular query
-// shape. Mongo can also use a leading prefix of any of these (e.g. just the
-// three visibility fields) when a request has no extra filters.
-PropertySchema.index(
-  { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, createdAt: -1 },
-  { name: 'property_public_listing_newest' },
-);
-PropertySchema.index(
-  { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, operationType: 1, createdAt: -1 },
-  { name: 'property_public_listing_operation_type' },
-);
-PropertySchema.index(
-  { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, governorateCode: 1, createdAt: -1 },
-  { name: 'property_public_listing_governorate' },
-);
-// DPF-007: purpose-only and any-selected-type queries use separate indexes
-// (created by migration 023). The replaced `property_public_listing_purpose`
-// is deliberately no longer declared, so autoIndex never re-creates it after
-// the manual migration 024 retires it.
-PropertySchema.index(PROPERTY_PURPOSE_CATEGORY_LISTING_INDEX.key, PROPERTY_PURPOSE_CATEGORY_LISTING_INDEX.options);
-PropertySchema.index(PROPERTY_TYPE_LISTING_INDEX.key, PROPERTY_TYPE_LISTING_INDEX.options);
-// Ascending on price; MongoDB can walk this index in reverse to satisfy a
-// descending price sort too, so one index covers both `price_asc`/`price_desc`.
-PropertySchema.index(
-  { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, totalPriceMinor: 1 },
-  { name: 'property_public_listing_price' },
-);
+// the trailing fields are the dimension that most narrows the query shape, then
+// the sort (including its `_id` tie-breaker). Phase 13 (migration 034) moved to
+// the sortable `_v2` set so the first page is served without a blocking sort;
+// the original names are retired only by the manual migration 035 and are
+// deliberately no longer declared here (autoIndex must not recreate them).
+for (const index of PROPERTY_SORTABLE_LISTING_INDEXES) PropertySchema.index(index.key as never, index.options);

@@ -12,6 +12,8 @@ import {
   VerificationTrustState,
 } from '../users/identity.types';
 import { UsersService } from '../users/users.service';
+import { guardAction } from '../config/deployment-environment';
+import { getConnectionToken } from '@nestjs/mongoose';
 
 async function seedSuperAdmin(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule);
@@ -19,6 +21,7 @@ async function seedSuperAdmin(): Promise<void> {
   const users = app.get(UsersService);
 
   try {
+    await guardAction('seed:super-admin', process.env, app.get(getConnectionToken()).db);
     if (config.get<string>('SUPER_ADMIN_BOOTSTRAP_CONFIRM') !== 'CREATE_SUPER_ADMIN') {
       throw new Error('SUPER_ADMIN_BOOTSTRAP_CONFIRM=CREATE_SUPER_ADMIN is required');
     }

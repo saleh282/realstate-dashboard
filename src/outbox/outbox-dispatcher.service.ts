@@ -1,3 +1,4 @@
+import { operationalMetrics } from '../common/observability/operational-metrics';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -407,6 +408,7 @@ export class OutboxDispatcherService {
       return 'UNCONFIRMED';
     }
     summary.deadLettered += 1;
+    operationalMetrics.increment('outbox_dead_lettered');
     // Identifiers and classification only — never the payload or the error message.
     this.logger.error(JSON.stringify({
       event: 'outbox_event_dead_lettered',

@@ -1,3 +1,4 @@
+import { operationalMetrics } from '../src/common/observability/operational-metrics';
 import { Logger } from '@nestjs/common';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
@@ -505,10 +506,12 @@ describe('AuctionsQueryService — public discovery (MAZAD-025)', () => {
 
   it('omits an auction whose property projection is no longer available', async () => {
     const { instance } = queryService([], { aggregateResult: page([rawAuction()]) });
+    operationalMetrics.reset();
     const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     expect((await instance.listPublic({})).items).toEqual([]);
     // A row lost after the anchored pipeline is data corruption: it must be logged, never silent.
     expect(error).toHaveBeenCalledWith(expect.stringContaining('auction_anchor_unresolved'));
+    expect(operationalMetrics.snapshot().auction_anchor_unresolved).toBe(1);
     error.mockRestore();
   });
 
@@ -659,8 +662,10 @@ describe('PropertiesService.getAnchoredPublicProjections (MAZAD-025)', () => {
   it('applies the shared public-visibility gate to the property query', async () => {
     const { instance, propertyQueries } = propertiesService([property], [revOld]);
     await instance.getAnchoredPublicProjections([{ propertyId: PROPERTY_ID, revisionId: REV_OLD }]);
-    expect(propertyQueries[0]).toMatchObject({ status: 'approved', isOwnerVisible: { $ne: false } });
-    expect(JSON.stringify(propertyQueries[0].lifecycleStatus)).toContain('admin_hidden');
+    // Phase 13: set-membership form of the same gate (owner-visible or unset; lifecycle active or unset).
+    expect(propertyQueries[0]).toMatchObject({ status: 'approved', isOwnerVisible: { $in: [true, null] }, lifecycleStatus: { $in: ['active', null] } });
+    expect(JSON.stringify(propertyQueries[0].lifecycleStatus)).not.toContain('admin_hidden');
+    expect(JSON.stringify(propertyQueries[0].lifecycleStatus)).not.toContain('archived');
   });
 
   it('omits properties that fail the gate, and revisions that do not belong to the property', async () => {

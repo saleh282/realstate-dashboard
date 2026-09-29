@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AuctionErrorCode } from '../common/errors/auction-error-codes';
 import { ClockService } from '../common/time/clock.service';
+import { operationalMetrics } from '../common/observability/operational-metrics';
 import { PropertiesService } from '../properties/properties.service';
 import { toAdminAuction, toOwnAuction, toPublicAuction } from './auction-projections';
 import { DEFAULT_PUBLIC_LIST_STATUSES, PUBLIC_AUCTION_STATUSES } from './auction.types';
@@ -128,6 +129,7 @@ export class AuctionsQueryService {
     // The pipeline already excludes auctions whose anchor cannot resolve, so a
     // shortfall here means data corruption; surface it instead of hiding it.
     if (items.length !== docs.length) {
+      operationalMetrics.increment('auction_anchor_unresolved', undefined, docs.length - items.length);
       logger.error(JSON.stringify({ event: 'auction_anchor_unresolved', auctionIds: docs.filter((doc) => !projections.has(`${doc.propertyId}:${doc.propertyRevisionId}`)).map((doc) => String(doc._id)) }));
     }
     return { items, pagination: pagination(page, limit, total), serverTime: this.clock.now() };

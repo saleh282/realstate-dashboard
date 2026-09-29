@@ -12,6 +12,8 @@ import {
 } from '../users/identity.types';
 import { hashPassword } from '../common/security/password-hashing';
 import { UsersService } from '../users/users.service';
+import { guardAction } from '../config/deployment-environment';
+import { getConnectionToken } from '@nestjs/mongoose';
 
 async function seedAdmin(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule);
@@ -19,6 +21,7 @@ async function seedAdmin(): Promise<void> {
   const users = app.get(UsersService);
 
   try {
+    await guardAction('seed:dev-admin', process.env, app.get(getConnectionToken()).db);
     const email = config.get<string>('ADMIN_EMAIL')?.trim().toLowerCase();
     const password = config.get<string>('ADMIN_PASSWORD');
     const fullName = config.get<string>('ADMIN_FULL_NAME')?.trim();

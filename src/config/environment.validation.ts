@@ -1,6 +1,8 @@
 import { isPublicOsmNominatim } from '../geocoding/geocoding.config';
 import { REALTIME_MAX_MESSAGE_BYTES_HARD_CAP, REALTIME_TOPOLOGY_SINGLE_INSTANCE } from '../realtime/realtime.constants';
 import { parseTrustProxy } from './trust-proxy.config';
+import { deploymentEnvironmentErrors } from './deployment-environment';
+import { paymentProviderErrors } from '../payments/payment-provider.config';
 import {
   PASSWORD_POLICY_MESSAGE,
   isValidPassword,
@@ -60,6 +62,8 @@ export function validateEnvironment(config: Environment): Environment {
     ['MONGO_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'],
     errors,
   );
+  errors.push(...deploymentEnvironmentErrors(config));
+  errors.push(...paymentProviderErrors(config));
 
   for (const key of ['JWT_ACCESS_EXPIRES_IN', 'JWT_REFRESH_EXPIRES_IN']) {
     const value = valueOf(config, key);

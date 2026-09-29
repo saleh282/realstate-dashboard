@@ -10,12 +10,13 @@ import { legacyRevisionPointer, planLegacyPropertyRevision, scanLegacyPropertyRe
 import {
   PROPERTY_TYPE_SELECTION_BACKFILL_FILTER,
   SELECTION_MISSING_PRIMARY_FILTER,
+  indexKeyMatches,
   listingIndexProblems,
   reconcileIndex,
   scanPropertyTypeSelection,
   type ExistingIndex,
 } from '../022-property-type-selection';
-import { PROPERTY_TYPE_LISTING_INDEXES, RETIRED_PURPOSE_LISTING_INDEX } from '../../properties/property-listing-indexes';
+import { PROPERTY_SORTABLE_LISTING_INDEXES, PROPERTY_TYPE_LISTING_INDEXES, RETIRED_PURPOSE_LISTING_INDEX, SUPERSEDED_LISTING_INDEXES } from '../../properties/property-listing-indexes';
 import {
   areaOutcome,
   buildLegacyPropertyDataReport,
@@ -1137,6 +1138,94 @@ export const phase11AmenityCatalogMigration: MigrationDefinition = {
   },
 };
 
+type NamedIndex = { key: Record<string, unknown>; options: { name: string } };
+
+function indexSetProblems(indexes: ExistingIndex[], expected: readonly NamedIndex[]) {
+  const byName = new Map(indexes.map((index) => [index.name, index]));
+  return {
+    missing: expected.filter((item) => !byName.has(item.options.name)).map((item) => item.options.name),
+    conflicting: expected.filter((item) => byName.has(item.options.name) && !indexKeyMatches(byName.get(item.options.name), item.key)).map((item) => item.options.name),
+  };
+}
+
+/** Phase 13: additive sortable listing indexes. Old indexes stay until the manual migration 035. */
+export const phase13SortableListingIndexesMigration: MigrationDefinition = {
+  id: '034-phase13-sortable-listing-indexes',
+  version: 1,
+  description: 'Phase 13: create the sortable public-listing indexes (_id tie-breaker in the key) so the first page needs no blocking sort',
+  dependencies: ['023-property-type-listing-indexes'],
+  rollback: {
+    kind: 'none',
+    remediation: 'The indexes are purely additive and the previous indexes remain in place until the manual migration 035 is run.',
+    restoreProcedure: 'Drop only the six *_v2 listing indexes named by this migration if a reviewed rollback is required; queries fall back to the previous indexes.',
+  },
+  async preflight({ db }) {
+    const { missing, conflicting } = indexSetProblems(await existingIndexes(db, 'properties'), PROPERTY_SORTABLE_LISTING_INDEXES);
+    return {
+      eligible: missing.length,
+      alreadyApplied: PROPERTY_SORTABLE_LISTING_INDEXES.length - missing.length - conflicting.length,
+      blockers: conflicting.length ? [{ code: 'PROPERTY_SORTABLE_INDEX_CONFLICT', message: `An index named ${conflicting.join(', ')} exists with a different key` }] : [],
+      summary: { indexNames: PROPERTY_SORTABLE_LISTING_INDEXES.map((index) => index.options.name) },
+    };
+  },
+  async migrateBatch({ db }) {
+    for (const index of PROPERTY_SORTABLE_LISTING_INDEXES) await db.collection('properties').createIndex(index.key as never, index.options);
+    return { scanned: PROPERTY_SORTABLE_LISTING_INDEXES.length, modified: PROPERTY_SORTABLE_LISTING_INDEXES.length, done: true };
+  },
+  async validate({ db }) {
+    const { missing, conflicting } = indexSetProblems(await existingIndexes(db, 'properties'), PROPERTY_SORTABLE_LISTING_INDEXES);
+    return {
+      valid: !missing.length && !conflicting.length,
+      errors: [...missing, ...conflicting].map((name) => ({ code: 'PROPERTY_SORTABLE_INDEX_MISSING', message: `Required listing index ${name} is missing or has a different key` })),
+      summary: { missingIndexes: missing, conflictingIndexes: conflicting },
+    };
+  },
+};
+
+/** Manual-only: run with `--migration=035-phase13-retire-superseded-listing-indexes` once the sortable indexes are verified in use. */
+export const phase13RetireSupersededListingIndexesMigration: MigrationDefinition = {
+  id: '035-phase13-retire-superseded-listing-indexes',
+  version: 1,
+  description: 'Phase 13: drop the six listing indexes superseded by the sortable *_v2 set',
+  dependencies: ['034-phase13-sortable-listing-indexes'],
+  manualOnly: true,
+  rollback: {
+    kind: 'automatic',
+    instructions: `Recreate the dropped indexes: ${SUPERSEDED_LISTING_INDEXES.map((index) => `${index.options.name} ${JSON.stringify(index.key)}`).join('; ')}.`,
+  },
+  async preflight({ db }) {
+    const indexes = await existingIndexes(db, 'properties');
+    const present = SUPERSEDED_LISTING_INDEXES.filter((index) => indexes.some((existing) => existing.name === index.options.name));
+    const { missing, conflicting } = indexSetProblems(indexes, PROPERTY_SORTABLE_LISTING_INDEXES);
+    return {
+      eligible: present.length,
+      alreadyApplied: SUPERSEDED_LISTING_INDEXES.length - present.length,
+      blockers: missing.length || conflicting.length ? [{ code: 'PROPERTY_SORTABLE_INDEXES_NOT_IN_PLACE', message: `The replacement indexes are not in place: ${[...missing, ...conflicting].join(', ')}` }] : [],
+      summary: { willDrop: present.map((index) => index.options.name) },
+    };
+  },
+  async migrateBatch({ db }) {
+    const indexes = await existingIndexes(db, 'properties');
+    let dropped = 0;
+    for (const index of SUPERSEDED_LISTING_INDEXES) {
+      if (indexes.some((existing) => existing.name === index.options.name)) { await db.collection('properties').dropIndex(index.options.name); dropped += 1; }
+    }
+    return { scanned: SUPERSEDED_LISTING_INDEXES.length, modified: dropped, done: true };
+  },
+  async validate({ db }) {
+    const indexes = await existingIndexes(db, 'properties');
+    const stillPresent = SUPERSEDED_LISTING_INDEXES.filter((index) => indexes.some((existing) => existing.name === index.options.name)).map((index) => index.options.name);
+    const { missing, conflicting } = indexSetProblems(indexes, PROPERTY_SORTABLE_LISTING_INDEXES);
+    return {
+      valid: !stillPresent.length && !missing.length && !conflicting.length,
+      errors: [
+        ...stillPresent.map((name) => ({ code: 'PROPERTY_SUPERSEDED_INDEX_PRESENT', message: `${name} still exists` })),
+        ...[...missing, ...conflicting].map((name) => ({ code: 'PROPERTY_SORTABLE_INDEX_MISSING', message: `Required listing index ${name} is missing or has a different key` })),
+      ],
+    };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
@@ -1159,6 +1248,8 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   phase9FacetBackfillMigration,
   phase10UnitFloorLevelRegistryMigration,
   phase11AmenityCatalogMigration,
+  phase13SortableListingIndexesMigration,
+  phase13RetireSupersededListingIndexesMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {

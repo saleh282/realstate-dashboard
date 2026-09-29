@@ -966,10 +966,15 @@ export class PropertiesService {
    * through any of them, even if a user had previously favorited it.
    */
   private publicVisibilityFilter() {
+    // Set-membership form of "not hidden by the owner" / "not archived or admin-hidden".
+    // Equivalent to { $ne: false } / { $nin: [archived, admin_hidden] } for boolean and
+    // three-valued enum fields (null also matches a missing field, as before), but the
+    // point intervals let MongoDB merge index ranges to serve the listing sort (Phase 13).
+    // The integrity check PROPERTY_VISIBILITY_FIELD_INVALID guards that equivalence.
     return {
       status: 'approved',
-      isOwnerVisible: { $ne: false },
-      lifecycleStatus: { $nin: [PropertyLifecycleStatus.ARCHIVED, PropertyLifecycleStatus.ADMIN_HIDDEN] },
+      isOwnerVisible: { $in: [true, null] },
+      lifecycleStatus: { $in: [PropertyLifecycleStatus.ACTIVE, null] },
       currentPublicRevisionId: { $exists: true },
     };
   }

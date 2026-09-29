@@ -1,5 +1,6 @@
 import { PropertyMediaTagCode } from './property.types';
 import type { MediaProfile } from '../property-form-definitions/property-form-definition.constants';
+import { canonicalize, sha256 } from '../common/idempotency/idempotency.service';
 
 /**
  * Media profiles (DPF-012, frozen §I). A profile's required-slot list is frozen
@@ -95,3 +96,21 @@ export function mediaRequirements(profile: MediaProfile): MediaRequirements {
     additionalSlotPrefix: definition.additionalSlotPrefix,
   };
 }
+
+/** sha256 of a shipped profile's complete slot/count definition. */
+export function mediaProfileDefinitionHash(profile: MediaProfile): string {
+  return sha256(canonicalize(mediaProfileDefinition(profile)));
+}
+
+/**
+ * Definition hashes of every shipped profile, frozen at the value they had when
+ * they shipped. A form version stores only the profile KEY, so editing a
+ * profile in place would silently change how every historical revision is
+ * validated. The pinning test and the release manifest both compare against
+ * these; changing a shipped profile now requires a NEW profile key (and never
+ * an edit of an entry below).
+ */
+export const FROZEN_MEDIA_PROFILE_HASHES: Readonly<Record<string, string>> = {
+  residential_rooms: 'e14538ce28d72383910dddec203d01b873c892a1ee877feaf2d55a615ba2924f',
+  generic: 'cd73702ad32e657345ea694b8f03c72b7603fdd7339b9146b712fd78c085d1c3',
+};

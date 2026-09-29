@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { MongoClient, ObjectId } from 'mongodb';
+import { guardAction, resolveDeploymentEnv } from '../config/deployment-environment';
 
 const uri = process.env.MONGO_URI;
 
@@ -15,8 +16,12 @@ const localDisposable = process.env.PHASE12_DISPOSABLE_DB === '1';
 const localDb = parsed.pathname.slice(1);
 
 if (localDisposable) {
-  if (!['127.0.0.1', 'localhost'].includes(parsed.hostname) || localDb !== 'mazad_phase12_disposable') {
-    throw new Error('Refused: Phase 12 disposable seed requires localhost/mazad_phase12_disposable');
+  // The disposable escape hatch is local-only: it can never unlock a development, staging or production process.
+  if (resolveDeploymentEnv(process.env).env !== 'local' && resolveDeploymentEnv(process.env).env !== 'development') {
+    throw new Error('Refused: PHASE12_DISPOSABLE_DB requires a non-protected DEPLOYMENT_ENV');
+  }
+  if (!['127.0.0.1', 'localhost'].includes(parsed.hostname) || !(localDb === 'mazad_phase12_disposable' || localDb.startsWith('mazad_phase13_'))) {
+    throw new Error('Refused: the disposable seed requires localhost and mazad_phase12_disposable or a mazad_phase13_* database');
   }
 } else if (parsed.hostname !== EXPECTED_HOST) {
   throw new Error(`Refused: unexpected Mongo host ${parsed.hostname}`);
@@ -35,6 +40,7 @@ const client = new MongoClient(uri);
 async function main() {
   await client.connect();
   const db = client.db(localDisposable ? localDb : EXPECTED_DB);
+  await guardAction('seed:baseline', process.env, db);
 
   const admin = await db.collection('users').findOne({
     systemRole: 'SUPER_ADMIN',

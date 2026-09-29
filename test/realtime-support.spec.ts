@@ -288,7 +288,7 @@ describe('the real application wiring over a real socket (configureApp + Realtim
 describe('environment validation — realtime and the single-instance guard', () => {
   const development = { NODE_ENV: 'development', MONGO_URI: 'mongodb://localhost/x', JWT_ACCESS_SECRET: 'a', JWT_ACCESS_EXPIRES_IN: '15m', JWT_REFRESH_SECRET: 'b', JWT_REFRESH_EXPIRES_IN: '7d' };
   const production = {
-    NODE_ENV: 'production', MONGO_URI: 'mongodb://db/x', JWT_ACCESS_SECRET: 'a'.repeat(40), JWT_REFRESH_SECRET: 'b'.repeat(40), JWT_ACCESS_EXPIRES_IN: '15m', JWT_REFRESH_EXPIRES_IN: '7d',
+    NODE_ENV: 'production', MONGO_URI: 'mongodb://db/x', DEPLOYMENT_ENV: 'production', DB_ENV_ALLOWLIST: 'db/x', JWT_ACCESS_SECRET: 'a'.repeat(40), JWT_REFRESH_SECRET: 'b'.repeat(40), JWT_ACCESS_EXPIRES_IN: '15m', JWT_REFRESH_EXPIRES_IN: '7d',
     MAIL_HOST: 'smtp.example.com', MAIL_PORT: '587', MAIL_SECURE: 'false', MAIL_USER: 'u', MAIL_PASS: 'p', MAIL_FROM: 'no-reply@example.com', MAIL_TLS_REJECT_UNAUTHORIZED: 'true',
     CLOUDINARY_CLOUD_NAME: 'c', CLOUDINARY_API_KEY: 'k', CLOUDINARY_API_SECRET: 's', CORS_ORIGINS: 'https://admin.example.com', TRUST_PROXY: '10.0.0.0/8',
     GEOCODING_USER_AGENT: 'Mazad/1.0 (ops@example.com)', GEOCODING_PROVIDER_BASE_URL: 'https://geocoder.internal.example.com',

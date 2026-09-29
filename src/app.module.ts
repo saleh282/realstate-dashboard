@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { EnvironmentGuardService } from './config/environment-guard.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -68,6 +69,6 @@ import { NotificationsModule } from './notifications/notifications.module';
     NotificationsModule,
     HealthModule,
   ],
-  providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }],
+  providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }, EnvironmentGuardService],
 })
 export class AppModule {}

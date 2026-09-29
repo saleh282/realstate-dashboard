@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { runIntegrityChecks } from './integrity-checker';
+import { guardAction } from '../config/deployment-environment';
 
 async function main(): Promise<void> {
   ConfigModule.forRoot();
@@ -9,6 +10,7 @@ async function main(): Promise<void> {
   await mongoose.connect(uri, { maxPoolSize: 5 });
   const db = mongoose.connection.db;
   if (!db) throw new Error('MongoDB connection has no database');
+  await guardAction('integrity:read', process.env, db);
   const report = await runIntegrityChecks(db);
   console.log(JSON.stringify(report, null, 2));
   if (!report.ok || (process.argv.includes('--fail-on-warning') && report.warningCount > 0)) process.exitCode = 1;

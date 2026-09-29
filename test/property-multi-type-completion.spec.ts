@@ -392,15 +392,20 @@ describe('DPF-007 auction discovery inherits the any-type match', () => {
 describe('DPF-007 M-G listing indexes', () => {
   const listingIndexes = () => PropertySchema.indexes().filter(([, options]) => String((options as any)?.name ?? '').startsWith('property_public_listing_'));
 
-  it('declares the exact frozen shapes and no longer declares the replaced index', () => {
+  it('keeps the DPF-007 migration shapes frozen and declares the Phase 13 sortable set instead of the superseded indexes', () => {
+    // Migrations 023/024 own these exact shapes and must keep creating them on a fresh database.
+    expect(JSON.stringify(PROPERTY_TYPE_LISTING_INDEXES.map((index) => [index.options.name, index.key]))).toBe(JSON.stringify([
+      ['property_public_listing_purpose_category', { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, purposeCategoryId: 1, createdAt: -1 }],
+      ['property_public_listing_type', { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, purposeSubcategoryIds: 1, createdAt: -1 }],
+    ]));
     const byName = Object.fromEntries(listingIndexes().map(([key, options]) => [(options as any).name, JSON.stringify(key)]));
-    expect(byName.property_public_listing_purpose_category).toBe(JSON.stringify({ status: 1, isOwnerVisible: 1, lifecycleStatus: 1, purposeCategoryId: 1, createdAt: -1 }));
-    expect(byName.property_public_listing_type).toBe(JSON.stringify({ status: 1, isOwnerVisible: 1, lifecycleStatus: 1, purposeSubcategoryIds: 1, createdAt: -1 }));
     expect(byName).not.toHaveProperty('property_public_listing_purpose');
+    // The schema declares only the sortable *_v2 set (each ends with the sort incl. its _id tie-breaker); the old names are retired by manual migration 035.
     expect(Object.keys(byName).sort()).toEqual([
-      'property_public_listing_governorate', 'property_public_listing_newest', 'property_public_listing_operation_type',
-      'property_public_listing_price', 'property_public_listing_purpose_category', 'property_public_listing_type',
+      'property_public_listing_governorate_v2', 'property_public_listing_newest_v2', 'property_public_listing_operation_type_v2',
+      'property_public_listing_price_v2', 'property_public_listing_purpose_category_v2', 'property_public_listing_type_v2',
     ]);
+    expect(byName.property_public_listing_type_v2).toBe(JSON.stringify({ status: 1, isOwnerVisible: 1, lifecycleStatus: 1, purposeSubcategoryIds: 1, createdAt: -1, _id: -1 }));
     expect(listingIndexes().length).toBeLessThanOrEqual(8);
     // Only one array field per compound index (a MongoDB multikey constraint).
     for (const [key] of listingIndexes()) expect(Object.keys(key).filter((field) => ['purposeSubcategoryIds', 'amenityCodes', 'paymentMethodCodes'].includes(field)).length).toBeLessThanOrEqual(1);

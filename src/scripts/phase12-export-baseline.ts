@@ -5,6 +5,7 @@ import 'dotenv/config';
 import { writeFile } from 'node:fs/promises';
 import { MongoClient } from 'mongodb';
 import { computeFormContentHash } from '../property-form-definitions/property-form-definition.constants';
+import { guardAction } from '../config/deployment-environment';
 import { DEFAULT_CITIES } from '../governorates/governorate.constants';
 import { storedContent } from '../property-form-definitions/form-definition-drafts';
 
@@ -16,6 +17,7 @@ async function main() {
   try {
     await client.connect();
     const db = client.db();
+    await guardAction('manifest:verify', process.env, db);
     const [types, heads, governorates, cities, options] = await Promise.all([
       db.collection('property_types').find({}).toArray(),
       db.collection('property_form_definitions').find({}).toArray(),

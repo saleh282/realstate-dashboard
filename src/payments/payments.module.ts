@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuditModule } from '../audit/audit.module';
 import { Auction, AuctionSchema } from '../auctions/schemas/auction.schema';
@@ -9,7 +10,8 @@ import { UsersModule } from '../users/users.module';
 import { AuctionEntryFeeService } from './auction-entry-fee.service';
 import { AuctionEntryPaymentService } from './auction-entry-payment.service';
 import { AuctionPaymentConfirmationService } from './auction-payment-confirmation.service';
-import { AUCTION_PAYMENT_PROVIDER_PORT, UnconfiguredPaymentProvider } from './auction-payment-provider.port';
+import { AUCTION_PAYMENT_PROVIDER_PORT } from './auction-payment-provider.port';
+import { paymentProviderPortFactory } from './payment-provider.factory';
 import { ManagedMarketingPaymentConfirmationService } from './managed-marketing-payment-confirmation.service';
 import { ManagedMarketingPaymentService } from './managed-marketing-payment.service';
 import { PersistentBidEntitlementPort } from './persistent-bid-entitlement.port';
@@ -22,8 +24,8 @@ import { AuctionEntryPayment, AuctionEntryPaymentSchema } from './schemas/auctio
  * AUCTION_ENTRY (payments + bid entitlement) and MANAGED_MARKETING (payments +
  * request PAID). Separate collections and services; only infrastructure
  * (provider port, verification rules, transaction runner, audit) is shared. The MAZAD-034A HTTP routes live in `AuctionsModule` (they need the public
- * auction visibility gate, and this module must not import it back). The provider port is bound to the fail-closed default until a real
- * adapter is chosen. `Auction` is re-registered here (like BidsModule) to
+ * auction visibility gate, and this module must not import it back). The provider port is bound to the fail-closed default unless
+ * PAYMENT_PROVIDER=fake in a non-protected deployment (Phase 13); a real adapter is not selectable yet. `Auction` is re-registered here (like BidsModule) to
  * avoid a module cycle with AuctionsModule, which consumes the entitlement port.
  */
 @Module({
@@ -47,7 +49,7 @@ import { AuctionEntryPayment, AuctionEntryPaymentSchema } from './schemas/auctio
     ManagedMarketingPaymentService,
     ManagedMarketingPaymentConfirmationService,
     PersistentBidEntitlementPort,
-    { provide: AUCTION_PAYMENT_PROVIDER_PORT, useClass: UnconfiguredPaymentProvider },
+    { provide: AUCTION_PAYMENT_PROVIDER_PORT, inject: [ConfigService], useFactory: paymentProviderPortFactory },
   ],
   exports: [AuctionEntryFeeService, AuctionEntryPaymentService, AuctionPaymentConfirmationService, ManagedMarketingPaymentService, ManagedMarketingPaymentConfirmationService, PersistentBidEntitlementPort, AUCTION_PAYMENT_PROVIDER_PORT, MongooseModule],
 })

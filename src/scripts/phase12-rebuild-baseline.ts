@@ -12,6 +12,7 @@ import { Connection, Types } from 'mongoose';
 import { AdminPropertyFormDefinitionsService } from '../property-form-definitions/admin-property-form-definitions.service';
 import { PropertyFormDefinitionsModule } from '../property-form-definitions/property-form-definitions.module';
 import { computeFormContentHash, type FormVersionContent } from '../property-form-definitions/property-form-definition.constants';
+import { guardAction } from '../config/deployment-environment';
 import { DEFAULT_CITIES } from '../governorates/governorate.constants';
 import type { FormFieldDto } from '../property-form-definitions/dto/admin-form-definition.dto';
 
@@ -67,6 +68,7 @@ async function main() {
     const connection = app.get<Connection>(getConnectionToken());
     const db = connection.db;
     if (!db || db.databaseName !== DB_NAME) throw new Error('Connected to unexpected database');
+    await guardAction('manifest:apply', process.env, db);
     const admin = await db.collection('users').findOne({ systemRole: 'SUPER_ADMIN' }, { projection: { _id: 1 } });
     if (!admin?._id) throw new Error('Local SUPER_ADMIN bootstrap is missing');
     const actor = { userId: String(admin._id) };

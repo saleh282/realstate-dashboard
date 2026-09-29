@@ -9,6 +9,7 @@ import {
 import { Request, Response } from 'express';
 import { EvidenceErrorCode } from '../errors/evidence-error-codes';
 import { redactSensitive } from '../logging/redact';
+import { classifyRejection, operationalMetrics } from '../observability/operational-metrics';
 import { getRequestId, resolveRequestId } from '../request-context/request-context';
 
 type LogKind = 'unexpected' | 'server' | 'client-upload' | 'client-disconnected';
@@ -90,6 +91,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     if (callerGone && logKind && logKind !== 'client-upload') logKind = 'client-disconnected';
 
     if (logKind) this.log(logKind, exception, statusCode, requestId, request);
+    this.observe(statusCode, responseMetadata.code, requestId, request);
 
     if (response.headersSent) return;
     response.status(statusCode).json({
@@ -99,6 +101,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
       ...responseMetadata,
       requestId,
     });
+  }
+
+  /** Counts and logs the expected failures operators care about (stale form 409, amenity/spec rejections, payment trouble, rate limiting). */
+  private observe(statusCode: number, code: unknown, requestId: string, request: Request | undefined) {
+    const observation = classifyRejection(statusCode, code);
+    if (!observation) return;
+    operationalMetrics.increment(observation.event === 'rate_limited' ? 'rate_limited' : 'domain_rejection', observation.label);
+    this.logger.warn(JSON.stringify({
+      event: observation.event, code: observation.event === 'domain_rejection' ? observation.label : undefined, status: statusCode, requestId,
+      method: request?.method, path: typeof request?.originalUrl === 'string' ? request.originalUrl.split('?')[0] : undefined,
+    }));
   }
 
   private log(

@@ -33,3 +33,39 @@ export const RETIRED_PURPOSE_LISTING_INDEX = {
   key: { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, purposeCategoryId: 1, purposeSubcategoryId: 1, createdAt: -1 },
   options: { name: 'property_public_listing_purpose' },
 } as const;
+
+/**
+ * Phase 13 sortable listing indexes (migration 034). The public listing sorts by
+ * `{ createdAt: -1, _id: -1 }` or `{ totalPriceMinor: ±1, _id: ±1 }`; with the
+ * `_id` tie-breaker in the index key AND set-membership visibility predicates
+ * (`isOwnerVisible: { $in: [true, null] }`, `lifecycleStatus: { $in: ['active', null] }`
+ * instead of `$ne` / `$nin`) MongoDB serves the first page by merging a few index
+ * ranges (SORT_MERGE) instead of scanning and sorting every visible listing.
+ * Measured on 100k listings: 83,797 keys and ~74 ms p50 down to 20 keys and ~1 ms.
+ *
+ * New names, not new keys under old names: an existing database keeps its old
+ * indexes untouched (autoIndex would otherwise fail on a same-name key change)
+ * until the manual migration 035 retires them.
+ */
+const VISIBILITY = { status: 1, isOwnerVisible: 1, lifecycleStatus: 1 } as const;
+const NEWEST = { createdAt: -1, _id: -1 } as const;
+
+export const PROPERTY_SORTABLE_LISTING_INDEXES = [
+  { key: { ...VISIBILITY, ...NEWEST }, options: { name: 'property_public_listing_newest_v2' } },
+  { key: { ...VISIBILITY, operationType: 1, ...NEWEST }, options: { name: 'property_public_listing_operation_type_v2' } },
+  { key: { ...VISIBILITY, governorateCode: 1, ...NEWEST }, options: { name: 'property_public_listing_governorate_v2' } },
+  { key: { ...VISIBILITY, purposeCategoryId: 1, ...NEWEST }, options: { name: 'property_public_listing_purpose_category_v2' } },
+  { key: { ...VISIBILITY, purposeSubcategoryIds: 1, ...NEWEST }, options: { name: 'property_public_listing_type_v2' } },
+  // Ascending; walked in reverse for `price_desc` (whose sort is { totalPriceMinor: -1, _id: -1 }).
+  { key: { ...VISIBILITY, totalPriceMinor: 1, _id: 1 }, options: { name: 'property_public_listing_price_v2' } },
+] as const;
+
+/** Indexes superseded by the sortable set; dropped only by the manual migration 035. */
+export const SUPERSEDED_LISTING_INDEXES = [
+  { key: { ...VISIBILITY, createdAt: -1 }, options: { name: 'property_public_listing_newest' } },
+  { key: { ...VISIBILITY, operationType: 1, createdAt: -1 }, options: { name: 'property_public_listing_operation_type' } },
+  { key: { ...VISIBILITY, governorateCode: 1, createdAt: -1 }, options: { name: 'property_public_listing_governorate' } },
+  PROPERTY_PURPOSE_CATEGORY_LISTING_INDEX,
+  PROPERTY_TYPE_LISTING_INDEX,
+  { key: { ...VISIBILITY, totalPriceMinor: 1 }, options: { name: 'property_public_listing_price' } },
+] as const;

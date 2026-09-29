@@ -20,6 +20,8 @@
     "migration:list": "ts-node src/migrations/cli.ts --list",
     "migration:check": "ts-node src/migrations/cli.ts --dry-run",
     "migration:apply": "ts-node src/migrations/cli.ts --apply",
+    "release:manifest": "ts-node src/scripts/release-manifest.ts",
+    "env:init": "ts-node src/scripts/env-init.ts",
     "migration:integrity": "ts-node src/migrations/integrity-cli.ts",
     "migration:integrity:strict": "ts-node src/migrations/integrity-cli.ts --fail-on-warning",
     "test": "jest --runInBand",

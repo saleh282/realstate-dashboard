@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common';
+import { emitOperationalEvent } from '../common/observability/operational-metrics';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
@@ -55,6 +57,7 @@ const OBJECT_ID = /^[a-fA-F0-9]{24}$/;
  */
 @Injectable()
 export class AdminPropertyFormDefinitionsService {
+  private readonly opsLogger = new Logger('FormLifecycle');
   constructor(
     @InjectModel(PropertyFormDefinition.name) private readonly definitions: Model<PropertyFormDefinitionDocument>,
     @InjectModel(PropertyFormDefinitionVersion.name) private readonly versions: Model<PropertyFormDefinitionVersionDocument>,
@@ -367,6 +370,7 @@ export class AdminPropertyFormDefinitionsService {
       });
       return version;
     });
+    emitOperationalEvent(this.opsLogger, 'log', 'form_definition_published', { definitionId, version: (published as any).version, contentHash: (published as any).contentHash });
     return { message: 'تم نشر نسخة جديدة من النموذج', published: versionSummary(published), ...(await this.getDefinition(definitionId)) };
   }
 
@@ -384,6 +388,7 @@ export class AdminPropertyFormDefinitionsService {
         definitionId: String(head._id), purposeSubcategoryId: String(head.purposeSubcategoryId), currentVersionId: head.currentVersionId ? String(head.currentVersionId) : null, currentVersion: head.currentVersion ?? null,
       });
     });
+    emitOperationalEvent(this.opsLogger, 'warn', 'form_definition_archived', { definitionId });
     return { message: 'تم إيقاف نموذج نوع العقار', ...(await this.getDefinition(definitionId)) };
   }
 
@@ -408,6 +413,7 @@ export class AdminPropertyFormDefinitionsService {
         definitionId: String(head._id), purposeSubcategoryId: String(head.purposeSubcategoryId), currentVersionId: head.currentVersionId ? String(head.currentVersionId) : null, currentVersion: head.currentVersion ?? null,
       });
     });
+    emitOperationalEvent(this.opsLogger, 'log', 'form_definition_restored', { definitionId });
     return { message: 'تمت إعادة تفعيل نموذج نوع العقار', ...(await this.getDefinition(definitionId)) };
   }
 

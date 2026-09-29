@@ -29,5 +29,6 @@ This inventory freezes the V1 authorization classification. Capability responses
 | `/admin/property-form-definitions/:id/publish`, `/archive`, `/restore` | SUPER_ADMIN-only | `ADMIN_FORM_DEFINITION_PUBLISH` (DPF-030); optimistic tokens and one audited transaction |
 | `/admin/audit-logs` | Admin-only read | `ADMIN_AUDIT_READ` |
 | `/admin/dashboard/metrics` | Admin-only read | `ADMIN_DASHBOARD_READ` |
+| `/admin/operations/status` | Admin-only read (Phase 13 operator diagnostics) | `ADMIN_DASHBOARD_READ` |
 
 Future auction, bid, and entry-payment modules must use `AUCTION_CREATE_OWN`, `BID_PLACE`, and `PAYMENT_ENTRY_INITIATE`. `assertBid` also enforces exact-account self-bid prevention. These hooks do not implement the later auction/payment tasks.
