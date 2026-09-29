@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { CAPABILITIES_KEY } from '../src/authorization/capabilities.decorator';
@@ -357,7 +358,10 @@ function fakeAuctionModel(docs: any[], aggregateResult?: any) {
 function queryService(docs: any[], options: { aggregateResult?: any; projections?: Map<string, any> } = {}) {
   const { model, calls } = fakeAuctionModel(docs, options.aggregateResult);
   const properties = {
-    buildPublicPropertyMatchForAuctions: jest.fn().mockResolvedValue({ status: 'approved', isOwnerVisible: { $ne: false } }),
+    buildPublicAuctionMatches: jest.fn().mockResolvedValue({
+      propertyMatch: { status: 'approved', isOwnerVisible: { $ne: false } },
+      revisionMatch: { governorateCode: 'CAI', city: 'Nasr City' },
+    }),
     getAnchoredPublicProjections: jest.fn().mockResolvedValue(options.projections ?? new Map()),
   };
   const clock = { now: jest.fn(() => NOW) };
@@ -445,13 +449,14 @@ describe('AuctionsQueryService — public discovery (MAZAD-025)', () => {
   it('joins to the property with the shared public-visibility gate before paginating', async () => {
     const { instance, calls, properties } = queryService([], { aggregateResult: page([]) });
     await instance.listPublic({ governorateCode: 'CAI', city: 'Nasr City' });
-    expect(properties.buildPublicPropertyMatchForAuctions).toHaveBeenCalledWith(expect.objectContaining({ governorateCode: 'CAI', city: 'Nasr City' }));
+    expect(properties.buildPublicAuctionMatches).toHaveBeenCalledWith(expect.objectContaining({ governorateCode: 'CAI', city: 'Nasr City' }));
     const pipeline = calls.aggregate[0];
-    const lookup = pipeline.find((stage: any) => stage.$lookup).$lookup;
-    expect(lookup.from).toBe('properties');
-    expect(JSON.stringify(lookup.pipeline[0].$match.$and[1])).toContain('approved');
+    const lookups = pipeline.filter((stage: any) => stage.$lookup).map((stage: any) => stage.$lookup);
+    expect(lookups.map((lookup: any) => lookup.from)).toEqual(['properties', 'property_revisions']);
+    expect(JSON.stringify(lookups[0].pipeline[0].$match.$and[1])).toContain('approved');
+    expect(lookups[1].pipeline[0].$match.$and[1]).toEqual({ governorateCode: 'CAI', city: 'Nasr City' });
     const stageNames = pipeline.map((stage: any) => Object.keys(stage)[0]);
-    expect(stageNames.indexOf('$lookup')).toBeLessThan(stageNames.indexOf('$facet'));
+    expect(stageNames.lastIndexOf('$lookup')).toBeLessThan(stageNames.indexOf('$facet'));
     expect(stageNames.indexOf('$sort')).toBeLessThan(stageNames.indexOf('$facet'));
   });
 
@@ -500,7 +505,11 @@ describe('AuctionsQueryService — public discovery (MAZAD-025)', () => {
 
   it('omits an auction whose property projection is no longer available', async () => {
     const { instance } = queryService([], { aggregateResult: page([rawAuction()]) });
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     expect((await instance.listPublic({})).items).toEqual([]);
+    // A row lost after the anchored pipeline is data corruption: it must be logged, never silent.
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('auction_anchor_unresolved'));
+    error.mockRestore();
   });
 
   it('public detail returns the safe projection plus the authoritative server time', async () => {

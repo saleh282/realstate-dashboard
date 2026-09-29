@@ -334,9 +334,9 @@ describe('Phase 9 filter-metadata endpoint (GET /properties/filter-metadata)', (
 });
 
 describe('Phase 9 auction discovery is unaffected (regression)', () => {
-  it('buildPublicPropertyMatchForAuctions never includes a facet predicate, even if facet-shaped keys are (incorrectly) passed in', async () => {
+  it('buildPublicAuctionMatches never includes a facet predicate, even if facet-shaped keys are (incorrectly) passed in', async () => {
     const instance = service([]);
-    const match = await (instance as any).buildPublicPropertyMatchForAuctions({
+    const matches = await (instance as any).buildPublicAuctionMatches({
       governorateCode: 'cairo',
       // Simulates a hypothetical future refactor accidentally forwarding the full query object.
       shopFloorLevel: 'ground',
@@ -347,7 +347,7 @@ describe('Phase 9 auction discovery is unaffected (regression)', () => {
       soilType: 'clay',
       waterSource: 'well',
     });
-    expect(Object.keys(match).some((key) => key.startsWith('facets.'))).toBe(false);
+    expect(JSON.stringify(matches)).not.toContain('facets.');
   });
 
   it('ListPublicAuctionsDto declares no Phase 9 facet parameters at all', () => {

@@ -359,6 +359,50 @@ describe('DPF-023 approval synchronizes the aggregate and facets', () => {
     expect(ctx.world.revision(ids.revisionId).moderationStatus).toBe('pending_review');
     expect(ctx.world.property(ids.propertyId).facets).toBeUndefined();
   });
+
+  describe('additional types are re-validated at approval (Phase 12)', () => {
+    const pendingWithDuplex = async (ctx: Ctx) => {
+      const { files, media } = photos(RESIDENTIAL_SLOTS);
+      const ids = await draft(ctx, legacyPayload({ ...media, purposeSubcategoryIds: [IDS.apartment, IDS.duplex] }), files);
+      await submit(ctx, ids);
+      return ids;
+    };
+
+    it('rejects approval when an additional type was deactivated after submit, without publishing anything', async () => {
+      const ctx = world();
+      const ids = await pendingWithDuplex(ctx);
+      ctx.world.propertyTypes.find((type) => String(type._id) === IDS.duplex)!.isActive = false;
+      const { body } = await responseOf(review(ctx, ids, 'approved'));
+      expect(body).toMatchObject({ code: PropertyErrorCode.SUBCATEGORIES_INVALID, details: { reason: 'INACTIVE', invalidIds: [IDS.duplex] } });
+      expect(ctx.world.revision(ids.revisionId).moderationStatus).toBe('pending_review');
+      expect(ctx.world.property(ids.propertyId).currentPublicRevisionId).toBeUndefined();
+    });
+
+    it('rejects approval when an additional type lost its published form (no longer listing-enabled)', async () => {
+      const ctx = world();
+      const ids = await pendingWithDuplex(ctx);
+      ctx.world.forms.archive(IDS.duplex);
+      const { body } = await responseOf(review(ctx, ids, 'approved'));
+      expect(body).toMatchObject({ code: PropertyErrorCode.FORM_DEFINITION_ARCHIVED, details: { purposeSubcategoryId: IDS.duplex } });
+      expect(ctx.world.revision(ids.revisionId).moderationStatus).toBe('pending_review');
+    });
+
+    it('still approves when an additional type merely republished a newer form (its form never controls the listing)', async () => {
+      const ctx = world();
+      const ids = await pendingWithDuplex(ctx);
+      ctx.world.forms.publish(IDS.duplex, { fields: VILLA_V2_FIELDS });
+      await review(ctx, ids, 'approved');
+      expect(ctx.world.revision(ids.revisionId).moderationStatus).toBe('approved');
+    });
+
+    it('still lets an admin reject a revision whose additional type became unavailable', async () => {
+      const ctx = world();
+      const ids = await pendingWithDuplex(ctx);
+      ctx.world.propertyTypes.find((type) => String(type._id) === IDS.duplex)!.isActive = false;
+      await review(ctx, ids, 'rejected', 'invalid classification');
+      expect(ctx.world.revision(ids.revisionId).moderationStatus).toBe('rejected');
+    });
+  });
 });
 
 describe('DPF-023 read compatibility after approval', () => {

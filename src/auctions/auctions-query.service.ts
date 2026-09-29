@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AuctionErrorCode } from '../common/errors/auction-error-codes';
@@ -11,6 +11,8 @@ import { Auction, AuctionDocument } from './schemas/auction.schema';
 
 /** Mirrors `@Schema({ collection: 'properties' })` on the Property schema; needed for the public-listing `$lookup`. */
 const PROPERTIES_COLLECTION = 'properties';
+const PROPERTY_REVISIONS_COLLECTION = 'property_revisions';
+const logger = new Logger('AuctionsQueryService');
 
 const PUBLIC_SORTS: Record<PublicAuctionSort, Record<string, 1 | -1>> = {
   newest: { createdAt: -1, _id: -1 },
@@ -64,7 +66,7 @@ export class AuctionsQueryService {
    */
   async listPublic(query: ListPublicAuctionsDto = {}) {
     const { page, limit, skip } = paging(query);
-    const propertyMatch = await this.properties.buildPublicPropertyMatchForAuctions(query);
+    const { propertyMatch, revisionMatch } = await this.properties.buildPublicAuctionMatches(query);
 
     const auctionMatch: Record<string, unknown> = {
       status: query.status ? query.status : { $in: [...DEFAULT_PUBLIC_LIST_STATUSES] },
@@ -91,7 +93,25 @@ export class AuctionsQueryService {
         },
       },
       { $match: { 'visibleProperty.0': { $exists: true } } },
-      { $project: { visibleProperty: 0 } },
+      {
+        $lookup: {
+          from: PROPERTY_REVISIONS_COLLECTION,
+          let: { propertyId: '$propertyId', revisionId: '$propertyRevisionId' },
+          pipeline: [
+            { $match: { $and: [
+              { $expr: { $and: [
+                { $eq: ['$_id', '$$revisionId'] },
+                { $eq: ['$propertyId', '$$propertyId'] },
+              ] } },
+              revisionMatch,
+            ] } },
+            { $project: { _id: 1 } },
+          ],
+          as: 'anchoredRevision',
+        },
+      },
+      { $match: { 'anchoredRevision.0': { $exists: true } } },
+      { $project: { visibleProperty: 0, anchoredRevision: 0 } },
       { $sort: sort },
       { $facet: { items: [{ $skip: skip }, { $limit: limit }], total: [{ $count: 'count' }] } },
     ]).exec();
@@ -105,6 +125,11 @@ export class AuctionsQueryService {
       const property = projections.get(`${doc.propertyId}:${doc.propertyRevisionId}`);
       return property ? [toPublicAuction(doc, property)] : [];
     });
+    // The pipeline already excludes auctions whose anchor cannot resolve, so a
+    // shortfall here means data corruption; surface it instead of hiding it.
+    if (items.length !== docs.length) {
+      logger.error(JSON.stringify({ event: 'auction_anchor_unresolved', auctionIds: docs.filter((doc) => !projections.has(`${doc.propertyId}:${doc.propertyRevisionId}`)).map((doc) => String(doc._id)) }));
+    }
     return { items, pagination: pagination(page, limit, total), serverTime: this.clock.now() };
   }
 

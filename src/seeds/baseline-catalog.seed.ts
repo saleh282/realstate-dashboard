@@ -11,8 +11,14 @@ const EXPECTED_HOST = 'cluster0.jepfa3a.mongodb.net';
 const EXPECTED_DB = 'real-estate-auction';
 
 const parsed = new URL(uri);
+const localDisposable = process.env.PHASE12_DISPOSABLE_DB === '1';
+const localDb = parsed.pathname.slice(1);
 
-if (parsed.hostname !== EXPECTED_HOST) {
+if (localDisposable) {
+  if (!['127.0.0.1', 'localhost'].includes(parsed.hostname) || localDb !== 'mazad_phase12_disposable') {
+    throw new Error('Refused: Phase 12 disposable seed requires localhost/mazad_phase12_disposable');
+  }
+} else if (parsed.hostname !== EXPECTED_HOST) {
   throw new Error(`Refused: unexpected Mongo host ${parsed.hostname}`);
 }
 
@@ -28,7 +34,7 @@ const client = new MongoClient(uri);
 
 async function main() {
   await client.connect();
-  const db = client.db(EXPECTED_DB);
+  const db = client.db(localDisposable ? localDb : EXPECTED_DB);
 
   const admin = await db.collection('users').findOne({
     systemRole: 'SUPER_ADMIN',

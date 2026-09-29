@@ -718,6 +718,20 @@ export class PropertiesService {
     return { mediaProfile: version.mediaProfile, attributes: effectiveSpec(revision).attributes };
   }
 
+  /**
+   * Approval publishes the revision's classification, so additional types that
+   * became inactive, moved purpose or lost their published form since submit
+   * must not survive into the public revision. The primary type's pinned form
+   * keeps its own frozen approval rules (`approvalForm`).
+   */
+  private async assertAdditionalTypesStillAvailable(revision: any, session: ClientSession) {
+    const primary = String(revision.purposeSubcategoryId).toLowerCase();
+    const additional = canonicalPropertyTypeOrder(selectedPropertyTypeIds(revision)).filter((typeId) => typeId !== primary);
+    if (!additional.length) return;
+    await this.assertAdditionalPropertyTypes(additional, revision.purposeCategoryId, session);
+    assertListingEnabled(additional, await this.loadFormState(additional, [], session));
+  }
+
   /** Non-primary selected types must exist, be active and belong to the listing's purpose. */
   private async assertAdditionalPropertyTypes(additionalIds: string[], purposeId: unknown, session?: ClientSession) {
     if (!additionalIds.length) return;
@@ -1018,9 +1032,9 @@ export class PropertiesService {
    * dimension filter is validated (unknown/mismatched catalog ids throw the
    * same stable property error codes).
    */
-  async buildPublicPropertyMatchForAuctions(
+  async buildPublicAuctionMatches(
     filters: Pick<ListPublishedPropertiesDto, 'governorateCode' | 'city' | 'purposeCategoryId' | 'purposeSubcategoryId'> = {},
-  ): Promise<Record<string, unknown>> {
+  ): Promise<{ propertyMatch: Record<string, unknown>; revisionMatch: Record<string, unknown> }> {
     // Phase 9 (Search & Facets): explicitly whitelist only these 4 catalog
     // fields at runtime, never the caller's object as-is — a TypeScript `Pick<>`
     // on the parameter type is erased at runtime and would not stop extra
@@ -1030,7 +1044,18 @@ export class PropertiesService {
     // disagree with a terminal auction's anchored display later.
     const { governorateCode, city, purposeCategoryId, purposeSubcategoryId } = filters;
     const { filter } = await this.buildPublicListingQuery({ governorateCode, city, purposeCategoryId, purposeSubcategoryId } as ListPublishedPropertiesDto);
-    return { ...this.publicVisibilityFilter(), ...filter };
+    // Visibility belongs to the current Property, but classification and
+    // location belong to the revision the auction actually promises bidders.
+    // A terminal auction can outlive a later property approval, so applying
+    // these predicates to Property would return a row under the wrong filters.
+    const { purposeSubcategoryIds, ...revisionMatch } = filter;
+    if (purposeSubcategoryIds) {
+      revisionMatch.$or = [
+        { purposeSubcategoryIds },
+        { purposeSubcategoryIds: { $exists: false }, purposeSubcategoryId: purposeSubcategoryIds },
+      ];
+    }
+    return { propertyMatch: this.publicVisibilityFilter(), revisionMatch };
   }
 
   /**
@@ -1440,6 +1465,7 @@ export class PropertiesService {
         if (status === 'approved') {
           const approvalCandidate = await this.revisions.findOne({ _id: revisionId, propertyId: property._id, moderationStatus: PropertyRevisionModerationStatus.PENDING_REVIEW, decisionVersion: version }).session(session).lean().exec();
           if (!approvalCandidate) throw new ConflictException({ message: 'سبق اتخاذ قرار أو تغير إصدار النسخة', code: PropertyErrorCode.REVISION_VERSION_CONFLICT });
+          await this.assertAdditionalTypesStillAvailable(approvalCandidate, session);
           const form = await this.approvalForm(approvalCandidate, session);
           this.assertPresentationMediaComplete(approvalCandidate, form);
           // DPF-023: promoted facets of the approved revision's effective attributes (primary form only).

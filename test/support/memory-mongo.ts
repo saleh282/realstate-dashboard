@@ -39,6 +39,7 @@ export function evaluate(expr: any, doc: Doc, vars: Doc = {}): any {
     case '$or': return args.some(truthy);
     case '$eq': return same(args[0], args[1]);
     case '$ne': return !same(args[0], args[1]);
+    case '$lt': return args[0] < args[1];
     case '$arrayElemAt': return Array.isArray(args[0]) ? args[0][args[1]] : undefined;
     default: throw new Error(`unsupported expression ${op}`);
   }

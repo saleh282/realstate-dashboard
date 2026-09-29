@@ -75,12 +75,14 @@ async function catalogDriftFinding(db: Db, collectionName: string, propertyField
   const rows = await db.collection(collectionName).aggregate([
     { $lookup: { from: 'properties', let: { catalogCode: '$code' }, pipeline: [{ $match: { $expr: expression } }, { $count: 'value' }], as: '_actual' } },
     { $set: { _actualUsage: { $ifNull: [{ $arrayElemAt: ['$_actual.value', 0] }, 0] } } },
-    { $match: { $expr: { $ne: [{ $ifNull: ['$usageCount', 0] }, '$_actualUsage'] } } },
+    // usageCount is a conservative delete guard: later revisions can increase
+    // it without adding another Property. Only an undercount makes deletion unsafe.
+    { $match: { $expr: { $lt: [{ $ifNull: ['$usageCount', 0] }, '$_actualUsage'] } } },
     { $facet: { count: [{ $count: 'value' }], samples: [{ $limit: SAMPLE_LIMIT }, { $project: { _id: 1 } }] } },
   ]).toArray();
   const count = Number(rows[0]?.count?.[0]?.value ?? 0);
   if (!count) return null;
-  return { code, severity: 'warning', count, sampleIds: (rows[0].samples as Document[]).map((row) => String(row._id)), message: `${collectionName}.usageCount differs from property references` };
+  return { code, severity: 'warning', count, sampleIds: (rows[0].samples as Document[]).map((row) => String(row._id)), message: `${collectionName}.usageCount is below property references` };
 }
 
 async function filterFinding(collection: Collection, filter: Document, code: string, severity: IntegrityFinding['severity'], message: string): Promise<IntegrityFinding | null> {
@@ -130,7 +132,7 @@ export function propertyTypeUsageDriftPipeline(): Document[] {
   return [
     { $lookup: { from: 'properties', let: { typeId: '$_id', typeCode: '$code' }, pipeline: [{ $match: { $expr: PROPERTY_REFERENCES_TYPE } }, { $count: 'value' }], as: '_actual' } },
     { $set: { _actualUsage: { $ifNull: [{ $arrayElemAt: ['$_actual.value', 0] }, 0] } } },
-    { $match: { $expr: { $ne: [{ $ifNull: ['$usageCount', 0] }, '$_actualUsage'] } } },
+    { $match: { $expr: { $lt: [{ $ifNull: ['$usageCount', 0] }, '$_actualUsage'] } } },
     { $facet: { count: [{ $count: 'value' }], samples: [{ $limit: SAMPLE_LIMIT }, { $project: { _id: 1 } }] } },
   ];
 }
@@ -139,7 +141,7 @@ async function propertyTypeUsageDriftFinding(db: Db): Promise<IntegrityFinding |
   const rows = await db.collection('property_types').aggregate(propertyTypeUsageDriftPipeline()).toArray();
   const count = Number(rows[0]?.count?.[0]?.value ?? 0);
   if (!count) return null;
-  return { code: 'PROPERTY_TYPE_USAGE_DRIFT', severity: 'warning', count, sampleIds: (rows[0].samples as Document[]).map((row) => String(row._id)), message: 'property_types.usageCount differs from properties selecting the type' };
+  return { code: 'PROPERTY_TYPE_USAGE_DRIFT', severity: 'warning', count, sampleIds: (rows[0].samples as Document[]).map((row) => String(row._id)), message: 'property_types.usageCount is below properties selecting the type' };
 }
 
 async function danglingPropertyOptionFinding(db: Db, propertyField: string, group: string, code: string): Promise<IntegrityFinding | null> {
@@ -162,12 +164,12 @@ async function propertyOptionDriftFinding(db: Db): Promise<IntegrityFinding | nu
       { $and: [{ $eq: ['$$optionGroup', 'payment_method'] }, { $eq: ['$paymentMethodCode', '$$optionCode'] }] },
     ] } } }, { $count: 'value' }], as: '_actual' } },
     { $set: { _actualUsage: { $ifNull: [{ $arrayElemAt: ['$_actual.value', 0] }, 0] } } },
-    { $match: { $expr: { $ne: [{ $ifNull: ['$usageCount', 0] }, '$_actualUsage'] } } },
+    { $match: { $expr: { $lt: [{ $ifNull: ['$usageCount', 0] }, '$_actualUsage'] } } },
     { $facet: { count: [{ $count: 'value' }], samples: [{ $limit: SAMPLE_LIMIT }, { $project: { _id: 1 } }] } },
   ]).toArray();
   const count = Number(rows[0]?.count?.[0]?.value ?? 0);
   if (!count) return null;
-  return { code: 'PROPERTY_OPTION_USAGE_DRIFT', severity: 'warning', count, sampleIds: (rows[0].samples as Document[]).map((row) => String(row._id)), message: 'property_options.usageCount differs from property references' };
+  return { code: 'PROPERTY_OPTION_USAGE_DRIFT', severity: 'warning', count, sampleIds: (rows[0].samples as Document[]).map((row) => String(row._id)), message: 'property_options.usageCount is below property references' };
 }
 
 /** Order-insensitive facet equality; array-valued facets (e.g. `commercialUseTypes`) compare as sets. Exported for the Phase 9 backfill migration, which uses the identical comparison to decide whether a write is needed. */
@@ -220,6 +222,21 @@ async function propertyFacetDriftFinding(db: Db): Promise<IntegrityFinding | nul
   };
 }
 
+/** An auction is anchored to one immutable PropertyRevision of its property; without it the public projection cannot be built. */
+async function auctionAnchorFinding(db: Db): Promise<IntegrityFinding | null> {
+  const rows = await db.collection('auctions').aggregate([
+    { $lookup: { from: 'property_revisions', let: { propertyId: '$propertyId', revisionId: '$propertyRevisionId' }, pipeline: [
+      { $match: { $expr: { $and: [{ $eq: ['$_id', '$$revisionId'] }, { $eq: ['$propertyId', '$$propertyId'] }] } } },
+      { $project: { _id: 1 } },
+    ], as: '_anchor' } },
+    { $match: { '_anchor.0': { $exists: false } } },
+    { $facet: { count: [{ $count: 'value' }], samples: [{ $limit: SAMPLE_LIMIT }, { $project: { _id: 1 } }] } },
+  ]).toArray();
+  const count = Number(rows[0]?.count?.[0]?.value ?? 0);
+  if (!count) return null;
+  return { code: 'AUCTION_ANCHOR_BROKEN', severity: 'error', count, sampleIds: (rows[0].samples as Document[]).map((row) => String(row._id)), message: 'auctions.propertyRevisionId does not resolve to a revision of the auction property' };
+}
+
 export async function runIntegrityChecks(db: Db, now: Date = new Date()): Promise<IntegrityReport> {
   const users = db.collection('users');
   const properties = db.collection('properties');
@@ -260,6 +277,7 @@ export async function runIntegrityChecks(db: Db, now: Date = new Date()): Promis
     catalogDriftFinding(db, 'amenities', 'amenityCodes', 'AMENITY_USAGE_DRIFT', true),
     propertyOptionDriftFinding(db),
     propertyFacetDriftFinding(db),
+    auctionAnchorFinding(db),
   ]);
   const findings = candidates.filter((finding): finding is IntegrityFinding => finding !== null);
   const errorCount = findings.filter((finding) => finding.severity === 'error').reduce((sum, finding) => sum + finding.count, 0);

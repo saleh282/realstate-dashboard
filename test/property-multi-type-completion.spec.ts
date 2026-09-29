@@ -149,6 +149,32 @@ describe('DPF-006 integrity checks for multi-type classification', () => {
     expect((await codes(db)).PROPERTY_TYPE_USAGE_DRIFT).toEqual({ count: 1, severity: 'warning', sampleIds: [String(DUPLEX)] });
   });
 
+  it('treats usageCount as a conservative deletion guard: overcounts are safe, undercounts are reported', async () => {
+    const db = consistent().seed('property_options', [
+      { _id: oid(401), group: 'payment_method', code: 'cash', usageCount: 3 },
+      { _id: oid(402), group: 'payment_method', code: 'installment', usageCount: 0 },
+    ]);
+    db.docs('property_types').find((type) => type._id.equals(DUPLEX))!.usageCount = 5;
+    db.docs('properties')[0].paymentMethodCode = 'cash';
+    expect((await codes(db)).PROPERTY_TYPE_USAGE_DRIFT).toBeUndefined();
+    expect((await codes(db)).PROPERTY_OPTION_USAGE_DRIFT).toBeUndefined();
+
+    db.docs('properties')[1].paymentMethodCode = 'installment';
+    expect((await codes(db)).PROPERTY_OPTION_USAGE_DRIFT).toEqual({ count: 1, severity: 'warning', sampleIds: [String(oid(402))] });
+  });
+
+  it('reports an auction whose anchored revision is missing or belongs to another property as an error', async () => {
+    const db = consistent().seed('auctions', [
+      { _id: oid(601), propertyId: oid(1), propertyRevisionId: oid(9001), status: 'active' },
+      { _id: oid(602), propertyId: oid(1), propertyRevisionId: oid(9002), status: 'active' },
+    ]);
+    db.docs('property_revisions').push({ _id: oid(9002), propertyId: oid(2) });
+    expect((await codes(db)).AUCTION_ANCHOR_BROKEN).toEqual({ count: 2, severity: 'error', sampleIds: [String(oid(601)), String(oid(602))] });
+    db.docs('property_revisions').push({ _id: oid(9001), propertyId: oid(1) });
+    db.docs('property_revisions').find((revision) => revision._id.equals(oid(9002)))!.propertyId = oid(1);
+    expect((await codes(db)).AUCTION_ANCHOR_BROKEN).toBeUndefined();
+  });
+
   it('flags a missing backfill, and a stored selection missing its primary on properties and revisions', async () => {
     const db = consistent();
     db.docs('properties').push({ _id: oid(3), purposeCategoryId: PURPOSE_RES, purposeSubcategoryId: VILLA, status: 'approved' });
@@ -301,7 +327,8 @@ describe('DPF-007 auction discovery inherits the any-type match', () => {
       _id: oid(500 + index), propertyId: property._id, propertyRevisionId: property.currentPublicRevisionId, status: 'active',
       startingPriceMinor: 1000, minimumBidStepMinor: 100, currency: 'EGP', createdAt: new Date(Date.UTC(2026, 1, index + 1)),
     }));
-    const db = new MemoryDb().seed('properties', properties).seed('auctions', auctions).seed('property_types', types());
+    const revisions = properties.map((property) => ({ ...property, _id: property.currentPublicRevisionId, propertyId: property._id }));
+    const db = new MemoryDb().seed('properties', properties).seed('property_revisions', revisions).seed('auctions', auctions).seed('property_types', types());
     const { service: propertiesService } = searchService(properties);
     (propertiesService as any).getAnchoredPublicProjections = async (pairs: Array<{ propertyId: string; revisionId: string }>) =>
       new Map(pairs.map((pair) => [`${pair.propertyId}:${pair.revisionId}`, { id: pair.propertyId }]));
@@ -314,9 +341,51 @@ describe('DPF-007 auction discovery inherits the any-type match', () => {
     const listed = async (type: ObjectId) => (await query.listPublic({ purposeSubcategoryId: String(type) })).items.map((item: any) => item.property.id);
     expect(await listed(DUPLEX)).toEqual(n(5, 3, 1));
     expect(await listed(APARTMENT)).toEqual(n(2, 1));
-    const match = await propertiesService.buildPublicPropertyMatchForAuctions({ purposeSubcategoryId: String(VILLA) });
-    expect(match).toMatchObject({ purposeSubcategoryIds: VILLA });
-    expect(match).not.toHaveProperty('purposeSubcategoryId');
+    const match = await propertiesService.buildPublicAuctionMatches({ purposeSubcategoryId: String(VILLA) });
+    expect(match.propertyMatch).not.toHaveProperty('purposeSubcategoryIds');
+    expect(match.revisionMatch.$or).toEqual([
+      { purposeSubcategoryIds: VILLA },
+      { purposeSubcategoryIds: { $exists: false }, purposeSubcategoryId: VILLA },
+    ]);
+  });
+
+  it('filters and paginates an ended auction by its old revision after the live property changes', async () => {
+    const original = listingDb()[0];
+    const oldRevisionId = original.currentPublicRevisionId;
+    const property = {
+      ...original,
+      currentPublicRevisionId: oid(2001),
+      purposeSubcategoryId: VILLA,
+      purposeSubcategoryIds: [VILLA],
+      governorateCode: 'giza',
+      city: 'الجيزة',
+    };
+    const anchored = { ...original, _id: oldRevisionId, propertyId: property._id };
+    const auction = {
+      _id: oid(501), propertyId: property._id, propertyRevisionId: oldRevisionId,
+      status: 'ended_pending_close', startingPriceMinor: 1000, createdAt: new Date('2026-02-02'),
+    };
+    const dangling = { ...auction, _id: oid(502), propertyRevisionId: oid(2999), createdAt: new Date('2026-02-03') };
+    const db = new MemoryDb()
+      .seed('properties', [property])
+      .seed('property_revisions', [anchored])
+      .seed('auctions', [auction, dangling])
+      .seed('property_types', types());
+    const { service: propertiesService } = searchService([property]);
+    (propertiesService as any).getAnchoredPublicProjections = async (pairs: Array<{ propertyId: string; revisionId: string }>) =>
+      new Map(pairs.filter((pair) => pair.revisionId === String(oldRevisionId))
+        .map((pair) => [`${pair.propertyId}:${pair.revisionId}`, { id: pair.propertyId, purposeSubcategoryId: String(APARTMENT) }]));
+    const query = Object.create(AuctionsQueryService.prototype) as any;
+    Object.assign(query, {
+      auctions: { aggregate: (pipeline: Doc[]) => ({ exec: async () => db.aggregate('auctions', pipeline) }) },
+      properties: propertiesService,
+      clock: { now: () => new Date('2026-03-01T00:00:00Z') },
+    });
+
+    const oldMatch = await query.listPublic({ status: 'ended_pending_close', purposeSubcategoryId: String(APARTMENT), governorateCode: 'cairo', limit: 1 });
+    expect(oldMatch.items.map((item: any) => item.property.id)).toEqual([String(property._id)]);
+    expect(oldMatch.pagination).toEqual({ page: 1, limit: 1, total: 1, totalPages: 1 });
+    expect((await query.listPublic({ status: 'ended_pending_close', purposeSubcategoryId: String(VILLA), governorateCode: 'giza' })).items).toEqual([]);
   });
 });
 
