@@ -22,6 +22,8 @@ export type PublicFormVersion = {
   rendererVersion: number;
   contentHash: string;
   amenitiesEnabled: boolean;
+  /** Phase 11 type-aware amenities: absent means the legacy full-active-catalog-when-enabled behavior. */
+  allowedAmenityCodes?: string[];
   fields: FieldDefinition[];
   mediaRequirements: MediaRequirements;
 };
@@ -109,6 +111,7 @@ export function toPublicVersion(version: any): PublicFormVersion {
     rendererVersion: version.rendererVersion,
     contentHash: version.contentHash,
     amenitiesEnabled: version.amenitiesEnabled,
+    ...(version.allowedAmenityCodes !== undefined ? { allowedAmenityCodes: version.allowedAmenityCodes } : {}),
     fields: [...(version.fields ?? [])]
       .sort((a: FieldDefinition, b: FieldDefinition) => a.order - b.order)
       .map((field: FieldDefinition) => Object.fromEntries(FIELD_PROPERTIES.filter((property) => field[property] !== undefined && field[property] !== null).map((property) => [property, field[property]])) as FieldDefinition),

@@ -86,6 +86,8 @@ export class PropertyFormDefinitionVersion {
   @Prop({ type: [FieldDefinitionEntrySchema], default: [] }) fields: FieldDefinition[];
   @Prop({ required: true, enum: MEDIA_PROFILES }) mediaProfile: string;
   @Prop({ required: true }) amenitiesEnabled: boolean;
+  /** Phase 11 type-aware amenities: absent (the only value every pre-Phase-11 version has) means legacy full-catalog-when-enabled behavior. */
+  @Prop({ type: [String], default: undefined }) allowedAmenityCodes?: string[];
   @Prop({ trim: true, maxlength: PROPERTY_FORM_LIMITS.changeNoteMaxLength }) changeNote?: string;
   @Prop({ type: Types.ObjectId, ref: 'PropertyFormDefinitionVersion', immutable: true }) basedOnVersionId?: Types.ObjectId;
   @Prop({ required: true, min: 0, default: 0 }) draftRevision: number;

@@ -8,6 +8,7 @@ import { mediaRequirements } from '../properties/media-profiles';
 import { PROPERTY_ATTRIBUTE_LIMITS } from '../property-attributes/property-attribute.constants';
 import { PropertyAttribute, type PropertyAttributeDocument } from '../property-attributes/schemas/property-attribute.schema';
 import { PropertyType, type PropertyTypeDocument } from '../property-types/schemas/property-type.schema';
+import { Amenity, type AmenityDocument } from '../amenities/schemas/amenity.schema';
 import {
   buildDraftContent,
   canonicalContentHash,
@@ -15,6 +16,7 @@ import {
   publishableContent,
   storedContent,
   validateFormContent,
+  type AmenityCatalogEntry,
   type FormDraftError,
   type RegistryAttribute,
 } from './form-definition-drafts';
@@ -58,6 +60,7 @@ export class AdminPropertyFormDefinitionsService {
     @InjectModel(PropertyFormDefinitionVersion.name) private readonly versions: Model<PropertyFormDefinitionVersionDocument>,
     @InjectModel(PropertyAttribute.name) private readonly attributes: Model<PropertyAttributeDocument>,
     @InjectModel(PropertyType.name) private readonly types: Model<PropertyTypeDocument>,
+    @InjectModel(Amenity.name) private readonly amenities: Model<AmenityDocument>,
     private readonly audit: AuditLogService,
     @InjectConnection() private readonly connection: Connection,
   ) {}
@@ -234,7 +237,10 @@ export class AdminPropertyFormDefinitionsService {
       if (head.currentVersionId && !current) throw currentVersionInvalid();
       const draftId = new Types.ObjectId();
       const content = current
-        ? { fields: current.fields.map((field) => ({ ...field })), mediaProfile: current.mediaProfile as MediaProfile, amenitiesEnabled: current.amenitiesEnabled }
+        ? {
+            fields: current.fields.map((field) => ({ ...field })), mediaProfile: current.mediaProfile as MediaProfile, amenitiesEnabled: current.amenitiesEnabled,
+            ...(current.allowedAmenityCodes !== undefined ? { allowedAmenityCodes: [...current.allowedAmenityCodes] } : {}),
+          }
         : INITIAL_DRAFT;
       await this.versions.create([{
         _id: draftId, definitionId: head._id, purposeSubcategoryId: head.purposeSubcategoryId, state: 'draft', ...content, draftRevision: 0,
@@ -261,14 +267,23 @@ export class AdminPropertyFormDefinitionsService {
       const registry = await this.registry(dto.fields.map((field) => field.key), session);
       const built = buildDraftContent(dto, registry);
       const content: FormVersionContent = { rendererVersion: CURRENT_RENDERER_VERSION, ...built };
-      const errors = validateFormContent(content, registry, { stage: 'draft', baseFields: await this.baseFields(draft, session) });
+      const base = await this.baseVersion(draft, session);
+      const errors = validateFormContent(content, registry, {
+        stage: 'draft',
+        baseFields: base?.fields ?? [],
+        amenityCatalog: await this.amenityCatalogFor(content.allowedAmenityCodes, session),
+        baseAllowedAmenityCodes: base?.allowedAmenityCodes ?? [],
+      });
       if (errors.length) throw draftInvalid(FormDefinitionErrorCode.DRAFT_INVALID, errors);
       const changeNote = dto.changeNote?.trim();
+      const unset: Record<string, 1> = {};
+      if (!changeNote) unset.changeNote = 1;
+      if (built.allowedAmenityCodes === undefined) unset.allowedAmenityCodes = 1;
       const updated = await this.versions.findOneAndUpdate(
         { _id: draft._id, definitionId: head._id, state: 'draft', draftRevision: dto.expectedDraftRevision },
         {
-          $set: { fields: built.fields, mediaProfile: built.mediaProfile, amenitiesEnabled: built.amenitiesEnabled, ...(changeNote ? { changeNote } : {}) },
-          ...(changeNote ? {} : { $unset: { changeNote: 1 } }),
+          $set: { fields: built.fields, mediaProfile: built.mediaProfile, amenitiesEnabled: built.amenitiesEnabled, ...(changeNote ? { changeNote } : {}), ...(built.allowedAmenityCodes !== undefined ? { allowedAmenityCodes: built.allowedAmenityCodes } : {}) },
+          ...(Object.keys(unset).length ? { $unset: unset } : {}),
           $inc: { draftRevision: 1 },
         },
         { new: true, session, runValidators: true },
@@ -334,7 +349,8 @@ export class AdminPropertyFormDefinitionsService {
         { $set: {
           state: 'published', version: number, fields: content.fields, mediaProfile: content.mediaProfile, amenitiesEnabled: content.amenitiesEnabled,
           rendererVersion: content.rendererVersion, legacyWritable, contentHash, publishedAt: now, publishedBy: new Types.ObjectId(actor.userId),
-        } },
+          ...(content.allowedAmenityCodes !== undefined ? { allowedAmenityCodes: content.allowedAmenityCodes } : {}),
+        }, ...(content.allowedAmenityCodes === undefined ? { $unset: { allowedAmenityCodes: 1 } } : {}) },
         { new: true, session, runValidators: true },
       ).lean().exec();
       if (!version) throw new TransactionAttemptConflict();
@@ -381,7 +397,7 @@ export class AdminPropertyFormDefinitionsService {
       if (head.currentVersionId) {
         const current = await this.versions.findOne({ _id: head.currentVersionId, definitionId: head._id }).session(session).lean().exec();
         // Same integrity rule property writes apply: the stored content still hashes to its recorded hash.
-        const intact = current?.contentHash === computeFormContentHash({ rendererVersion: current?.rendererVersion as number, fields: current?.fields ?? [], mediaProfile: current?.mediaProfile as MediaProfile, amenitiesEnabled: current?.amenitiesEnabled as boolean });
+        const intact = current?.contentHash === computeFormContentHash({ rendererVersion: current?.rendererVersion as number, fields: current?.fields ?? [], mediaProfile: current?.mediaProfile as MediaProfile, amenitiesEnabled: current?.amenitiesEnabled as boolean, allowedAmenityCodes: current?.allowedAmenityCodes });
         if (!current || current.state !== 'published' || !intact) throw currentVersionInvalid();
       }
       await this.advanceHead(session, head, dto.expectedVersion, {
@@ -452,17 +468,34 @@ export class AdminPropertyFormDefinitionsService {
     return new Map(entries.map((entry) => [entry.key, entry as unknown as RegistryAttribute]));
   }
 
-  private async baseFields(draft: { basedOnVersionId?: Types.ObjectId | null }, session?: ClientSession): Promise<FieldDefinition[]> {
-    if (!draft.basedOnVersionId) return [];
+  private async baseVersion(draft: { basedOnVersionId?: Types.ObjectId | null }, session?: ClientSession): Promise<{ fields: FieldDefinition[]; allowedAmenityCodes?: string[] } | undefined> {
+    if (!draft.basedOnVersionId) return undefined;
     const query = this.versions.findOne({ _id: draft.basedOnVersionId });
     if (session) query.session(session);
     const base = await query.lean().exec();
-    return base?.fields ?? [];
+    if (!base) return undefined;
+    return { fields: base.fields ?? [], allowedAmenityCodes: base.allowedAmenityCodes };
+  }
+
+  /** The catalog entries `allowedAmenityCodes` names, for membership/active-status checks (Phase 11). Undefined input means "no list to check" — no query. */
+  private async amenityCatalogFor(codes: readonly string[] | undefined, session?: ClientSession): Promise<Map<string, AmenityCatalogEntry> | undefined> {
+    if (codes === undefined) return undefined;
+    const unique = [...new Set(codes.filter((code) => typeof code === 'string' && code))];
+    if (!unique.length) return new Map();
+    const query = this.amenities.find({ code: { $in: unique } });
+    if (session) query.session(session);
+    const entries = await query.lean().exec();
+    return new Map(entries.map((entry) => [entry.code, { code: entry.code, isActive: entry.isActive !== false }]));
   }
 
   private async validationErrors(content: FormVersionContent, draft: { basedOnVersionId?: Types.ObjectId | null }, session?: ClientSession): Promise<FormDraftError[]> {
     const registry = await this.registry(content.fields.map((field) => field.key), session);
-    return validateFormContent(content, registry, { baseFields: await this.baseFields(draft, session) });
+    const base = await this.baseVersion(draft, session);
+    return validateFormContent(content, registry, {
+      baseFields: base?.fields ?? [],
+      amenityCatalog: await this.amenityCatalogFor(content.allowedAmenityCodes, session),
+      baseAllowedAmenityCodes: base?.allowedAmenityCodes ?? [],
+    });
   }
 
   private record(session: ClientSession, actor: FormAdminActor, action: AuditAction, definitionId: Types.ObjectId, reason: string, metadata: Record<string, unknown>) {
@@ -542,6 +575,7 @@ function versionView(version: any) {
     purposeSubcategoryId: String(version.purposeSubcategoryId),
     mediaProfile: version.mediaProfile,
     amenitiesEnabled: version.amenitiesEnabled,
+    allowedAmenityCodes: version.allowedAmenityCodes ?? null,
     fields: content.fields,
     changeNote: version.changeNote ?? null,
     basedOnVersionId: idOrNull(version.basedOnVersionId),

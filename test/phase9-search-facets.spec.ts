@@ -139,6 +139,7 @@ function service(docs: Record<string, any>[]) {
     },
     purposeCategories: emptyLookup,
     options: emptyLookup,
+    amenities: emptyLookup,
   });
   return instance as PropertiesService;
 }

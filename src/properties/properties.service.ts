@@ -41,7 +41,7 @@ import {
 } from '../common/validators/property-attributes';
 import {
   FormDefinitionInvalidReason,
-  amenitiesNotEnabled,
+  assertAmenitySelection,
   approvedFacets,
   assertDraftMedia,
   assertDynamicPin,
@@ -97,6 +97,8 @@ export const PUBLIC_REVISION_PROJECTION_FIELDS = [
   'galleryMedia', 'entranceImageAsset', 'coverImageIndex', 'moderationStatus',
   // DPF-016: pinned revisions derive the deprecated flat spec fields from their attributes.
   'formDefinitionVersionId', 'attributes',
+  // Phase 11: selected amenity codes, resolved to public catalog metadata by `toMarketplacePublic`.
+  'amenityCodes',
 ] as const;
 const PUBLIC_REVISION_SELECT = PUBLIC_REVISION_PROJECTION_FIELDS.join(' ');
 // Anchored reads load revisions directly and must also verify revision ownership.
@@ -123,6 +125,10 @@ type ResolvedWriteForm = {
 
 /** Media profile and effective attributes that drive photo completeness (DPF-022). */
 type MediaForm = { mediaProfile: MediaProfile; attributes: Readonly<Record<string, unknown>> };
+
+/** Phase 11: one amenity as rendered in a public property detail response. */
+type PublicAmenityView = { code: string; nameAr: string; nameEn: string; iconKey: string; category: string; sortOrder: number };
+type PublicAmenity = Omit<PublicAmenityView, 'sortOrder'>;
 
 type PropertyAttribution = {
   actorId: Types.ObjectId;
@@ -607,7 +613,7 @@ export class PropertiesService {
       carried = carriedAttributes(await this.carryForwardSource(primary, current.head._id, current.version, existingProperty, existingDraft), current.version, operationType, input);
     }
     assertListingEnabled(selected.filter((typeId) => typeId !== primary), state);
-    if (!current.version.amenitiesEnabled && dto.amenityCodes.length) throw amenitiesNotEnabled();
+    assertAmenitySelection(current.version, dto.amenityCodes);
 
     const validate = async (attributes: ParsedAttributes) => {
       const active = await this.activeCatalogCodes(catalogCandidates(current.version, attributes), knownActiveCatalog);
@@ -684,7 +690,7 @@ export class PropertiesService {
     const active = await this.activeCatalogCodes(catalogCandidates(current.version, parsed), [], session);
     const result = validateAgainstVersion(current.version, revision.operationType, parsed, (group, code) => active.has(`${group}:${code}`));
     if ('fieldErrors' in result) throw propertyAttributesInvalid(String(current.version._id), result.fieldErrors);
-    if (!current.version.amenitiesEnabled && (revision.amenityCodes ?? []).length) throw amenitiesNotEnabled();
+    assertAmenitySelection(current.version, revision.amenityCodes ?? []);
     return { mediaProfile: current.version.mediaProfile, attributes: result.attributes };
   }
 
@@ -708,7 +714,7 @@ export class PropertiesService {
     assertUsableVersion(version, primary);
     const result = validateAgainstVersion(version, revision.operationType, toParsedAttributes(revision.attributes), () => true);
     if ('fieldErrors' in result) throw propertyAttributesInvalid(String(version._id), result.fieldErrors);
-    if (!version.amenitiesEnabled && (revision.amenityCodes ?? []).length) throw amenitiesNotEnabled();
+    assertAmenitySelection(version, revision.amenityCodes ?? []);
     return { mediaProfile: version.mediaProfile, attributes: effectiveSpec(revision).attributes };
   }
 
@@ -886,11 +892,12 @@ export class PropertiesService {
     const purposeIds = currentRevisions.map(revision => revision?.purposeCategoryId).filter(Boolean);
     const subcategoryIds = currentRevisions.flatMap(revision => selectedPropertyTypeIds(revision));
     const paymentCodes = currentRevisions.flatMap(revision => revision?.paymentMethodCodes ?? []);
-    const [governorates, propertyTypes, purposes, paymentMethods] = await Promise.all([
+    const [governorates, propertyTypes, purposes, paymentMethods, amenityCatalog] = await Promise.all([
       this.governorates.find({ code: { $in: [...new Set(currentRevisions.map((revision, index) => revision?.governorateCode ?? items[index].governorateCode))] } }).lean().exec(),
       this.propertyTypes.find({ $or: [{ _id: { $in: subcategoryIds } }, { code: { $in: [...new Set(currentRevisions.map((revision, index) => revision?.legacyPropertyTypeCode ?? items[index].propertyTypeCode))] } }] }).lean().exec(),
       this.purposeCategories.find({ _id: { $in: purposeIds } }).lean().exec(),
       this.options.find({ group: 'payment_method', code: { $in: paymentCodes } }).lean().exec(),
+      this.publicAmenityCatalog(),
     ]);
     const governorateNames = new Map(governorates.map(item => [item.code, item.nameAr]));
     const propertyTypeNames = new Map(propertyTypes.map(item => [item.code, item.nameAr]));
@@ -900,7 +907,7 @@ export class PropertiesService {
     return items.map(item => {
       const revision = this.populatedRevision(item.currentPublicRevisionId);
       return {
-        ...this.toMarketplacePublic(item),
+        ...this.toMarketplacePublic(item, amenityCatalog),
         governorateNameAr: governorateNames.get(revision?.governorateCode ?? item.governorateCode) ?? (revision?.governorateCode ?? item.governorateCode),
         purposeCategoryNameAr: revision?.purposeCategoryId ? purposeNames.get(revision.purposeCategoryId.toString()) : undefined,
         propertyTypeNameAr: revision?.purposeSubcategoryId ? propertyTypesById.get(revision.purposeSubcategoryId.toString())?.nameAr : (propertyTypeNames.get(item.propertyTypeCode) ?? item.propertyTypeCode),
@@ -916,16 +923,17 @@ export class PropertiesService {
     if (!item || !this.populatedRevision(item.currentPublicRevisionId)) throw new NotFoundException('العقار غير موجود');
     const revision = this.populatedRevision(item.currentPublicRevisionId)!;
     const selectedTypeIds = selectedPropertyTypeIds(revision);
-    const [purpose, types, governorate, paymentMethods] = await Promise.all([
+    const [purpose, types, governorate, paymentMethods, amenityCatalog] = await Promise.all([
       revision.purposeCategoryId ? this.purposeCategories.findById(revision.purposeCategoryId).lean().exec() : undefined,
       selectedTypeIds.length ? this.propertyTypes.find({ _id: { $in: selectedTypeIds } }).lean().exec() : [],
       this.governorates.findOne({ code: revision.governorateCode }).lean().exec(),
       this.options.find({ group: 'payment_method', code: { $in: revision.paymentMethodCodes ?? [] } }).lean().exec(),
+      this.publicAmenityCatalog(),
     ]);
     const typesById = new Map<string, any>(types.map((value: any): [string, any] => [value._id.toString(), value]));
     const [specifications] = await this.specificationsFor([revision]);
     return { property: {
-      ...this.toMarketplacePublic(item),
+      ...this.toMarketplacePublic(item, amenityCatalog),
       specifications,
       purposeCategoryNameAr: purpose?.nameAr,
       propertyTypeNameAr: (revision.purposeSubcategoryId ? typesById.get(revision.purposeSubcategoryId.toString())?.nameAr : undefined) ?? revision.legacyPropertyTypeCode,
@@ -1716,7 +1724,20 @@ export class PropertiesService {
     };
   }
 
-  private toMarketplacePublic(item: any) {
+  /**
+   * Phase 11: buyer-facing amenities, resolved from the revision-owned
+   * `amenityCodes` against the current amenity catalog (not filtered by
+   * `isActive`, so a code that was selected while active and later archived
+   * still renders correctly with its current label/icon/category instead of
+   * silently disappearing from a property that already has it — the same
+   * "hard-delete blocked while referenced" invariant the catalog already
+   * enforces keeps this safe: a still-selected code's document is never
+   * removed). A code with no matching catalog document at all (never
+   * possible in practice, but not assumed) is silently dropped rather than
+   * breaking the read. Deterministic order matches the public catalog list's
+   * own sort (category, then sortOrder, then nameAr).
+   */
+  private toMarketplacePublic(item: any, amenityCatalog?: ReadonlyMap<string, PublicAmenityView>) {
     const projected = this.projectProperty(item, false);
     const {
       advertiserAccountId: _advertiserAccountId,
@@ -1729,9 +1750,31 @@ export class PropertiesService {
       currentPublicRevisionId: _currentPublicRevisionId,
       reviewReason: _reviewReason,
       reviewedAt: _reviewedAt,
+      amenityCodes: rawAmenityCodes,
       ...safe
     } = projected;
-    return safe;
+    return { ...safe, amenities: this.resolvePublicAmenities(rawAmenityCodes, amenityCatalog) };
+  }
+
+  /** The full amenity catalog (active and inactive), for resolving `amenityCodes` into public display metadata. The catalog is small enough that fetching it whole, once per read, is simpler than a per-code lookup. */
+  private async publicAmenityCatalog(): Promise<Map<string, PublicAmenityView>> {
+    const items = await this.amenities.find({}).lean().exec();
+    return new Map(items.map((item: any) => [item.code, { code: item.code, nameAr: item.nameAr, nameEn: item.nameEn, iconKey: item.iconKey, category: item.category, sortOrder: item.sortOrder ?? 0 }]));
+  }
+
+  private resolvePublicAmenities(codes: readonly string[] | undefined, catalog?: ReadonlyMap<string, PublicAmenityView>): PublicAmenity[] {
+    if (!codes?.length || !catalog) return [];
+    const seen = new Set<string>();
+    const resolved: PublicAmenityView[] = [];
+    for (const code of codes) {
+      if (seen.has(code)) continue;
+      const entry = catalog.get(code);
+      if (!entry) continue;
+      seen.add(code);
+      resolved.push(entry);
+    }
+    return resolved.sort((a, b) => (a.category !== b.category ? a.category.localeCompare(b.category) : a.sortOrder !== b.sortOrder ? a.sortOrder - b.sortOrder : a.nameAr.localeCompare(b.nameAr)))
+      .map(({ sortOrder: _sortOrder, ...publicAmenity }) => publicAmenity);
   }
 
   /** Owner projections plus `specifications` of the revision the owner sees (pending, draft, else public). */
@@ -1806,6 +1849,7 @@ export class PropertiesService {
       marketingMode: revision?.marketingMode,
       images: this.publicImages(this.revisionPublicImages(revision, item.images)),
       coverImageIndex: source.coverImageIndex,
+      amenityCodes: source.amenityCodes,
       advertiserType: item.advertiserType,
       isOwnerVisible: item.isOwnerVisible !== false,
       status: revision?.moderationStatus ?? item.status,

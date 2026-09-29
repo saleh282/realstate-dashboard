@@ -19,9 +19,9 @@ import {
 type Head = { _id: Types.ObjectId; purposeSubcategoryId: Types.ObjectId; status: string; currentVersionId?: Types.ObjectId; currentVersion?: number; nextVersionNumber: number; version: number };
 type Version = {
   _id: Types.ObjectId; definitionId: Types.ObjectId; purposeSubcategoryId: Types.ObjectId; version?: number; state: string;
-  rendererVersion?: number; fields: FieldDefinition[]; mediaProfile: MediaProfile; amenitiesEnabled: boolean; legacyWritable?: boolean; contentHash?: string;
+  rendererVersion?: number; fields: FieldDefinition[]; mediaProfile: MediaProfile; amenitiesEnabled: boolean; allowedAmenityCodes?: string[]; legacyWritable?: boolean; contentHash?: string;
 };
-export type PublishInput = { fields: FieldDefinition[]; mediaProfile?: MediaProfile; amenitiesEnabled?: boolean; rendererVersion?: number };
+export type PublishInput = { fields: FieldDefinition[]; mediaProfile?: MediaProfile; amenitiesEnabled?: boolean; allowedAmenityCodes?: string[]; rendererVersion?: number };
 
 const derivedId = (seed: string) => new Types.ObjectId(createHash('sha256').update(seed).digest('hex').slice(0, 24));
 const key = (value: unknown) => String(value).toLowerCase();
@@ -57,6 +57,7 @@ export class FormDefinitionStore {
       fields: input.fields,
       mediaProfile: input.mediaProfile ?? 'residential_rooms',
       amenitiesEnabled: input.amenitiesEnabled ?? true,
+      ...(input.allowedAmenityCodes !== undefined ? { allowedAmenityCodes: input.allowedAmenityCodes } : {}),
     };
     if (head.currentVersionId) this.versions.get(key(head.currentVersionId))!.state = 'superseded';
     const number = head.nextVersionNumber;
@@ -75,6 +76,7 @@ export class FormDefinitionStore {
     const version: Version = {
       _id: derivedId(`draft:${key(typeId)}:${this.versions.size}`), definitionId: head._id, purposeSubcategoryId: head.purposeSubcategoryId, state: 'draft',
       fields: input.fields, mediaProfile: input.mediaProfile ?? 'residential_rooms', amenitiesEnabled: input.amenitiesEnabled ?? true,
+      ...(input.allowedAmenityCodes !== undefined ? { allowedAmenityCodes: input.allowedAmenityCodes } : {}),
     };
     this.versions.set(key(version._id), version);
     return version;

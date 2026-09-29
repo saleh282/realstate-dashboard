@@ -25,13 +25,15 @@ const REQUIRED_PUBLIC_REVISION_FIELDS = [
   'galleryMedia', 'entranceImageAsset', 'coverImageIndex', 'moderationStatus',
   // DPF-016: a pinned revision's deprecated flat fields come from its attributes.
   'formDefinitionVersionId', 'attributes',
+  // Phase 11: selected amenity codes, resolved to public catalog metadata by toMarketplacePublic.
+  'amenityCodes',
 ];
 /** Fields that only matter for a revision pinned to a FormDefinitionVersion. */
 const PIN_FIELDS = ['formDefinitionVersionId', 'attributes'];
 const PRIVATE_OR_UNUSED_REVISION_FIELDS = [
   'privateEvidenceAssets', 'supersededAssets', 'street', 'additionalAddressDetails', 'latitude', 'longitude',
   'livingRooms', 'kitchens', 'totalFloors', 'buildingYear', 'finishingStatusCode', 'deliveryStatusCode',
-  'amenityCodes', 'isPriceNegotiable', 'hidePhone', 'legacyDownPaymentMinor', 'createdByActorId',
+  'isPriceNegotiable', 'hidePhone', 'legacyDownPaymentMinor', 'createdByActorId',
   'reviewedBy', 'reviewReason', 'reviewedAt', 'submittedAt', 'decisionVersion', 'version',
   'migrationVersion', 'migrationRunId', 'migratedAt',
 ];
@@ -224,6 +226,8 @@ describe('DPF-002 public read paths load only the revision fields they project',
       ]),
       purposeCategories: lookup([{ _id: new Types.ObjectId(purposeId), nameAr: 'سكني' }]),
       options: lookup([{ code: 'cash', nameAr: 'كاش' }, { code: 'installments', nameAr: 'تقسيط' }]),
+      // Phase 11: matches fullRevision's amenityCodes: ['pool'] so it is actually observable when dropped.
+      amenities: lookup([{ code: 'pool', nameAr: 'حمام سباحة', nameEn: 'Pool', iconKey: 'pool', category: 'facility', sortOrder: 5 }]),
     });
     const hydrate = (items: unknown[]): Promise<any[]> => instance.hydratePublicListings(items);
     return { service: instance as PropertiesService, hydrate, populateCalls, revisionProjections, properties, revisions };

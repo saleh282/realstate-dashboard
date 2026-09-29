@@ -61,7 +61,10 @@ export type DraftFieldInput = {
   validation?: object;
   options?: DraftOptionInput[];
 };
-export type DraftContentInput = { fields: DraftFieldInput[]; mediaProfile: string; amenitiesEnabled: boolean };
+export type DraftContentInput = { fields: DraftFieldInput[]; mediaProfile: string; amenitiesEnabled: boolean; allowedAmenityCodes?: string[] };
+
+/** One amenity catalog entry as far as allowed-list validation cares. */
+export type AmenityCatalogEntry = { code: string; isActive: boolean };
 
 /** Stable `code` of one form-builder validation error. */
 export enum FormDraftErrorCode {
@@ -96,6 +99,11 @@ export enum FormDraftErrorCode {
   MEDIA_PROFILE_UNSUPPORTED = 'MEDIA_PROFILE_UNSUPPORTED',
   RENDERER_VERSION_UNSUPPORTED = 'RENDERER_VERSION_UNSUPPORTED',
   VERSION_TOO_LARGE = 'VERSION_TOO_LARGE',
+  /** Phase 11 type-aware amenities. */
+  AMENITY_ALLOWED_LIST_NOT_APPLICABLE = 'AMENITY_ALLOWED_LIST_NOT_APPLICABLE',
+  AMENITY_CODE_DUPLICATE = 'AMENITY_CODE_DUPLICATE',
+  AMENITY_CODE_UNKNOWN = 'AMENITY_CODE_UNKNOWN',
+  AMENITY_CODE_INACTIVE = 'AMENITY_CODE_INACTIVE',
 }
 
 /** One error; `fieldKey` is absent for form-level errors, `property` names the offending path. */
@@ -126,6 +134,8 @@ const TEXT_LIMITS = [
 ] as const;
 
 const present = (value: unknown) => value !== undefined && value !== null;
+/** Canonical, deterministic order (alphabetical); `undefined` (absent, legacy) is preserved, `[]` (explicitly none) is preserved. */
+const canonicalAmenityCodes = (codes?: string[] | null): string[] | undefined => (codes != null ? [...codes].sort() : undefined);
 const isInteger = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value);
 const inOrderRange = (value: unknown) => isInteger(value) && value >= PROPERTY_FORM_LIMITS.fieldOrderMin && value <= PROPERTY_FORM_LIMITS.fieldOrderMax;
 const cleanText = (value: unknown) => (typeof value === 'string' ? sanitizeFormLabel(value) : value);
@@ -166,6 +176,7 @@ export function buildDraftContent(input: DraftContentInput, registry: ReadonlyMa
     }).sort(byOrder),
     mediaProfile: input.mediaProfile as MediaProfile,
     amenitiesEnabled: input.amenitiesEnabled,
+    ...(canonicalAmenityCodes(input.allowedAmenityCodes) !== undefined ? { allowedAmenityCodes: canonicalAmenityCodes(input.allowedAmenityCodes) } : {}),
   };
 }
 
@@ -207,17 +218,18 @@ const isOperationSet = (value: unknown): value is string[] =>
 const byOrder = (a: FieldDefinition, b: FieldDefinition) => (a.order - b.order) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 
 /** The content a draft would publish as, canonical and with the current renderer version. */
-export function publishableContent(draft: { fields: readonly FieldDefinition[]; mediaProfile: string; amenitiesEnabled: boolean }): FormVersionContent {
+export function publishableContent(draft: { fields: readonly FieldDefinition[]; mediaProfile: string; amenitiesEnabled: boolean; allowedAmenityCodes?: string[] }): FormVersionContent {
   return {
     rendererVersion: CURRENT_RENDERER_VERSION,
     fields: draft.fields.map((field) => canonicalField({ ...field })).sort(byOrder),
     mediaProfile: draft.mediaProfile as MediaProfile,
     amenitiesEnabled: draft.amenitiesEnabled,
+    ...(canonicalAmenityCodes(draft.allowedAmenityCodes) !== undefined ? { allowedAmenityCodes: canonicalAmenityCodes(draft.allowedAmenityCodes) } : {}),
   };
 }
 
 /** A stored published version's content, canonical (it keeps its own renderer version). */
-export function storedContent(version: { rendererVersion?: number; fields: readonly FieldDefinition[]; mediaProfile: string; amenitiesEnabled: boolean }): FormVersionContent {
+export function storedContent(version: { rendererVersion?: number; fields: readonly FieldDefinition[]; mediaProfile: string; amenitiesEnabled: boolean; allowedAmenityCodes?: string[] }): FormVersionContent {
   return { ...publishableContent(version), rendererVersion: version.rendererVersion ?? CURRENT_RENDERER_VERSION };
 }
 
@@ -237,6 +249,15 @@ export type ValidationContext = {
    * but may not be newly added (deprecation means "no new use").
    */
   baseFields?: readonly FieldDefinition[];
+  /**
+   * Phase 11: the amenity catalog, for `allowedAmenityCodes` membership
+   * checks. Omitted entirely, only structural checks (shape, duplicates, the
+   * `amenitiesEnabled` invariant) run — a caller that does not pass it is
+   * asking for pure/offline validation, not a real catalog check.
+   */
+  amenityCatalog?: ReadonlyMap<string, AmenityCatalogEntry>;
+  /** Codes already allowed by the published version the draft is based on (an inactive one may stay, as with a deprecated option). */
+  baseAllowedAmenityCodes?: readonly string[];
 };
 
 /**
@@ -255,6 +276,7 @@ export function validateFormContent(content: FormVersionContent, registry: Reado
   // (a repeated slot whose count attribute the form does not collect simply yields no slots).
   if (!SHIPPED_MEDIA_PROFILES.includes(content.mediaProfile)) add(FormDraftErrorCode.MEDIA_PROFILE_UNSUPPORTED, undefined, 'mediaProfile', { supported: [...SHIPPED_MEDIA_PROFILES] });
   if (typeof content.amenitiesEnabled !== 'boolean') add(FormDraftErrorCode.PROPERTY_INVALID, undefined, 'amenitiesEnabled');
+  validateAllowedAmenityCodes(content, context, add);
   if ((context.stage ?? 'publish') === 'publish' && content.fields.length === 0) add(FormDraftErrorCode.FIELDS_EMPTY, undefined, 'fields', { min: 1 });
   if (content.fields.length > PROPERTY_FORM_LIMITS.maxFields) add(FormDraftErrorCode.FIELDS_TOO_MANY, undefined, 'fields', { max: PROPERTY_FORM_LIMITS.maxFields });
 
@@ -275,6 +297,34 @@ export function validateFormContent(content: FormVersionContent, registry: Reado
 }
 
 type Add = (code: FormDraftErrorCode, fieldKey?: string, property?: string, params?: Record<string, unknown>) => void;
+
+/**
+ * Phase 11 type-aware amenities. Chosen invariant (documented, tested):
+ * `amenitiesEnabled: false` with a non-empty `allowedAmenityCodes` is
+ * rejected rather than silently canonicalized away — a restriction that can
+ * never take effect is more likely a mistake than an intentional no-op, and
+ * this codebase prefers to reject ambiguous input over guessing at it. An
+ * explicit empty array is always fine (it is consistent with "no amenities"
+ * either way). Membership (unknown/inactive) is only checked when the caller
+ * supplies `context.amenityCatalog`; an inactive code already present on the
+ * draft's base version may stay, mirroring how a deprecated option may stay.
+ */
+function validateAllowedAmenityCodes(content: FormVersionContent, context: ValidationContext, add: Add): void {
+  const codes = content.allowedAmenityCodes;
+  if (codes === undefined) return;
+  if (!Array.isArray(codes)) { add(FormDraftErrorCode.PROPERTY_INVALID, undefined, 'allowedAmenityCodes'); return; }
+  if (!content.amenitiesEnabled && codes.length > 0) add(FormDraftErrorCode.AMENITY_ALLOWED_LIST_NOT_APPLICABLE, undefined, 'allowedAmenityCodes');
+  const counts = countBy(codes);
+  const baseCodes = new Set(context.baseAllowedAmenityCodes ?? []);
+  for (const code of codes) {
+    if (typeof code !== 'string' || !code) { add(FormDraftErrorCode.PROPERTY_INVALID, undefined, `allowedAmenityCodes.${String(code)}`); continue; }
+    if ((counts.get(code) ?? 0) > 1) add(FormDraftErrorCode.AMENITY_CODE_DUPLICATE, undefined, `allowedAmenityCodes.${code}`);
+    if (!context.amenityCatalog) continue;
+    const entry = context.amenityCatalog.get(code);
+    if (!entry) add(FormDraftErrorCode.AMENITY_CODE_UNKNOWN, undefined, `allowedAmenityCodes.${code}`);
+    else if (!entry.isActive && !baseCodes.has(code)) add(FormDraftErrorCode.AMENITY_CODE_INACTIVE, undefined, `allowedAmenityCodes.${code}`);
+  }
+}
 
 function validateField(field: FieldDefinition, attribute: RegistryAttribute | undefined, base: FieldDefinition | undefined, add: Add): void {
   const key = String(field.key);
@@ -464,7 +514,7 @@ export type FormDiff = {
   fieldsChanged: Array<{ key: string; changes: FormChange[] }>;
 };
 
-const FORM_PROPERTIES = ['rendererVersion', 'mediaProfile', 'amenitiesEnabled', 'legacyWritable'] as const;
+const FORM_PROPERTIES = ['rendererVersion', 'mediaProfile', 'amenitiesEnabled', 'allowedAmenityCodes', 'legacyWritable'] as const;
 const COMPARED_FIELD_PROPERTIES = FIELD_DEFINITION_PROPERTIES.filter((property) => property !== 'key' && property !== 'validation' && property !== 'options');
 
 /**

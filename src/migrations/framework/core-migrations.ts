@@ -33,6 +33,7 @@ import { scanPhase8RegistrySeed, seedPhase8Registry } from '../029-non-residenti
 import { PHASE9_PROMOTED_FACET_KEYS, promotePhase9Facets, scanPhase9FacetPromotion } from '../030-phase9-facet-promotion';
 import { backfillPhase9FacetsBatch, scanPhase9FacetBackfill } from '../031-phase9-facet-backfill';
 import { scanPhase10RegistrySeed, seedPhase10Registry } from '../032-phase10-unit-floor-level-registry';
+import { scanExistingAmenityCatalog, scanPhase11AmenitySeed, seedPhase11Amenities } from '../033-phase11-amenity-catalog';
 
 function afterCheckpoint(checkpoint?: string): Record<string, unknown> {
   if (!checkpoint) return {};
@@ -1088,6 +1089,54 @@ export const phase10UnitFloorLevelRegistryMigration: MigrationDefinition = {
   },
 };
 
+/**
+ * Phase 11 (Type-Aware Amenities): seeds the 5 new engineering-approved
+ * amenity catalog entries (fire_safety, accessibility, storage_yard, fenced,
+ * drainage). Insert-only; the 7 pre-existing amenities are never touched.
+ * See ../033-phase11-amenity-catalog.ts.
+ */
+export const phase11AmenityCatalogMigration: MigrationDefinition = {
+  id: '033-phase11-amenity-catalog',
+  version: 1,
+  description: 'Phase 11: seed 5 new engineering-approved amenity catalog entries (fire_safety, accessibility, storage_yard, fenced, drainage); insert-only, existing amenities never modified',
+  dependencies: [],
+  rollback: {
+    kind: 'none',
+    remediation: 'Amenity codes may already be referenced by FormDefinitionVersions or properties; never delete them. Disable (isActive:false) via the Admin catalog instead of removing.',
+    restoreProcedure: 'Restore the verified pre-migration snapshot to a separate database and compare the amenities collection before any production remediation.',
+  },
+  async preflight({ db }) {
+    const { missing, matching, conflicting } = await scanPhase11AmenitySeed(db);
+    const existing = await scanExistingAmenityCatalog(db);
+    const admin = await db.collection('users').findOne({ systemRole: 'SUPER_ADMIN' }, { projection: { _id: 1 } });
+    return {
+      eligible: missing.length,
+      alreadyApplied: matching.length,
+      blockers: [
+        ...(conflicting.length ? [{ code: 'AMENITY_SEED_CONFLICT', message: `Amenity codes exist with a different identity: ${conflicting.join(', ')}` }] : []),
+        ...(!admin ? [{ code: 'AMENITY_SEED_NO_SUPER_ADMIN', message: 'No SUPER_ADMIN user exists to attribute the new amenities to' }] : []),
+      ],
+      summary: { missing, conflicting, existingAmenityCatalogCount: existing.count, existingAmenityCatalogExpected: existing.expected },
+    };
+  },
+  async migrateBatch({ db }) {
+    const inserted = await seedPhase11Amenities(db, new Date());
+    return { scanned: 1, modified: inserted, done: true };
+  },
+  async validate({ db }) {
+    const { missing, conflicting } = await scanPhase11AmenitySeed(db);
+    const existing = await scanExistingAmenityCatalog(db);
+    const problems = [...missing, ...conflicting];
+    return {
+      valid: problems.length === 0 && existing.count === existing.expected,
+      errors: [
+        ...problems.map((code) => ({ code: 'AMENITY_SEED_MISSING', message: `Amenity ${code} is missing or has a different identity` })),
+        ...(existing.count !== existing.expected ? [{ code: 'AMENITY_CATALOG_BASELINE_DRIFT', message: `Expected ${existing.expected} pre-existing amenities, found ${existing.count}` }] : []),
+      ],
+    };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
@@ -1109,6 +1158,7 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   phase9FacetPromotionMigration,
   phase9FacetBackfillMigration,
   phase10UnitFloorLevelRegistryMigration,
+  phase11AmenityCatalogMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {

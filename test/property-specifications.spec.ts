@@ -75,6 +75,7 @@ function service(propertyDoc: any, revisions: any[]) {
     options: {
       find: (filter: any) => chain(filter.group === 'payment_method' ? [] : catalog.filter((option) => filter.group.$in.includes(option.group) && filter.code.$in.includes(option.code))),
     },
+    amenities: { find: () => chain([]) },
     formVersions: { find: formVersionFind },
   });
   return { instance, formVersionFind };

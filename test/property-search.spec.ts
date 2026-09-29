@@ -185,6 +185,7 @@ function service(docs: Record<string, any>[], catalogOverrides: Record<string, u
       })),
     },
     options: emptyLookup,
+    amenities: emptyLookup,
     ...catalogOverrides,
   });
   return instance as PropertiesService;

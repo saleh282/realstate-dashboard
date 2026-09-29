@@ -112,28 +112,48 @@ export type FieldDefinition = {
   widget?: FormFieldWidget;
 };
 
-/** The content that defines a version; everything else is lifecycle metadata. */
+/**
+ * The content that defines a version; everything else is lifecycle metadata.
+ * `allowedAmenityCodes` (Phase 11, type-aware amenities) is optional: absent
+ * means "amenitiesEnabled alone decides, full active catalog when true" (the
+ * legacy behavior every version published before Phase 11 keeps exactly);
+ * present (including an explicit empty array) restricts selectable amenities
+ * to that list. It never applies when `amenitiesEnabled` is false.
+ */
 export type FormVersionContent = {
   rendererVersion: number;
   fields: FieldDefinition[];
   mediaProfile: MediaProfile;
   amenitiesEnabled: boolean;
+  allowedAmenityCodes?: string[];
 };
 
-/** sha256 hex of the canonical content (frozen §A3); identical content always hashes identically. */
+/**
+ * sha256 hex of the canonical content (frozen §A3); identical content always
+ * hashes identically. `allowedAmenityCodes` participates in the hash only
+ * when present: `canonicalize` drops `undefined` values, so a version that
+ * never sets it (every version published before Phase 11) hashes exactly as
+ * it always has.
+ */
 export function computeFormContentHash(content: FormVersionContent): string {
   return sha256(canonicalize({
     rendererVersion: content.rendererVersion,
     fields: content.fields,
     mediaProfile: content.mediaProfile,
     amenitiesEnabled: content.amenitiesEnabled,
+    allowedAmenityCodes: content.allowedAmenityCodes ?? undefined,
   }));
 }
 
-/** Frozen §H3: an old (pre-dynamic-form) client can still write this version. */
-export function computeLegacyWritable(content: Pick<FormVersionContent, 'fields' | 'mediaProfile' | 'amenitiesEnabled'>): boolean {
+/**
+ * Frozen §H3: an old (pre-dynamic-form) client can still write this version.
+ * A restricted amenity list is a Phase 11 (dynamic-form-only) concept an old
+ * client cannot honor, so a version that carries one is never legacy writable.
+ */
+export function computeLegacyWritable(content: Pick<FormVersionContent, 'fields' | 'mediaProfile' | 'amenitiesEnabled' | 'allowedAmenityCodes'>): boolean {
   return content.mediaProfile === 'residential_rooms'
     && content.amenitiesEnabled === true
+    && content.allowedAmenityCodes === undefined
     && content.fields.filter((field) => field.required).every((field) => LEGACY_ATTRIBUTE_KEYS.includes(field.key));
 }
 

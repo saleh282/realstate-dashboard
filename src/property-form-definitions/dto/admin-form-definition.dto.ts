@@ -16,6 +16,9 @@ import {
 } from 'class-validator';
 import { MEDIA_PROFILES, PROPERTY_FORM_LIMITS } from '../property-form-definition.constants';
 
+/** Transport cap on the allowed-amenities list; the domain validator enforces catalog membership. */
+const TRANSPORT_MAX_AMENITY_CODES = 100;
+
 /**
  * DPF-030..032 Admin request bodies. Only the frozen editable properties
  * exist here; with the global whitelist + forbidNonWhitelisted pipe, any
@@ -87,5 +90,7 @@ export class UpdateFormDraftDto {
   @IsArray() @ArrayMaxSize(TRANSPORT_MAX_FIELDS) @ValidateNested({ each: true }) @Type(() => FormFieldDto) fields: FormFieldDto[];
   @IsString() @IsIn(MEDIA_PROFILES) mediaProfile: string;
   @IsBoolean() amenitiesEnabled: boolean;
+  /** Absent means legacy behavior (full active catalog when enabled); present restricts selection to these codes. Duplicates are a domain-level error (AMENITY_CODE_DUPLICATE), not rejected at this transport layer, matching how field key duplicates are handled. */
+  @IsOptional() @IsArray() @ArrayMaxSize(TRANSPORT_MAX_AMENITY_CODES) @IsString({ each: true }) allowedAmenityCodes?: string[];
   @IsOptional() @IsString() @MaxLength(PROPERTY_FORM_LIMITS.changeNoteMaxLength) changeNote?: string;
 }

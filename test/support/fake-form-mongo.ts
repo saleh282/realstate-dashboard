@@ -1,6 +1,7 @@
 import mongoose, { Types } from 'mongoose';
 import { AuditLogService } from '../../src/audit/audit-log.service';
 import { AuditLogSchema } from '../../src/audit/schemas/audit-log.schema';
+import { AmenitySchema } from '../../src/amenities/schemas/amenity.schema';
 import { PropertyFormDefinitionSchema } from '../../src/property-form-definitions/schemas/property-form-definition.schema';
 import { PropertyFormDefinitionVersionSchema } from '../../src/property-form-definitions/schemas/property-form-definition-version.schema';
 import { matches, sortDocs, type Doc } from './memory-mongo';
@@ -16,15 +17,16 @@ import { matches, sortDocs, type Doc } from './memory-mongo';
  * remains the authority.
  */
 
-type Coll = 'definitions' | 'versions' | 'attributes' | 'types' | 'audit';
+type Coll = 'definitions' | 'versions' | 'attributes' | 'types' | 'amenities' | 'audit';
 type Txn = { id: number; active: boolean; snapshot: Record<Coll, Map<string, Doc>>; stamps: Map<string, number>; writes: Record<Coll, Map<string, Doc | null>> };
 export type WriteEvent = { collection: Coll; kind: 'insert' | 'update' | 'delete'; transaction: number | null; filter?: Doc; update?: Doc };
 
-const COLLS: Coll[] = ['definitions', 'versions', 'attributes', 'types', 'audit'];
+const COLLS: Coll[] = ['definitions', 'versions', 'attributes', 'types', 'amenities', 'audit'];
 const HeadModel = mongoose.models.FakeFormHead ?? mongoose.model('FakeFormHead', PropertyFormDefinitionSchema);
 const VersionModel = mongoose.models.FakeFormVersion ?? mongoose.model('FakeFormVersion', PropertyFormDefinitionVersionSchema);
+const AmenityModel = mongoose.models.FakeFormAmenity ?? mongoose.model('FakeFormAmenity', AmenitySchema);
 const AuditModel = mongoose.models.FakeFormAudit ?? mongoose.model('FakeFormAudit', AuditLogSchema);
-const SCHEMAS: Partial<Record<Coll, mongoose.Model<any>>> = { definitions: HeadModel, versions: VersionModel, audit: AuditModel };
+const SCHEMAS: Partial<Record<Coll, mongoose.Model<any>>> = { definitions: HeadModel, versions: VersionModel, amenities: AmenityModel, audit: AuditModel };
 
 export const writeConflict = (message = 'WriteConflict') => Object.assign(new Error(message), { code: 112, hasErrorLabel: (label: string) => label === 'TransientTransactionError' });
 const duplicateKey = (index: string) => Object.assign(new Error(`E11000 duplicate key error collection index: ${index}`), { code: 11000, keyPattern: {} });
@@ -39,7 +41,7 @@ export function clone<T>(value: T): T {
 const key = (value: unknown) => String(value).toLowerCase();
 
 export class FakeFormMongo {
-  readonly data: Record<Coll, Map<string, Doc>> = { definitions: new Map(), versions: new Map(), attributes: new Map(), types: new Map(), audit: new Map() };
+  readonly data: Record<Coll, Map<string, Doc>> = { definitions: new Map(), versions: new Map(), attributes: new Map(), types: new Map(), amenities: new Map(), audit: new Map() };
   /** Commit counter per document (`coll:id`), for the stale-snapshot check. */
   private readonly stamps = new Map<string, number>();
   private readonly locks = new Map<string, number>();
@@ -76,7 +78,7 @@ export class FakeFormMongo {
   }
 
   models() {
-    return { definitions: this.model('definitions'), versions: this.model('versions'), attributes: this.model('attributes'), types: this.model('types') };
+    return { definitions: this.model('definitions'), versions: this.model('versions'), attributes: this.model('attributes'), types: this.model('types'), amenities: this.model('amenities') };
   }
 
   /** The Phase-3/4 model names, for PropertyFormDefinitionsService and PropertiesService. */

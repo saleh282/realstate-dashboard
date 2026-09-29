@@ -51,6 +51,10 @@ export class PropertyWorld {
   readonly revisions: Doc[] = [];
   readonly propertyTypes: Doc[];
   readonly options: Doc[];
+  readonly amenityCatalog: Doc[] = [
+    { code: 'elevator', nameAr: 'مصعد', nameEn: 'Elevator', iconKey: 'elevator', category: 'service', isActive: true, usageCount: 0 },
+    { code: 'parking', nameAr: 'موقف سيارات', nameEn: 'Parking', iconKey: 'parking', category: 'facility', isActive: true, usageCount: 0 },
+  ];
   readonly writes: Array<{ collection: string; op: string; inTransaction: boolean; filter?: Doc; update?: Doc }> = [];
   inTransaction = false;
   transactions = 0;
@@ -102,7 +106,7 @@ export class PropertyWorld {
       governorates: this.model('governorates', [{ _id: new Types.ObjectId(), code: 'cairo', nameAr: 'القاهرة', isActive: true, usageCount: 0 }]),
       cities: this.model('cities', [{ _id: new Types.ObjectId(), nameAr: 'القاهرة', isActive: true, usageCount: 0 }], { ignoreKeys: ['governorateId'] }),
       options: this.model('options', this.options),
-      amenities: this.model('amenities', [{ code: 'elevator', nameAr: 'مصعد', isActive: true, usageCount: 0 }]),
+      amenities: this.model('amenities', this.amenityCatalog),
       properties: this.model('properties', this.properties, { schema: PropertyModel }),
       revisions: this.model('revisions', this.revisions, { schema: RevisionModel, documents: true }),
       ...this.forms.models(),

@@ -63,6 +63,14 @@ export function inputOf(fields: readonly FieldDefinition[]): DraftFieldInput[] {
   return fields.map(({ dataType: _d, unit: _u, optionSource: _o, catalogGroup: _c, ...editable }) => JSON.parse(JSON.stringify(editable)));
 }
 
+/** Phase 11: a small amenity catalog fixture — mirrors the shape (not the exact codes) of the production baseline catalog, plus one inactive entry for allowedAmenityCodes tests. */
+export const FIXTURE_AMENITIES = [
+  { code: 'elevator', nameAr: 'مصعد', nameEn: 'Elevator', iconKey: 'elevator', category: 'service', isActive: true, sortOrder: 1, usageCount: 0, createdBy: new Types.ObjectId() },
+  { code: 'parking', nameAr: 'موقف سيارات', nameEn: 'Parking', iconKey: 'parking', category: 'facility', isActive: true, sortOrder: 2, usageCount: 0, createdBy: new Types.ObjectId() },
+  { code: 'security', nameAr: 'أمن', nameEn: 'Security', iconKey: 'security', category: 'service', isActive: true, sortOrder: 3, usageCount: 0, createdBy: new Types.ObjectId() },
+  { code: 'retired_amenity', nameAr: 'ميزة متوقفة', nameEn: 'Retired', iconKey: 'other', category: 'feature', isActive: false, sortOrder: 4, usageCount: 0, createdBy: new Types.ObjectId() },
+];
+
 export function formAdminWorld(options: { typeIds?: string[]; withoutHead?: string[] } = {}) {
   const mongo = new FakeFormMongo();
   const typeIds = options.typeIds ?? [IDS.apartment, IDS.villa];
@@ -76,6 +84,7 @@ export function formAdminWorld(options: { typeIds?: string[]; withoutHead?: stri
     type(UNMAPPED_TYPE, 'unmapped', { purposeCategoryId: undefined }),
   ]);
   mongo.seed('attributes', [...LEGACY_PROPERTY_ATTRIBUTE_SEED.map((seed) => registryDocument(seed, NOW)), ...FIXTURE_ATTRIBUTES]);
+  mongo.seed('amenities', FIXTURE_AMENITIES.map((amenity) => ({ ...amenity, createdAt: NOW, updatedAt: NOW })));
   const legacy: Record<string, { definitionId: Types.ObjectId; versionId: Types.ObjectId }> = {};
   for (const typeId of typeIds) {
     const definitionId = new Types.ObjectId();
@@ -85,7 +94,7 @@ export function formAdminWorld(options: { typeIds?: string[]; withoutHead?: stri
     legacy[typeId] = { definitionId, versionId };
   }
   const models = mongo.models();
-  const service = new AdminPropertyFormDefinitionsService(models.definitions as any, models.versions as any, models.attributes as any, models.types as any, mongo.audit, mongo.connection as any);
+  const service = new AdminPropertyFormDefinitionsService(models.definitions as any, models.versions as any, models.attributes as any, models.types as any, models.amenities as any, mongo.audit, mongo.connection as any);
   const publicService = new PropertyFormDefinitionsService(models.definitions as any, models.versions as any);
   const actor = { userId: ACTORS.superAdmin, ip: '127.0.0.1' };
   return { mongo, service, publicService, legacy, actor };

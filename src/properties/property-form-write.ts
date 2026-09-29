@@ -49,6 +49,8 @@ export type FormVersionRecord = {
   fields: FieldDefinition[];
   mediaProfile: MediaProfile;
   amenitiesEnabled: boolean;
+  /** Phase 11 type-aware amenities: absent means the legacy full-active-catalog-when-enabled behavior. */
+  allowedAmenityCodes?: string[];
   legacyWritable?: boolean;
   contentHash?: string;
 };
@@ -113,6 +115,33 @@ export const amenitiesNotEnabled = () => new BadRequestException({
   code: PropertyErrorCode.AMENITIES_NOT_ENABLED,
 });
 
+export const amenityNotAllowed = (amenityCodes: readonly string[]) => new BadRequestException({
+  message: 'بعض المميزات المختارة غير متاحة لهذا النوع من العقارات',
+  code: PropertyErrorCode.AMENITY_NOT_ALLOWED,
+  details: { amenityCodes },
+});
+
+/**
+ * Phase 11 type-aware amenities, checked at create/save, submit and approval
+ * alike (the same three points `amenitiesEnabled` was already checked at).
+ * `allowedAmenityCodes` absent is the legacy behavior every version published
+ * before Phase 11 has: once enabled, the full active catalog is allowed (the
+ * catalog-membership/active check happens elsewhere, unchanged). Present
+ * (including an explicit empty array) restricts selection to exactly those
+ * codes. A primary-type/version change is covered automatically: this is
+ * always checked against the version actually resolved for the write, so a
+ * selection valid under a previous type's or version's list is rejected here
+ * the moment it no longer belongs to the current one — nothing needs to be
+ * separately "cleared" server-side.
+ */
+export function assertAmenitySelection(form: Pick<FormVersionRecord, 'amenitiesEnabled' | 'allowedAmenityCodes'>, amenityCodes: readonly string[]): void {
+  if (!amenityCodes.length) return;
+  if (!form.amenitiesEnabled) throw amenitiesNotEnabled();
+  if (form.allowedAmenityCodes === undefined) return;
+  const disallowed = amenityCodes.filter((code) => !form.allowedAmenityCodes!.includes(code));
+  if (disallowed.length) throw amenityNotAllowed(disallowed);
+}
+
 /**
  * Frozen §B8 409 (amendment §10: plus the primary's `purposeSubcategoryId`).
  * Carries everything a client needs to fetch the current version and remap:
@@ -167,12 +196,13 @@ export function isListingEnabled(typeId: unknown, state: FormState): boolean {
 }
 
 /** Recomputes the frozen §A3 content hash from a stored version document. */
-export function storedFormContentHash(version: Pick<FormVersionRecord, 'rendererVersion' | 'fields' | 'mediaProfile' | 'amenitiesEnabled'>): string {
+export function storedFormContentHash(version: Pick<FormVersionRecord, 'rendererVersion' | 'fields' | 'mediaProfile' | 'amenitiesEnabled' | 'allowedAmenityCodes'>): string {
   return computeFormContentHash({
     rendererVersion: version.rendererVersion!,
     fields: version.fields,
     mediaProfile: version.mediaProfile,
     amenitiesEnabled: version.amenitiesEnabled,
+    allowedAmenityCodes: version.allowedAmenityCodes,
   });
 }
 

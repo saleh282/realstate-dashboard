@@ -419,6 +419,7 @@ describe('DPF-005 reads: legacy fallback, projections and anchoring', () => {
       ]),
       purposeCategories: lookup([{ _id: new Types.ObjectId(PURPOSE_A), nameAr: 'سكني' }]),
       options: lookup([]),
+      amenities: lookup([]),
       ...extra,
     });
     return service;
