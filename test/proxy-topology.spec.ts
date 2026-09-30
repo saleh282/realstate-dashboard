@@ -122,7 +122,7 @@ describe('AppThrottlerGuard tracker', () => {
 describe('production proxy configuration', () => {
   const production = {
     NODE_ENV: 'production',
-    MONGO_URI: 'mongodb://db/x', DEPLOYMENT_ENV: 'production', DB_ENV_ALLOWLIST: 'db/x',
+    MONGO_URI: 'mongodb://db/x', DEPLOYMENT_ENV: 'production', DB_ENV_ALLOWLIST: 'db/x', REALTIME_ENABLED: 'false',
     JWT_ACCESS_SECRET: 'a'.repeat(40),
     JWT_REFRESH_SECRET: 'b'.repeat(40),
     JWT_ACCESS_EXPIRES_IN: '15m',

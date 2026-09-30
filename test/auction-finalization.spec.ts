@@ -571,3 +571,14 @@ describe('AUCTION_FINALIZED domain event — transactional outbox (MAZAD-031)', 
     expect(String(auction(mongo).winnerAccountId)).toBe(CAROL);
   });
 });
+
+describe('outbox wake-up after commit (realtime hardening)', () => {
+  it('finalizing notifies once, with AUCTION_FINALIZED already committed; a repeat (already finalized) does not', async () => {
+    const { service, mongo } = build({ auctions: [{ bids: [bidRow(AUCTION, 1, ALICE, 100_000)] }] });
+    const seenAtNotify: number[] = [];
+    (service as any).wakeup = { notify: () => seenAtNotify.push(mongo.outbox.events('AUCTION_FINALIZED').length) };
+    await service.finalize(AUCTION);
+    await service.finalize(AUCTION);
+    expect(seenAtNotify).toEqual([1]);
+  });
+});

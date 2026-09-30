@@ -136,7 +136,7 @@ describe('payment provider selection is fail-closed and impossible to enable in 
   it('a full production configuration with the fake provider fails startup validation', () => {
     const production = {
       MONGO_URI: 'mongodb://db.prod.example/mazad', JWT_ACCESS_SECRET: 'a'.repeat(40), JWT_REFRESH_SECRET: 'b'.repeat(40), JWT_ACCESS_EXPIRES_IN: '15m', JWT_REFRESH_EXPIRES_IN: '7d',
-      NODE_ENV: 'production', DEPLOYMENT_ENV: 'production', DB_ENV_ALLOWLIST: 'db.prod.example/mazad', TRUST_PROXY: 'false',
+      NODE_ENV: 'production', DEPLOYMENT_ENV: 'production', DB_ENV_ALLOWLIST: 'db.prod.example/mazad', TRUST_PROXY: 'false', REALTIME_ENABLED: 'false',
       MAIL_HOST: 'smtp.example.com', MAIL_PORT: '587', MAIL_SECURE: 'false', MAIL_USER: 'u', MAIL_PASS: 'p', MAIL_FROM: 'no-reply@example.com', MAIL_TLS_REJECT_UNAUTHORIZED: 'true',
       CLOUDINARY_CLOUD_NAME: 'c', CLOUDINARY_API_KEY: 'k', CLOUDINARY_API_SECRET: 's', CORS_ORIGINS: 'https://admin.example.com',
       GEOCODING_USER_AGENT: 'Mazad/1.0', GEOCODING_PROVIDER_BASE_URL: 'https://geocoder.example.com',

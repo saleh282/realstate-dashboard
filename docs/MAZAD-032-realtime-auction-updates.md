@@ -36,6 +36,33 @@ What the code does about it (correctness first, no broker invented):
    `REALTIME_TOPOLOGY=single_instance` is declared (`environment.validation.ts`).
    `single_instance` is the only accepted value until a shared adapter exists.
 
+4. **Staging and production must say it explicitly** (realtime hardening): with
+   `DEPLOYMENT_ENV=staging|production`, `REALTIME_ENABLED` must be set to `true` or
+   `false` — an unset value refuses to start. The code default stays OFF so a
+   developer process (whose `.env` may point at a shared database) never enables
+   realtime, writes the activation cutover or claims `realtime` deliveries by accident.
+5. **Visible state.** At startup every instance logs one `realtime_configuration`
+   line (enabled, topology, path, deployment, dispatcher/lifecycle intervals); it is a
+   `warn` on a protected deployment running without realtime. `GET /health/ready`
+   reports `checks.realtime: enabled | disabled | cutover_pending` for information
+   only — a replica with realtime off is a normal state and stays ready.
+
+### Supported V1 deployment (the only one)
+
+| Requirement | Why |
+|---|---|
+| Exactly **one** backend instance with `REALTIME_ENABLED=true` and `REALTIME_TOPOLOGY=single_instance`; every other replica `REALTIME_ENABLED=false` | the room registry is in-process and each outbox event has one `realtime` claimant |
+| Route **every** `/api/v1/realtime` WebSocket upgrade to that instance (plain HTTP may go to any replica) | a socket on another replica is refused with `4503` |
+| The proxy/ingress preserves `Upgrade` / `Connection` headers (HTTP/1.1 upgrade) | otherwise no WebSocket is established |
+| Idle timeout on the proxy ≥ 60 s | server heartbeat 30 s, client ping 10 s; a shorter idle timeout drops quiet sockets |
+| `TRUST_PROXY` lists the proxy | per-address socket limits key on the real client address, like HTTP throttling |
+| Deploy the realtime instance **stop-then-start (recreate)**, never overlapping two realtime replicas | during an overlap the old and new process both claim events; clients of the one that did not claim an event miss it (they recover on reconnect) |
+| `OUTBOX_DISPATCHER_INTERVAL_SECONDS=1` and `AUCTION_LIFECYCLE_INTERVAL_SECONDS=5` on the realtime instance | see "Latency" |
+
+During a restart of the realtime instance clients get `1001`, reconnect with back-off,
+resync over HTTP, and the open auction screen polls `bid-state` meanwhile (see
+"Client freshness fallback"). No Redis/shared fan-out exists or is implied.
+
 The code cannot detect a second realtime-enabled replica; that is an operator
 guarantee. **Release-qualification / distributed-runtime item:** shared
 pub/sub fan-out (so any replica can consume and every replica can serve), or a
@@ -167,6 +194,33 @@ bid that extends emits `AUCTION_END_EXTENDED` (version *n*) then `BID_ACCEPTED`
 `extended`). Clients display the countdown from `currentEndAt` and the frame's
 `serverTime`; they never compute an extension and never use the device clock as authority.
 
+## Latency (realtime hardening)
+
+Path of one bid: the bid transaction commits the ledger row, the auction counters and
+`BID_ACCEPTED` (and `AUCTION_END_EXTENDED` when it extends) together → the outbox
+dispatcher claims the `realtime` delivery → the consumer re-checks visibility (rooms with
+members only) and hands the frame to every subscribed socket → the client applies it.
+
+- **Wake-up.** After a successful COMMIT, the auction producers (bid acceptance,
+  activation, expiry, seller/Admin cancellation, supersede-on-revision, standalone
+  extension, finalization) call `OutboxWakeup.notify()`. The dispatcher worker then
+  starts a pass at once; a notification that arrives during a running pass marks
+  "run again", so an event committed after that pass scanned is not left for the next
+  tick. This is only a hint: nothing is emitted before commit, a lost/duplicated hint
+  changes nothing about what is delivered (the DB claim stays the only guard, the
+  periodic tick stays the guarantee), and a commit on another replica is picked up by
+  the realtime instance's periodic tick.
+- **Periodic tick.** Code default `OUTBOX_DISPATCHER_INTERVAL_SECONDS=5` (unchanged, all
+  consumers); set `1` on the realtime instance (supported minimum; idle cost ≈ two indexed
+  queries per consumer per second).
+- **Lifecycle.** Activation/end transitions come from the lifecycle worker (default 30 s,
+  minimum 5 s); set `AUCTION_LIFECYCLE_INTERVAL_SECONDS=5` on the realtime instance so
+  "ended" follows `currentEndAt` within seconds. Bids are always judged on server time.
+- **Measured** (engineering evidence, local loopback replica set, not an SLA): with the
+  wake-up, commit → `PROCESSED` 17–43 ms for every event type, and a bid accepted for
+  client A reached client B's screen in 38–44 ms (`test/e2e/realtime-two-client-driver.ts`
+  + the Flutter E2E).
+
 ## Visibility
 
 Realtime never shows more than the HTTP contract.
@@ -191,6 +245,16 @@ Realtime never shows more than the HTTP contract.
   which will hide the auction. If the product later makes COMPLETED public,
   realtime follows automatically because it uses the same gate.
 - No seller/Admin private realtime view exists. Not invented here.
+- **Outcome / resync visibility** (realtime hardening) is separate from DISCOVERY.
+  `GET /api/v1/auctions/:id/outcome` answers for the public statuses AND the terminal ones
+  (`ended_no_bids`, `completed`, `cancelled`), with the same anchored-property check (a
+  property that stopped being public ⇒ 404, fail closed). It returns only
+  `{ auctionId, status, currentEndAt, acceptedBidCount, cancelledAt?, finalizedAt?,
+  result?: { winningBidSequence, winningBidAmountMinor, currency } }` + `serverTime` —
+  the facts the terminal frames already carried; never identities, payment/provider data,
+  cancellation reason/code/source, Admin notes or review data. Discovery (`GET /auctions`
+  and its status filter), `GET /auctions/:id`, `/bid-state`, `/bids` and realtime
+  subscription are unchanged: terminal auctions stay out of them. No time limit in V1.
 
 ## Terminal behavior
 
@@ -370,6 +434,28 @@ exception. A crash between socket emit and acknowledgement redelivers after the 
 5. On any disconnect/reconnect, `closed`, a `streamVersion` gap, an unrecognised state,
    or any doubt → go back to step 1. A `terminal` event ends the subscription; later
    reads follow HTTP visibility.
+6. **Missed terminal event.** If step 1 answers 404 while the client still holds an open
+   auction (it was offline when `AUCTION_CANCELLED` / `AUCTION_ENDED_NO_BIDS` /
+   `AUCTION_FINALIZED` went out, the subscription is refused because the room already
+   closed, or its countdown ran out), read `GET /auctions/:id/outcome` and merge it
+   monotonically. Only if that is 404 too is the auction "no longer available".
+
+### Client freshness fallback and clock (Flutter, realtime hardening)
+
+- While the open auction screen's socket is not live for more than 5 s it polls
+  `GET /auctions/:id/bid-state` only: every 10 s while ACTIVE, every 5 s in the last 2
+  minutes, every 30 s while SCHEDULED / pending close; ±20 % jitter; errors back off
+  10 → 20 → 40 → 60 s; a 429 waits `Retry-After`, at least 60 s. Single-flight, skipped
+  while a full resync runs, stopped when the socket is live, the auction is terminal,
+  the app is suspended or the screen closes. Results merge monotonically (count, status
+  rank and end time never go backwards), so an older HTTP answer never overwrites newer
+  socket state. It never writes. The route allows 120 requests/min per address
+  (`BID_STATE_THROTTLE`); every other route keeps the global policy.
+- The client's server clock is `last HTTP server sample + monotonic time since`; the
+  phone's wall clock is read once and never again, so changing the device time cannot
+  move a countdown or close bidding early. A frame's `serverTime` is only a drift check
+  (it triggers an HTTP re-calibration), never a clock sample.
+- The client pings every 10 s: a silently dead mobile socket is noticed within ~20 s.
 
 The subscription acknowledgement is deliberately not a snapshot.
 
@@ -401,10 +487,15 @@ Payment and managed-marketing events are not subscribed to.
 
 ## Known limits and release-qualification items (not claimed solved)
 
-Automated tests use an in-memory MODEL of Mongo and localhost sockets. Still required
-against real infrastructure:
+Automated unit/integration tests use an in-memory MODEL of Mongo and localhost sockets. The
+realtime-hardening two-client E2E (`test/e2e/realtime-two-client-driver.ts` + the Flutter
+`test/e2e/realtime_two_client_e2e_test.dart`) ran against a disposable loopback MongoDB 8.0
+replica set with the real AppModule and workers, and covered: real outbox claiming by the
+`realtime` consumer, the activation cutover being established on real MongoDB, activation →
+bids → anti-sniping extension → cancellation, and activation → bid → ending → finalization
+by the real workers, each event delivered exactly once to the consumer, in order. Still
+required against real infrastructure:
 
-- `realtime` consumer + **real MongoDB** outbox claiming (incl. the per-consumer scan index).
 - Reconnect **during bid bursts**; anti-sniping event ordering under load.
 - **Process crash between socket emit and outbox acknowledgement** (duplicate) for real.
 - Lifecycle/finalization event ordering with real workers.

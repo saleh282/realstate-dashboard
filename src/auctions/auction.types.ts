@@ -50,5 +50,20 @@ export const PUBLIC_AUCTION_STATUSES: readonly AuctionStatus[] = [
   AuctionStatus.ENDED_PENDING_CLOSE,
 ];
 
+/**
+ * Statuses whose OUTCOME may be read directly by id (`GET /auctions/:id/outcome`,
+ * realtime hardening): the public ones plus the terminal ones. This is DIRECT
+ * RESYNC visibility, never DISCOVERY visibility — the public list, its status
+ * filter, `GET /auctions/:id`, `/bid-state`, `/bids` and realtime subscription keep
+ * using `PUBLIC_AUCTION_STATUSES`. It exists so a client that missed a terminal
+ * realtime event can still learn the authoritative end of the auction's public life.
+ */
+export const OUTCOME_READABLE_AUCTION_STATUSES: readonly AuctionStatus[] = [
+  ...PUBLIC_AUCTION_STATUSES,
+  AuctionStatus.ENDED_NO_BIDS,
+  AuctionStatus.COMPLETED,
+  AuctionStatus.CANCELLED,
+];
+
 /** What `GET /auctions` shows when no `status` filter is given: auctions still open to browsing or bidding. */
 export const DEFAULT_PUBLIC_LIST_STATUSES: readonly AuctionStatus[] = [AuctionStatus.SCHEDULED, AuctionStatus.ACTIVE];

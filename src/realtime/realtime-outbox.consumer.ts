@@ -84,6 +84,8 @@ export class RealtimeOutboxConsumer implements OutboxEventConsumer, OnModuleInit
 
   onModuleInit(): void {
     this.registry.register(this);
+    const { level, entry } = this.settings.startupSummary();
+    this.logger[level](JSON.stringify(entry));
   }
 
   async deliver(event: OutboxDeliveryEvent): Promise<void> {

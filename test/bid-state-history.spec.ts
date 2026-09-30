@@ -215,3 +215,90 @@ describe('auction visibility is enforced for bid reads (MAZAD-029)', () => {
     expect(text).not.toMatch(/WebSocket|EventSource|@Sse|winner|finalize|outbox/i);
   });
 });
+
+describe('public outcome — direct resync visibility (realtime hardening)', () => {
+  const SECRET_WINNER = '64b000000000000000000a99';
+  const SELLER = '64b000000000000000000a10';
+  const FINALIZED_AT = new Date('2026-05-08T10:01:00Z');
+  const CANCELLED_AT = new Date('2026-05-03T09:00:00Z');
+  /** Every private field an auction document can carry; none may reach the outcome. */
+  const sensitive = {
+    winnerAccountId: oid(SECRET_WINNER), winningBidId: oid('64b000000000000000000d01'), winnerAccountTypeSnapshot: 'broker',
+    winningBidAcceptedAt: NOW, cancellationReason: 'SECRET-REASON', cancellationReasonCode: 'SECRET_CODE', cancelledBySource: 'ADMIN',
+    cancellationInternalNote: 'SECRET-ADMIN-NOTE', cancelledByActorId: oid('64b000000000000000000a77'), createdByActorId: oid('64b000000000000000000a78'),
+    approvedByActorId: oid('64b000000000000000000a79'), activationHold: { code: 'SECRET_HOLD', at: NOW }, originRequestId: oid('64b000000000000000000e01'),
+    entryFee: { amountMinor: 25_000, currency: 'EGP', configuredByActorId: oid('64b000000000000000000a80'), configuredAt: NOW },
+    entryPaymentAttemptCount: 3,
+  };
+  const completed = { status: AuctionStatus.COMPLETED, acceptedBidCount: 2, winningBidSequence: 2, winningBidAmountMinor: 150_000, completedAt: FINALIZED_AT };
+
+  it.each([
+    [AuctionStatus.SCHEDULED, true],
+    [AuctionStatus.ACTIVE, true],
+    [AuctionStatus.ENDED_PENDING_CLOSE, true],
+    [AuctionStatus.ENDED_NO_BIDS, true],
+    [AuctionStatus.COMPLETED, true],
+    [AuctionStatus.CANCELLED, true],
+  ])('status matrix: %s → outcome readable=%s (property public)', async (status, readable) => {
+    const extra = status === AuctionStatus.COMPLETED ? { ...completed, ...sensitive } : { status, acceptedBidCount: 0, ...sensitive };
+    const { service } = build({ auction: extra });
+    const code = await codeOf(() => service.getPublicOutcome(AUCTION));
+    expect(code === undefined).toBe(readable);
+  });
+
+  it.each([AuctionStatus.SCHEDULED, AuctionStatus.ACTIVE, AuctionStatus.ENDED_PENDING_CLOSE, AuctionStatus.ENDED_NO_BIDS, AuctionStatus.COMPLETED, AuctionStatus.CANCELLED])(
+    'fails closed when the anchored property revision is no longer public (%s)', async (status) => {
+      const { service } = build({ auction: { status, ...(status === AuctionStatus.COMPLETED ? completed : {}) }, propertyVisible: false });
+      expect(await codeOf(() => service.getPublicOutcome(AUCTION))).toBe(AuctionErrorCode.PUBLIC_UNAVAILABLE);
+    });
+
+  it('a missing auction is a 404, like every other public read', async () => {
+    const ctx = build();
+    (ctx.service as any).queries.auctions = { findById: () => ({ lean: () => ({ exec: async () => null }) }) };
+    const error: any = await ctx.service.getPublicOutcome(AUCTION).catch((e) => e);
+    expect(error).toBeInstanceOf(NotFoundException);
+  });
+
+  it('terminal statuses stay hidden from every OTHER public read (discovery/detail/bid-state/bids unchanged)', async () => {
+    for (const status of [AuctionStatus.ENDED_NO_BIDS, AuctionStatus.COMPLETED, AuctionStatus.CANCELLED]) {
+      const { service } = build({ auction: { status, ...(status === AuctionStatus.COMPLETED ? completed : {}) } });
+      expect(await codeOf(() => service.getPublicBidState(AUCTION))).toBe(AuctionErrorCode.PUBLIC_UNAVAILABLE);
+      expect(await codeOf(() => service.getPublicBidHistory(AUCTION))).toBe(AuctionErrorCode.PUBLIC_UNAVAILABLE);
+      expect(await codeOf(() => (service as any).queries.getPublic(AUCTION))).toBe(AuctionErrorCode.PUBLIC_UNAVAILABLE);
+    }
+  });
+
+  it('COMPLETED: exactly the identity-free result, finalizedAt and the counters', async () => {
+    const { service } = build({ bids: [{ bidder: ALICE, amount: 100_000 }, { bidder: SECRET_WINNER, amount: 150_000 }], auction: { ...completed, ...sensitive } });
+    const body = await service.getPublicOutcome(AUCTION);
+    expect(body).toEqual({
+      outcome: {
+        auctionId: AUCTION, status: AuctionStatus.COMPLETED, currentEndAt: END, acceptedBidCount: 2, finalizedAt: FINALIZED_AT,
+        result: { winningBidSequence: 2, winningBidAmountMinor: 150_000, currency: 'EGP' },
+      },
+      serverTime: NOW,
+    });
+  });
+
+  it('CANCELLED: status, cancelledAt and counters — never the reason, code, source, note or actor', async () => {
+    const { service } = build({ bids: [{ bidder: ALICE, amount: 100_000 }], auction: { status: AuctionStatus.CANCELLED, cancelledAt: CANCELLED_AT, ...sensitive, acceptedBidCount: 1 } });
+    const { outcome } = await service.getPublicOutcome(AUCTION);
+    expect(outcome).toEqual({ auctionId: AUCTION, status: AuctionStatus.CANCELLED, currentEndAt: END, acceptedBidCount: 1, cancelledAt: CANCELLED_AT });
+  });
+
+  it('ENDED_NO_BIDS: status, end and a zero count only', async () => {
+    const { service } = build({ auction: { status: AuctionStatus.ENDED_NO_BIDS, acceptedBidCount: 0, ...sensitive } });
+    expect((await service.getPublicOutcome(AUCTION)).outcome).toEqual({ auctionId: AUCTION, status: AuctionStatus.ENDED_NO_BIDS, currentEndAt: END, acceptedBidCount: 0 });
+  });
+
+  it('never emits identities, payment/provider data, cancellation details, Admin notes or review data (any status)', async () => {
+    for (const extra of [{ ...completed }, { status: AuctionStatus.CANCELLED, cancelledAt: CANCELLED_AT }, { status: AuctionStatus.ENDED_NO_BIDS }, { status: AuctionStatus.ACTIVE }]) {
+      const { service } = build({ auction: { ...sensitive, ...extra } });
+      const text = JSON.stringify(await service.getPublicOutcome(AUCTION));
+      expect(text).not.toMatch(new RegExp([SECRET_WINNER, SELLER, 'SECRET', 'winner', 'bidder', 'advertiser', 'Actor', 'reason', 'Note', 'cancelledBy', 'activationHold',
+        'entryFee', 'payment', 'provider', 'originRequest', 'property', 'approved', '64b000000000000000000d01', '64b000000000000000000e01'].join('|'), 'i'));
+      const keys = Object.keys(JSON.parse(text).outcome).sort();
+      expect(keys.every((k) => ['acceptedBidCount', 'auctionId', 'cancelledAt', 'currentEndAt', 'finalizedAt', 'result', 'status'].includes(k))).toBe(true);
+    }
+  });
+});

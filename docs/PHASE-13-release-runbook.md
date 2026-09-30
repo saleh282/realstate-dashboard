@@ -104,6 +104,13 @@ The V1 backend is a **single instance**. Deliberately not addressed: shared rate
 process), multi-instance realtime (exactly one instance may serve realtime), cursor pagination, a media-profile
 registry entity, auction denormalization. `TRUST_PROXY` stays generic (state your topology explicitly).
 
+Auction realtime (realtime hardening): staging/production refuse to start unless `REALTIME_ENABLED` is set explicitly.
+Set it `true` (with `REALTIME_TOPOLOGY=single_instance`, `OUTBOX_DISPATCHER_INTERVAL_SECONDS=1`,
+`AUCTION_LIFECYCLE_INTERVAL_SECONDS=5`) on exactly one instance, route every `/api/v1/realtime` upgrade to it, and
+redeploy that instance stop-then-start. Check `realtime_configuration` in its startup log and
+`checks.realtime: enabled` on `/health/ready`. Full requirements: `docs/MAZAD-032-realtime-auction-updates.md`,
+"Supported V1 deployment".
+
 ## 8. Client readiness
 
 * **Flutter:** `--dart-define=APP_ENV=production --dart-define=API_BASE_URL=https://…` (release builds reject `development`

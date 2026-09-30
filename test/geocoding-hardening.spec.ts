@@ -151,7 +151,7 @@ describe('geocoding configuration', () => {
 
 describe('production geocoder requirements', () => {
   const production = {
-    NODE_ENV: 'production', MONGO_URI: 'mongodb://db/x', DEPLOYMENT_ENV: 'production', DB_ENV_ALLOWLIST: 'db/x',
+    NODE_ENV: 'production', MONGO_URI: 'mongodb://db/x', DEPLOYMENT_ENV: 'production', DB_ENV_ALLOWLIST: 'db/x', REALTIME_ENABLED: 'false',
     JWT_ACCESS_SECRET: 'a'.repeat(40), JWT_REFRESH_SECRET: 'b'.repeat(40),
     JWT_ACCESS_EXPIRES_IN: '15m', JWT_REFRESH_EXPIRES_IN: '7d',
     MAIL_HOST: 'smtp.example.com', MAIL_PORT: '587', MAIL_SECURE: 'false', MAIL_USER: 'u', MAIL_PASS: 'p',

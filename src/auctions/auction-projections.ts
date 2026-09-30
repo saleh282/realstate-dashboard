@@ -123,3 +123,28 @@ export function toAdminAuction(item: AuctionRecord) {
     updatedAt: item.updatedAt,
   };
 }
+
+/**
+ * The public OUTCOME of an auction (realtime hardening: `GET /auctions/:id/outcome`).
+ * The authoritative answer a client reads when it may have missed a terminal realtime
+ * event (`AUCTION_CANCELLED` / `AUCTION_ENDED_NO_BIDS` / `AUCTION_FINALIZED`). It
+ * carries exactly the facts those frames already carried to every subscriber — and
+ * nothing else: no property, no identities (bidder, winner, seller, actors), no
+ * payment/provider data, no cancellation reason or code, no Admin note, no review data.
+ * Named fields only: a field added to the schema is invisible here until added on purpose.
+ */
+export function toPublicOutcome(item: AuctionRecord) {
+  const status = item.status as AuctionStatus;
+  const winning = outcome(item);
+  return {
+    auctionId: item._id.toString(),
+    status,
+    currentEndAt: item.currentEndAt,
+    acceptedBidCount: item.acceptedBidCount ?? 0,
+    ...(status === AuctionStatus.CANCELLED && item.cancelledAt ? { cancelledAt: item.cancelledAt } : {}),
+    ...(winning ? {
+      finalizedAt: winning.finalizedAt,
+      result: { winningBidSequence: winning.winningBidSequence, winningBidAmountMinor: winning.winningBidAmountMinor, currency: winning.currency },
+    } : {}),
+  };
+}

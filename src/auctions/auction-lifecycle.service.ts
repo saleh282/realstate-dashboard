@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -16,6 +16,7 @@ import {
   auctionEndedPendingCloseEvent,
 } from '../outbox/outbox-events';
 import { OutboxService } from '../outbox/outbox.service';
+import { OutboxWakeup } from '../outbox/outbox-wakeup';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { AuctionActivationGate } from './auction-activation-gate';
 import { AUCTION_BID_EXISTENCE_PORT, AuctionBidExistencePort } from './auction-bid-existence.port';
@@ -72,6 +73,8 @@ export class AuctionLifecycleService {
     private readonly outbox: OutboxService,
     private readonly activationGate: AuctionActivationGate,
     private readonly participants: AuctionParticipantsReader,
+    /** Realtime hardening: after-commit dispatch hint (optimisation only; the periodic dispatcher is the guarantee). */
+    @Optional() private readonly wakeup?: OutboxWakeup,
   ) {}
 
   // -----------------------------------------------------------------------
@@ -141,6 +144,7 @@ export class AuctionLifecycleService {
       );
       if (outcome.kind === 'NONE') break;
       if (outcome.kind === 'RACED') continue;
+      if (outcome.kind === 'ACTIVATED') this.wakeup?.notify(); // committed with its AUCTION_ACTIVATED event
       if (outcome.kind === 'HELD') {
         held += 1;
         await this.audit.logSystemAction(AuditAction.AUCTION_ACTIVATION_HELD, outcome.doc._id.toString(), 'auction activation held by the activation gate', { code: outcome.holdCode, heldAt: outcome.now });
@@ -218,6 +222,7 @@ export class AuctionLifecycleService {
       );
       if (outcome.kind === 'NONE') break;
       if (outcome.kind === 'RACED') continue;
+      this.wakeup?.notify(); // committed with its AUCTION_ENDED_* event
       // Best-effort telemetry, unchanged from MAZAD-024: only after the transition and its event committed.
       if (outcome.to === AuctionStatus.ENDED_NO_BIDS) {
         endedNoBids += 1;
@@ -434,6 +439,7 @@ export class AuctionLifecycleService {
           participantAccountIds,
         }), session);
       });
+      this.wakeup?.notify(); // `withTransaction` resolved: the cancellation and its AUCTION_CANCELLED event committed
       return updated!;
     } finally {
       await session.endSession();
@@ -485,6 +491,7 @@ export class AuctionLifecycleService {
       (session) => this.extendWithinTransaction(auctionId, bidAt, session),
       { retryExhausted: retryConflict('تحديث وقت انتهاء المزاد قيد المعالجة؛ أعد المحاولة', AuctionErrorCode.STATE_CONFLICT) },
     );
+    if (result.extended) this.wakeup?.notify(); // committed with its AUCTION_END_EXTENDED event
     if (result.extended) {
       await this.audit.logSystemAction(
         AuditAction.AUCTION_END_TIME_EXTENDED,

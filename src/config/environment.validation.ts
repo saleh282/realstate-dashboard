@@ -1,7 +1,7 @@
 import { isPublicOsmNominatim } from '../geocoding/geocoding.config';
 import { REALTIME_MAX_MESSAGE_BYTES_HARD_CAP, REALTIME_TOPOLOGY_SINGLE_INSTANCE } from '../realtime/realtime.constants';
 import { parseTrustProxy } from './trust-proxy.config';
-import { deploymentEnvironmentErrors } from './deployment-environment';
+import { PROTECTED_ENVS, deploymentEnvironmentErrors, resolveDeploymentEnv } from './deployment-environment';
 import { paymentProviderErrors } from '../payments/payment-provider.config';
 import {
   PASSWORD_POLICY_MESSAGE,
@@ -140,6 +140,15 @@ export function validateEnvironment(config: Environment): Environment {
   const realtimeTopology = valueOf(config, 'REALTIME_TOPOLOGY');
   if (realtimeTopology && realtimeTopology !== REALTIME_TOPOLOGY_SINGLE_INSTANCE) {
     errors.push(`REALTIME_TOPOLOGY must be ${REALTIME_TOPOLOGY_SINGLE_INSTANCE} (no shared fan-out adapter exists yet)`);
+  }
+  // Realtime hardening: a staging/production instance must SAY whether it serves realtime. The code default stays OFF (so a
+  // developer laptop against a shared database never enables it by accident), but a protected deployment silently running
+  // without auction realtime — or a replica silently claiming it — must be a deliberate, visible choice.
+  const deployment = resolveDeploymentEnv(config).env;
+  if (deployment && PROTECTED_ENVS.includes(deployment) && !valueOf(config, 'REALTIME_ENABLED')) {
+    errors.push(
+      `REALTIME_ENABLED must be set explicitly (true on exactly ONE instance that serves /api/v1/realtime, false on every other replica) when DEPLOYMENT_ENV=${deployment}`,
+    );
   }
   if (nodeEnv === 'production' && valueOf(config, 'REALTIME_ENABLED').toLowerCase() === 'true' && realtimeTopology !== REALTIME_TOPOLOGY_SINGLE_INSTANCE) {
     // The hub is per-process memory and the outbox gives each event to ONE claimant of `realtime`: with several realtime-enabled replicas,

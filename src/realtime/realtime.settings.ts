@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { buildCorsOptions } from '../config/cors.config';
-import { REALTIME_MAX_MESSAGE_BYTES_HARD_CAP, REALTIME_TOPOLOGY_SINGLE_INSTANCE } from './realtime.constants';
+import { PROTECTED_ENVS, resolveDeploymentEnv } from '../config/deployment-environment';
+import { REALTIME_MAX_MESSAGE_BYTES_HARD_CAP, REALTIME_PATH, REALTIME_TOPOLOGY_SINGLE_INSTANCE } from './realtime.constants';
 
 const DEFAULTS = {
   maxConnections: 5_000,
@@ -48,6 +49,30 @@ export class RealtimeSettings {
   get heartbeatMs(): number { return this.integer('REALTIME_HEARTBEAT_SECONDS', DEFAULTS.heartbeatSeconds) * 1000; }
   /** A socket whose unsent outbound buffer exceeds this is terminated (it resyncs over HTTP on reconnect). */
   get maxBufferedBytes(): number { return this.integer('REALTIME_MAX_BUFFERED_BYTES', DEFAULTS.maxBufferedBytes); }
+
+  /**
+   * What this instance does about auction realtime, for the one startup log line (realtime hardening). Safe to log:
+   * flags and intervals only. `level` is `warn` when a protected deployment (staging/production) runs WITHOUT realtime —
+   * correct for every non-realtime replica, but it must be visible, because if NO instance enables it the open auction
+   * screen silently falls back to HTTP polling.
+   */
+  startupSummary(): { level: 'log' | 'warn'; entry: Record<string, unknown> } {
+    const deployment = resolveDeploymentEnv({ NODE_ENV: this.text('NODE_ENV'), DEPLOYMENT_ENV: this.text('DEPLOYMENT_ENV') }).env ?? 'unknown';
+    const protectedDeployment = (PROTECTED_ENVS as readonly string[]).includes(deployment) || deployment === 'unknown';
+    const entry: Record<string, unknown> = {
+      event: 'realtime_configuration',
+      enabled: this.enabled,
+      topology: this.topology,
+      path: REALTIME_PATH,
+      deployment,
+      outboxDispatcherIntervalSeconds: this.text('OUTBOX_DISPATCHER_INTERVAL_SECONDS') || 'default(5)',
+      lifecycleIntervalSeconds: this.text('AUCTION_LIFECYCLE_INTERVAL_SECONDS') || 'default(30)',
+    };
+    if (!this.enabled) {
+      entry.note = 'this instance serves no auction realtime (sockets are closed with 4503); exactly one instance must set REALTIME_ENABLED=true';
+    }
+    return { level: !this.enabled && protectedDeployment ? 'warn' : 'log', entry };
+  }
 
   /** Origins a BROWSER may connect from — the same allow-list as HTTP CORS. `true` = any (non-production with no list). Native clients send no Origin. */
   get allowedOrigins(): true | string[] {

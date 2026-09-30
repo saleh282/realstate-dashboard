@@ -5,7 +5,11 @@ import request from 'supertest';
 import { configureApp } from '../src/app.setup';
 import { AuctionBidAcceptanceService } from '../src/auctions/auction-bid-acceptance.service';
 import { AuctionBiddingReadService } from '../src/auctions/auction-bidding-read.service';
-import { AuctionBidsController } from '../src/auctions/auction-bids.controller';
+import { AuctionBidsController, BID_STATE_THROTTLE } from '../src/auctions/auction-bids.controller';
+import { AppThrottlerGuard } from '../src/common/security/app-throttler.guard';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { THROTTLER_LIMIT } from '@nestjs/throttler/dist/throttler.constants';
 import { JwtAuthGuard } from '../src/auth/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../src/auth/optional-jwt-auth.guard';
 import { RolesGuard } from '../src/auth/roles.guard';
@@ -58,7 +62,7 @@ class TestOptionalJwtGuard implements CanActivate {
 describe('bid HTTP contract (MAZAD-029)', () => {
   let app: INestApplication;
   const acceptance = { acceptBid: jest.fn() };
-  const reads = { getPublicBidState: jest.fn(), getPublicBidHistory: jest.fn() };
+  const reads = { getPublicBidState: jest.fn(), getPublicBidHistory: jest.fn(), getPublicOutcome: jest.fn() };
   const accepted = (overrides: Record<string, unknown> = {}) => ({
     bid: { id: 'bid-1', auctionId: AUCTION_ID, bidderAccountId: ME, bidderAccountTypeSnapshot: 'user', sequence: 3, amountMinor: 110_000, currency: 'EGP', acceptedAt: NOW },
     auction: { id: AUCTION_ID, status: 'active', currentEndAt: new Date('2026-05-08T10:05:00Z'), previousEndAt: new Date('2026-05-08T10:00:00Z'), extended: true, acceptedBidCount: 3 },
@@ -90,6 +94,7 @@ describe('bid HTTP contract (MAZAD-029)', () => {
     acceptance.acceptBid.mockResolvedValue(accepted());
     reads.getPublicBidState.mockResolvedValue({ bidding: {}, serverTime: NOW });
     reads.getPublicBidHistory.mockResolvedValue({ items: [], pagination: {}, serverTime: NOW });
+    reads.getPublicOutcome.mockResolvedValue({ outcome: { auctionId: AUCTION_ID, status: 'cancelled' }, serverTime: NOW });
   });
 
   const server = () => request(app.getHttpServer());
@@ -238,14 +243,73 @@ describe('bid HTTP contract (MAZAD-029)', () => {
       expect(reads.getPublicBidHistory).toHaveBeenLastCalledWith(AUCTION_ID, expect.objectContaining({ limit: 100, afterSequence: 7 }), undefined);
     });
 
+    it('outcome needs no token, passes only the id, and validates it', async () => {
+      const res = await server().get(`/api/v1/auctions/${AUCTION_ID}/outcome`).expect(200);
+      expect(reads.getPublicOutcome).toHaveBeenCalledWith(AUCTION_ID);
+      expect(res.body.data).toMatchObject({ outcome: { auctionId: AUCTION_ID, status: 'cancelled' } });
+      const bad = await server().get('/api/v1/auctions/nope/outcome').expect(400);
+      expect(codeOf(bad)).toBe(AuctionErrorCode.ID_INVALID);
+    });
+
     it('rejects a malformed auction id', async () => {
       const res = await server().get('/api/v1/auctions/nope/bids').expect(400);
       expect(codeOf(res)).toBe(AuctionErrorCode.ID_INVALID);
     });
   });
 
-  it('exposes exactly these routes on the controller — no payment, winner, close or realtime surface', () => {
+  it('exposes exactly these routes on the controller — no payment, winner identity, close or realtime surface', () => {
     const names = Object.getOwnPropertyNames(AuctionBidsController.prototype).filter((n) => n !== 'constructor' && !n.startsWith('require'));
-    expect(names.sort()).toEqual(['bidState', 'history', 'place']);
+    expect(names.sort()).toEqual(['bidState', 'history', 'outcome', 'place']);
+  });
+});
+
+/**
+ * Realtime hardening: GET bid-state has a read-only override (the socket-outage fallback
+ * polls it); the global policy stays in force for everything else, including writes.
+ * Real ThrottlerModule + the app's own guard, with the global limit the app configures.
+ */
+describe('bid-state throttle override (realtime hardening)', () => {
+  let app: INestApplication;
+  const reads = { getPublicBidState: jest.fn(async () => ({ bidding: {}, serverTime: NOW })), getPublicBidHistory: jest.fn(async () => ({ items: [] })), getPublicOutcome: jest.fn(async () => ({ outcome: {} })) };
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [ThrottlerModule.forRoot({ throttlers: [{ ttl: 60000, limit: 20 }] })],
+      controllers: [AuctionBidsController],
+      providers: [
+        RolesGuard,
+        { provide: APP_GUARD, useClass: AppThrottlerGuard },
+        { provide: AuctionBidAcceptanceService, useValue: { acceptBid: jest.fn() } },
+        { provide: AuctionBiddingReadService, useValue: reads },
+        { provide: ClockService, useValue: { now: () => NOW } },
+      ],
+    })
+      .overrideGuard(JwtAuthGuard).useClass(TestJwtAuthGuard)
+      .overrideGuard(OptionalJwtAuthGuard).useClass(TestOptionalJwtGuard)
+      .compile();
+    app = moduleRef.createNestApplication<NestExpressApplication>();
+    configureApp(app as NestExpressApplication, { NODE_ENV: 'test' });
+    await app.init();
+  });
+  afterAll(() => app.close());
+
+  it('declares 120/min on bid-state only; the write and the other reads keep the global policy', () => {
+    expect(BID_STATE_THROTTLE.default.limit).toBe(120);
+    expect(Reflect.getMetadata(`${THROTTLER_LIMIT}default`, AuctionBidsController.prototype.bidState)).toBe(120);
+    for (const method of ['place', 'history', 'outcome'] as const) {
+      expect(Reflect.getMetadata(`${THROTTLER_LIMIT}default`, AuctionBidsController.prototype[method])).toBeUndefined();
+    }
+  });
+
+  it('one address can poll bid-state well past the global 20/min, and is still bounded at 120', async () => {
+    const server = request(app.getHttpServer());
+    for (let i = 0; i < 120; i++) await server.get(`/api/v1/auctions/${AUCTION_ID}/bid-state`).expect(200);
+    const limited = await server.get(`/api/v1/auctions/${AUCTION_ID}/bid-state`).expect(429);
+    expect(limited.headers['retry-after']).toBeDefined();
+  });
+
+  it('the outcome read keeps the global 20/min', async () => {
+    const server = request(app.getHttpServer());
+    for (let i = 0; i < 20; i++) await server.get(`/api/v1/auctions/${AUCTION_ID}/outcome`).expect(200);
+    await server.get(`/api/v1/auctions/${AUCTION_ID}/outcome`).expect(429);
   });
 });

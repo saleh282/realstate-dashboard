@@ -6,7 +6,7 @@ import { ClockService } from '../common/time/clock.service';
 import { operationalMetrics } from '../common/observability/operational-metrics';
 import { PropertiesService } from '../properties/properties.service';
 import { toAdminAuction, toOwnAuction, toPublicAuction } from './auction-projections';
-import { DEFAULT_PUBLIC_LIST_STATUSES, PUBLIC_AUCTION_STATUSES } from './auction.types';
+import { DEFAULT_PUBLIC_LIST_STATUSES, OUTCOME_READABLE_AUCTION_STATUSES, PUBLIC_AUCTION_STATUSES } from './auction.types';
 import { ListAdminAuctionsDto, ListOwnAuctionsDto, ListPublicAuctionsDto, PublicAuctionSort } from './dto/list-auctions.dto';
 import { Auction, AuctionDocument } from './schemas/auction.schema';
 
@@ -140,16 +140,21 @@ export class AuctionsQueryService {
    * publicly browsable, and its anchored property revision is still public.
    * Used by `getPublic` and by the bid-state/bid-history reads (MAZAD-029) so
    * nothing can be revealed through them that `GET /auctions/:id` hides.
+   *
+   * `allowTerminal` widens ONLY the status set, to `OUTCOME_READABLE_AUCTION_STATUSES`,
+   * for the outcome read used by resync. The anchored-revision check is unchanged, so
+   * an auction whose property stopped being public stays hidden (fails closed).
    */
-  async getPubliclyVisible(id: string, options: { specifications?: boolean } = {}) {
+  async getPubliclyVisible(id: string, options: { specifications?: boolean; allowTerminal?: boolean } = {}) {
     assertId(id);
     const doc = await this.auctions.findById(id).lean().exec();
     if (!doc) throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
     const unavailable = () => new NotFoundException({ message: 'هذا المزاد غير متاح للعرض', code: AuctionErrorCode.PUBLIC_UNAVAILABLE });
-    if (!PUBLIC_AUCTION_STATUSES.includes(doc.status)) throw unavailable();
+    const readable = options.allowTerminal === true ? OUTCOME_READABLE_AUCTION_STATUSES : PUBLIC_AUCTION_STATUSES;
+    if (!readable.includes(doc.status)) throw unavailable();
     const projections = await this.properties.getAnchoredPublicProjections([
       { propertyId: doc.propertyId.toString(), revisionId: doc.propertyRevisionId.toString() },
-    ], options);
+    ], options.specifications === undefined ? {} : { specifications: options.specifications });
     const property = projections.get(`${doc.propertyId}:${doc.propertyRevisionId}`);
     if (!property) throw unavailable();
     return { doc, property };

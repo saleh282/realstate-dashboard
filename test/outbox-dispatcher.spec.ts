@@ -673,3 +673,112 @@ describe('Nest wiring (MAZAD-031)', () => {
     }
   });
 });
+
+describe('OutboxWakeup — after-commit dispatch hint (realtime hardening)', () => {
+  const { OutboxWakeup } = require('../src/outbox/outbox-wakeup');
+  const quiet = () => ({ log: jest.fn(), warn: jest.fn(), error: jest.fn() });
+  const started = (ctx: ReturnType<typeof build>, wakeup: any, values: Record<string, string> = { OUTBOX_DISPATCHER_ENABLED: 'true', OUTBOX_DISPATCHER_INTERVAL_SECONDS: '3600' }) => {
+    const worker = new OutboxDispatcherWorker(ctx.dispatcher, ctx.registry, { get: (k: string) => values[k] } as any, wakeup);
+    (worker as any).logger = quiet();
+    worker.onApplicationBootstrap(); // the periodic tick is armed but an hour away: only the wake-up can dispatch in these tests
+    return worker;
+  };
+  afterEach(() => jest.useRealTimers());
+
+  it('a notification dispatches committed events at once, without waiting for the periodic tick', async () => {
+    const ctx = build();
+    const wakeup = new OutboxWakeup();
+    const worker = started(ctx, wakeup);
+    seedAggregate(ctx.store, A, 1);
+    wakeup.notify();
+    await ticks(60);
+    expect(ctx.seen.map((e) => e.aggregateVersion)).toEqual([1]);
+    expect(row(ctx.store, ctx.store.rows[0]._id).status).toBe(OutboxStatus.PROCESSED);
+    await worker.onModuleDestroy();
+  });
+
+  it('a notification during a running pass causes exactly one more pass, which delivers the event committed after the scan', async () => {
+    const gate = deferred();
+    let calls = 0;
+    const ctx = build({ deliver: async () => { if (calls++ === 0) await gate.promise; } });
+    const wakeup = new OutboxWakeup();
+    const worker = started(ctx, wakeup);
+    const passes = jest.spyOn(ctx.dispatcher, 'dispatchConsumer');
+    seedAggregate(ctx.store, A, 1);
+    wakeup.notify();
+    await ticks(40); // pass 1 has scanned and is blocked delivering A v1
+    seedAggregate(ctx.store, B, 1); // committed AFTER pass 1's scan
+    wakeup.notify(); wakeup.notify(); wakeup.notify(); // several hints while running collapse into ONE re-run
+    expect(passes).toHaveBeenCalledTimes(1);
+    gate.resolve();
+    await ticks(120);
+    expect(passes).toHaveBeenCalledTimes(2);
+    expect(ctx.seen.map((e) => e.aggregateId)).toEqual([A, B]);
+    expect(ctx.consumer.deliver).toHaveBeenCalledTimes(2); // nothing delivered twice
+    await worker.onModuleDestroy();
+  });
+
+  it('without any notification (lost or never sent) the periodic tick still delivers', async () => {
+    jest.useFakeTimers();
+    const ctx = build();
+    const wakeup = new OutboxWakeup();
+    const worker = started(ctx, wakeup, { OUTBOX_DISPATCHER_ENABLED: 'true', OUTBOX_DISPATCHER_INTERVAL_SECONDS: '1' });
+    seedAggregate(ctx.store, A, 2);
+    expect(ctx.seen).toHaveLength(0);
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(ctx.seen.map((e) => e.aggregateVersion)).toEqual([1, 2]);
+    expect(wakeup.notified).toBe(0);
+    await worker.onModuleDestroy();
+  });
+
+  it('a burst of notifications keeps per-auction order and never duplicates a delivery', async () => {
+    const ctx = build();
+    const wakeup = new OutboxWakeup();
+    const worker = started(ctx, wakeup);
+    for (let v = 1; v <= 5; v++) {
+      ctx.store.seed({ aggregateType: 'AUCTION', aggregateId: A, aggregateVersion: v, type: 'BID_ACCEPTED', occurredAt: new Date(T0.getTime() + v), payload: { auctionId: A, sequence: v } });
+      wakeup.notify();
+      await ticks(3);
+    }
+    await ticks(300);
+    expect(ctx.seen.map((e) => e.aggregateVersion)).toEqual([1, 2, 3, 4, 5]);
+    expect(new Set(ctx.seen.map((e) => e.eventId)).size).toBe(5);
+    await worker.onModuleDestroy();
+  });
+
+  it('is ignored before start, when the dispatcher is disabled, for an unconfigured consumer, and after shutdown', async () => {
+    const ctx = build();
+    const wakeup = new OutboxWakeup();
+    const passes = jest.spyOn(ctx.dispatcher, 'dispatchConsumer');
+    const notStarted = new OutboxDispatcherWorker(ctx.dispatcher, ctx.registry, { get: () => undefined } as any, wakeup);
+    notStarted.onWakeup();
+    const disabled = started(ctx, wakeup, { OUTBOX_DISPATCHER_ENABLED: 'false' });
+    wakeup.notify();
+    expect(passes).not.toHaveBeenCalled();
+    const off = build({ configured: false });
+    const offWorker = started(off, new OutboxWakeup());
+    const offPasses = jest.spyOn(off.dispatcher, 'dispatchConsumer');
+    offWorker.onWakeup();
+    expect(offPasses).not.toHaveBeenCalled();
+    const worker = started(ctx, wakeup);
+    await worker.onModuleDestroy();
+    wakeup.notify();
+    expect(passes).not.toHaveBeenCalled();
+    await disabled.onModuleDestroy(); await offWorker.onModuleDestroy();
+  });
+
+  it('a failing listener never reaches the producer', () => {
+    const wakeup = new OutboxWakeup();
+    (wakeup as any).logger = quiet();
+    const after = jest.fn();
+    wakeup.subscribe(() => { throw new Error('boom'); });
+    wakeup.subscribe(after);
+    expect(() => wakeup.notify()).not.toThrow();
+    expect(after).toHaveBeenCalledTimes(1);
+  });
+
+  it('is provided and exported by OutboxModule (one instance shared by producers and the worker)', () => {
+    expect(Reflect.getMetadata('providers', OutboxModule)).toContain(OutboxWakeup);
+    expect(Reflect.getMetadata('exports', OutboxModule)).toContain(OutboxWakeup);
+  });
+});

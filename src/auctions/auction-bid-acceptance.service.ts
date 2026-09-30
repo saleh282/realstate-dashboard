@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, InternalServerErrorException, NotFoundException, Optional } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -15,6 +15,7 @@ import { ClockService } from '../common/time/clock.service';
 import { bidAcceptedEvent } from '../outbox/outbox-events';
 import { OUTBOX_AGGREGATE_VERSION_INDEX } from '../outbox/outbox.constants';
 import { OutboxService } from '../outbox/outbox.service';
+import { OutboxWakeup } from '../outbox/outbox-wakeup';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { AUCTION_BID_ENTITLEMENT_PORT, AuctionBidEntitlementPort } from './auction-bid-entitlement.port';
 import { AuctionLifecycleService } from './auction-lifecycle.service';
@@ -128,6 +129,8 @@ export class AuctionBidAcceptanceService {
     @Inject(AUCTION_BID_ENTITLEMENT_PORT) private readonly entitlement: AuctionBidEntitlementPort,
     @InjectConnection() private readonly connection: Connection,
     private readonly outbox: OutboxService,
+    /** Realtime hardening: after-commit dispatch hint (optimisation only; the periodic dispatcher is the guarantee). */
+    @Optional() private readonly wakeup?: OutboxWakeup,
   ) {}
 
   /** `actorId` MUST be the authenticated principal's id; it is the only source of bidder identity. */
@@ -159,6 +162,8 @@ export class AuctionBidAcceptanceService {
           if (this.hasLabel(error, 'TransientTransactionError')) { await this.pause(attempt); continue; } // provably not committed
           throw error;
         }
+        // Committed: BID_ACCEPTED (and any AUCTION_END_EXTENDED) are now durable. A replay recorded nothing new.
+        if (!result.replayed) this.wakeup?.notify();
         return result;
       } finally {
         await session.endSession();

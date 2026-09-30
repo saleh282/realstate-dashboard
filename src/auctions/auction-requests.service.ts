@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, UnprocessableEntityException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -13,6 +13,7 @@ import { retryConflict, runTransactionWithRetry } from '../common/mongo/transact
 import { ClockService } from '../common/time/clock.service';
 import { auctionRequestApprovedEvent, auctionRequestRejectedEvent } from '../outbox/outbox-events';
 import { OutboxService } from '../outbox/outbox.service';
+import { OutboxWakeup } from '../outbox/outbox-wakeup';
 import { PropertiesService } from '../properties/properties.service';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { AuctionLifecycleService } from './auction-lifecycle.service';
@@ -107,6 +108,8 @@ export class AuctionRequestsService {
     private readonly clock: ClockService,
     private readonly outbox: OutboxService,
     @InjectConnection() private readonly connection: Connection,
+    /** Realtime hardening: after-commit dispatch hint (optimisation only; the periodic dispatcher is the guarantee). */
+    @Optional() private readonly wakeup?: OutboxWakeup,
   ) {}
 
   // ================================ seller ================================
@@ -228,6 +231,8 @@ export class AuctionRequestsService {
       await this.audit.logRequired({ action: AuditAction.AUCTION_REQUEST_UPDATED, actorUserId: actorId, targetResourceId: id.toString(), reason: 'auction request terms updated', ip, metadata: { revision: nextRevision, status: current.status } }, session);
       return doc;
     }, { uniqueIndexNames: UNIQUE_INDEXES, retryExhausted });
+    // Committed. Re-opening an APPROVED request superseded (cancelled) its scheduled auction with an AUCTION_CANCELLED event.
+    this.wakeup?.notify();
     return { message: 'تم تحديث طلب المزاد', request: await this.sellerView(updated) };
   }
 

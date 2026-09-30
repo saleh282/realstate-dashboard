@@ -823,3 +823,50 @@ describe('extendIfWithinAntiSnipingWindow inside a caller transaction (MAZAD-027
     expect(audit.logSystemAction).not.toHaveBeenCalled();
   });
 });
+
+describe('outbox wake-up after commit (realtime hardening)', () => {
+  /** Records the order of commit / withTransaction completion / notify on the shared session shim. */
+  function wired(options: Parameters<typeof lifecycleService>[0]) {
+    const ctx = lifecycleService(options);
+    const order: string[] = [];
+    ctx.session.commitTransaction.mockImplementation(async () => { order.push('commit'); });
+    ctx.session.withTransaction.mockImplementation(async (work: () => Promise<void>) => { await work(); order.push('commit'); });
+    const wakeup = { notify: jest.fn(() => order.push('notify')) };
+    (ctx.instance as any).wakeup = wakeup;
+    return { ...ctx, order, wakeup };
+  }
+
+  it('activation notifies after its transaction committed', async () => {
+    const ctx = wired({ docs: [auctionDoc({ scheduledStartAt: NOW })], now: NOW });
+    await ctx.instance.activateDueAuctions();
+    // The first transaction activated it; the loop's next (empty) transaction also commits, after the hint.
+    expect(ctx.order.slice(0, 2)).toEqual(['commit', 'notify']);
+    expect(ctx.wakeup.notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('a held (not activated) auction records no AUCTION_ACTIVATED and does not notify', async () => {
+    const ctx = wired({ docs: [auctionDoc({ scheduledStartAt: NOW })], now: NOW, holdCode: 'FEE_MISSING' });
+    await ctx.instance.activateDueAuctions();
+    expect(ctx.wakeup.notify).not.toHaveBeenCalled();
+  });
+
+  it('expiry notifies after commit; nothing due → no notification', async () => {
+    const ctx = wired({ docs: [auctionDoc({ status: AuctionStatus.ACTIVE, currentEndAt: NOW })], now: NOW });
+    await ctx.instance.expireDueAuctions();
+    expect(ctx.order.slice(0, 2)).toEqual(['commit', 'notify']);
+    expect(ctx.wakeup.notify).toHaveBeenCalledTimes(1);
+    const idle = wired({ docs: [auctionDoc({ status: AuctionStatus.ACTIVE, currentEndAt: new Date(NOW.getTime() + 60_000) })], now: NOW });
+    await idle.instance.expireDueAuctions();
+    expect(idle.wakeup.notify).not.toHaveBeenCalled();
+  });
+
+  it('cancellation notifies only after withTransaction resolved, and never when it throws', async () => {
+    const ctx = wired({ docs: [auctionDoc({ status: AuctionStatus.SCHEDULED })] });
+    await ctx.instance.cancel(ADVERTISER_ID, AUCTION_ID, undefined);
+    expect(ctx.order).toEqual(['commit', 'notify']);
+    const failing = wired({ docs: [auctionDoc({ status: AuctionStatus.SCHEDULED })] });
+    failing.session.withTransaction.mockRejectedValue(new Error('transaction aborted'));
+    await expect(failing.instance.cancel(ADVERTISER_ID, AUCTION_ID, undefined)).rejects.toThrow('transaction aborted');
+    expect(failing.wakeup.notify).not.toHaveBeenCalled();
+  });
+});

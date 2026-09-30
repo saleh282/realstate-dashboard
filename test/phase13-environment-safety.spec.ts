@@ -7,7 +7,7 @@ import { validateEnvironment } from '../src/config/environment.validation';
 
 const base = { MONGO_URI: 'mongodb://localhost:27017/mazad_dev', JWT_ACCESS_SECRET: 'a', JWT_REFRESH_SECRET: 'b', JWT_ACCESS_EXPIRES_IN: '15m', JWT_REFRESH_EXPIRES_IN: '7d' };
 const production = {
-  ...base, NODE_ENV: 'production', DEPLOYMENT_ENV: 'production', DB_ENV_ALLOWLIST: 'db.prod.example/mazad',
+  ...base, NODE_ENV: 'production', DEPLOYMENT_ENV: 'production', DB_ENV_ALLOWLIST: 'db.prod.example/mazad', REALTIME_ENABLED: 'false',
   MONGO_URI: 'mongodb://user:pw@db.prod.example/mazad?retryWrites=true',
   JWT_ACCESS_SECRET: 'a'.repeat(40), JWT_REFRESH_SECRET: 'b'.repeat(40), TRUST_PROXY: 'false',
   MAIL_HOST: 'smtp.example.com', MAIL_PORT: '587', MAIL_SECURE: 'false', MAIL_USER: 'u', MAIL_PASS: 'p', MAIL_FROM: 'no-reply@example.com', MAIL_TLS_REJECT_UNAUTHORIZED: 'true',

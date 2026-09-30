@@ -7,6 +7,7 @@ import { computeNextMinimumBidMinor } from '../bids/bid-pricing';
 import { AuctionErrorCode } from '../common/errors/auction-error-codes';
 import { BidErrorCode } from '../common/errors/bid-error-codes';
 import { ClockService } from '../common/time/clock.service';
+import { toPublicOutcome } from './auction-projections';
 import { AuctionsQueryService } from './auctions-query.service';
 import { Auction, AuctionDocument } from './schemas/auction.schema';
 
@@ -36,6 +37,18 @@ export class AuctionBiddingReadService {
   async getPublicBidState(auctionId: string) {
     await this.queries.getPubliclyVisible(auctionId);
     return { bidding: await this.readBidState(auctionId), serverTime: this.clock.now() };
+  }
+
+  /**
+   * The public outcome of an auction, readable while it is public AND after it reached
+   * a terminal status (realtime hardening). This is the authoritative recovery read for
+   * a client that missed a terminal realtime event: `GET /auctions/:id` hides terminal
+   * auctions by design, and discovery keeps hiding them. Same gate otherwise (the
+   * anchored property revision must still be public: fails closed).
+   */
+  async getPublicOutcome(auctionId: string) {
+    const { doc } = await this.queries.getPubliclyVisible(auctionId, { allowTerminal: true });
+    return { outcome: toPublicOutcome(doc), serverTime: this.clock.now() };
   }
 
   /**

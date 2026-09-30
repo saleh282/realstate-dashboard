@@ -1216,3 +1216,54 @@ describe('BID_ACCEPTED domain event — transactional outbox (MAZAD-031)', () =>
     expect(mongo.committedAuction().acceptedBidCount).toBe(1);
   });
 });
+
+describe('outbox wake-up after commit (realtime hardening)', () => {
+  const { OutboxWakeup } = require('../src/outbox/outbox-wakeup');
+  /** A wake-up whose listener records what was COMMITTED at the moment it was notified. */
+  function withWakeup(ctx: ReturnType<typeof build>) {
+    const wakeup = new OutboxWakeup();
+    const seenAtNotify: number[] = [];
+    wakeup.subscribe(() => seenAtNotify.push(ctx.mongo.outbox.events('BID_ACCEPTED').length));
+    (ctx.service as any).wakeup = wakeup;
+    return { wakeup, seenAtNotify };
+  }
+
+  it('notifies exactly once per accepted bid, and only once its BID_ACCEPTED event is committed', async () => {
+    const ctx = build();
+    const { seenAtNotify } = withWakeup(ctx);
+    await ctx.service.acceptBid(ALICE, AUCTION, 100_000);
+    await ctx.service.acceptBid(BOB, AUCTION, 105_000);
+    expect(seenAtNotify).toEqual([1, 2]); // the event was already durable when the hint fired
+  });
+
+  it('never notifies for a rejected bid or a failed commit (nothing was committed)', async () => {
+    const ctx = build();
+    const { seenAtNotify } = withWakeup(ctx);
+    await ctx.service.acceptBid(ALICE, AUCTION, 1).catch(() => undefined);
+    ctx.mongo.hooks.commitError = () => new Error('commit failed');
+    await ctx.service.acceptBid(ALICE, AUCTION, 100_000).catch(() => undefined);
+    expect(ctx.mongo.outbox.events()).toHaveLength(0);
+    expect(seenAtNotify).toEqual([]);
+  });
+
+  it('an idempotent replay (no new event) does not notify', async () => {
+    const ctx = build();
+    const { seenAtNotify } = withWakeup(ctx);
+    await ctx.service.acceptBid(ALICE, AUCTION, 100_000, undefined, { key: 'wake-key-0001' });
+    await ctx.service.acceptBid(ALICE, AUCTION, 100_000, undefined, { key: 'wake-key-0001' });
+    expect(seenAtNotify).toEqual([1]);
+  });
+
+  it('a listener failure cannot fail an already committed bid', async () => {
+    const ctx = build();
+    const { wakeup } = withWakeup(ctx);
+    (wakeup as any).logger = { warn: jest.fn() };
+    wakeup.subscribe(() => { throw new Error('listener down'); });
+    await expect(ctx.service.acceptBid(ALICE, AUCTION, 100_000)).resolves.toMatchObject({ bid: { sequence: 1 } });
+  });
+
+  it('works unchanged with no wake-up wired (optional dependency)', async () => {
+    const ctx = build();
+    await expect(ctx.service.acceptBid(ALICE, AUCTION, 100_000)).resolves.toMatchObject({ bid: { sequence: 1 } });
+  });
+});

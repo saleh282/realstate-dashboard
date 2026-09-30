@@ -1,7 +1,8 @@
-import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OutboxConsumerRegistry } from './outbox-consumer.port';
 import { OutboxDispatchSummary, OutboxDispatcherService } from './outbox-dispatcher.service';
+import { OutboxWakeup } from './outbox-wakeup';
 
 const DEFAULT_INTERVAL_SECONDS = 5;
 const MIN_INTERVAL_SECONDS = 1;
@@ -24,6 +25,15 @@ const STOP_WAIT_MS = 10_000;
  * nothing at all — no database access — and events stay durable. Nothing is ever
  * marked delivered just because nobody was listening. Consumers may register at
  * any point before or after start-up; each tick reads the current registry.
+ *
+ * WAKE-UP (realtime hardening). Besides the periodic tick, an `OutboxWakeup`
+ * notification (sent by a producer after its transaction COMMITTED) starts a pass
+ * immediately for every configured consumer. A notification that arrives while a
+ * consumer's pass is running marks it "run again": when the pass ends, one more
+ * pass starts, so an event committed after the running pass scanned is not left
+ * for the next tick. Many notifications during one pass collapse into one re-run.
+ * This only changes WHEN a pass runs, never what it delivers: the periodic tick
+ * stays the durability guarantee, and the database claim stays the only guard.
  */
 @Injectable()
 export class OutboxDispatcherWorker implements OnApplicationBootstrap, OnModuleDestroy {
@@ -31,6 +41,10 @@ export class OutboxDispatcherWorker implements OnApplicationBootstrap, OnModuleD
   private timer?: NodeJS.Timeout;
   private readonly inFlight = new Map<string, Promise<OutboxDispatchSummary | null>>();
   private stopped = false;
+  private started = false;
+  /** Consumers notified while their pass was running: they get one more pass when it ends. */
+  private readonly rerun = new Set<string>();
+  private unsubscribeWakeup?: () => void;
   lastRunAt?: Date;
   /** Latest summary per consumer. */
   readonly lastSummaries = new Map<string, OutboxDispatchSummary>();
@@ -39,6 +53,7 @@ export class OutboxDispatcherWorker implements OnApplicationBootstrap, OnModuleD
     private readonly dispatcher: OutboxDispatcherService,
     private readonly registry: OutboxConsumerRegistry,
     private readonly config: ConfigService,
+    @Optional() private readonly wakeup?: OutboxWakeup,
   ) {}
 
   get enabled(): boolean {
@@ -59,11 +74,25 @@ export class OutboxDispatcherWorker implements OnApplicationBootstrap, OnModuleD
     if (this.registry.list().length === 0) {
       this.logger.warn(JSON.stringify({ event: 'outbox_no_consumers_registered', note: 'domain events stay durable until a consumer registers' }));
     }
+    this.started = true;
+    this.unsubscribeWakeup = this.wakeup?.subscribe(() => this.onWakeup());
     this.schedule(1_000 + Math.floor(Math.random() * 2_000));
+  }
+
+  /** A producer committed outbox events: dispatch now (or right after the running pass). */
+  onWakeup(): void {
+    if (this.stopped || !this.started) return;
+    for (const consumer of this.registry.list()) {
+      if (consumer.configured !== true) continue;
+      if (this.inFlight.has(consumer.name)) this.rerun.add(consumer.name);
+      else this.startPass(consumer.name);
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
     this.stopped = true;
+    this.unsubscribeWakeup?.();
+    this.rerun.clear();
     if (this.timer) clearTimeout(this.timer);
     if (this.inFlight.size === 0) return;
     await Promise.race([
@@ -101,7 +130,11 @@ export class OutboxDispatcherWorker implements OnApplicationBootstrap, OnModuleD
 
   private startPass(name: string): Promise<OutboxDispatchSummary | null> | null {
     if (this.inFlight.has(name)) return null;
-    const pass = this.execute(name).finally(() => this.inFlight.delete(name));
+    const pass = this.execute(name).finally(() => {
+      this.inFlight.delete(name);
+      // A wake-up arrived during this pass: the event it announced may have committed after the scan.
+      if (this.rerun.delete(name) && !this.stopped) this.startPass(name);
+    });
     this.inFlight.set(name, pass);
     return pass;
   }

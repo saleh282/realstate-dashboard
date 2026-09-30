@@ -315,8 +315,7 @@ describe('environment validation — realtime and the single-instance guard', ()
     expect(invalid({ REALTIME_TOPOLOGY: 'multi_instance' })).toThrow('REALTIME_TOPOLOGY must be single_instance');
   });
 
-  it('production starts without realtime (the default is off) and with realtime only when the single-instance topology is declared', () => {
-    expect(() => validateEnvironment(production)).not.toThrow();
+  it('production starts without realtime only when that is said explicitly, and with realtime only when the single-instance topology is declared', () => {
     expect(() => validateEnvironment({ ...production, REALTIME_ENABLED: 'false' })).not.toThrow();
     expect(() => validateEnvironment({ ...production, REALTIME_ENABLED: 'true', REALTIME_TOPOLOGY: 'single_instance' })).not.toThrow();
   });
@@ -325,6 +324,29 @@ describe('environment validation — realtime and the single-instance guard', ()
     expect(() => validateEnvironment({ ...production, REALTIME_ENABLED: 'true' })).toThrow(/REALTIME_TOPOLOGY=single_instance is required in production/);
     expect(() => validateEnvironment({ ...production, REALTIME_ENABLED: 'TRUE', REALTIME_TOPOLOGY: '   ' })).toThrow(/REALTIME_TOPOLOGY=single_instance is required/);
     expect(() => validateEnvironment({ ...production, REALTIME_ENABLED: 'true', REALTIME_TOPOLOGY: 'shared' })).toThrow(/REALTIME_TOPOLOGY must be single_instance/);
+  });
+
+  it('staging/production must configure REALTIME_ENABLED explicitly (realtime hardening); local/dev keep the OFF default', () => {
+    expect(() => validateEnvironment(production)).toThrow(/REALTIME_ENABLED must be set explicitly .* DEPLOYMENT_ENV=production/);
+    expect(() => validateEnvironment({ ...production, REALTIME_ENABLED: '  ' })).toThrow(/REALTIME_ENABLED must be set explicitly/);
+    expect(() => validateEnvironment({ ...production, DEPLOYMENT_ENV: 'staging' })).toThrow(/REALTIME_ENABLED must be set explicitly .* DEPLOYMENT_ENV=staging/);
+    expect(() => validateEnvironment({ ...production, DEPLOYMENT_ENV: 'staging', REALTIME_ENABLED: 'false' })).not.toThrow();
+    expect(() => validateEnvironment({ ...production, REALTIME_ENABLED: 'maybe' })).toThrow(/REALTIME_ENABLED must be true or false/);
+    // A developer process (possibly pointed at a shared database) never needs — and never gets — realtime by default.
+    expect(() => validateEnvironment(development)).not.toThrow();
+    expect(() => validateEnvironment({ ...development, DEPLOYMENT_ENV: 'local' })).not.toThrow();
+  });
+
+  it('the realtime startup line says what this instance does, and warns when a protected deployment runs without realtime', () => {
+    const { RealtimeSettings } = require('../src/realtime/realtime.settings');
+    const settings = (values: Record<string, string>) => new RealtimeSettings({ get: (k: string) => values[k] } as any);
+    const off = settings({ NODE_ENV: 'production', DEPLOYMENT_ENV: 'production', REALTIME_ENABLED: 'false' }).startupSummary();
+    expect(off.level).toBe('warn');
+    expect(off.entry).toMatchObject({ event: 'realtime_configuration', enabled: false, deployment: 'production', path: '/api/v1/realtime' });
+    const on = settings({ NODE_ENV: 'production', DEPLOYMENT_ENV: 'staging', REALTIME_ENABLED: 'true', REALTIME_TOPOLOGY: 'single_instance', OUTBOX_DISPATCHER_INTERVAL_SECONDS: '1', AUCTION_LIFECYCLE_INTERVAL_SECONDS: '5' }).startupSummary();
+    expect(on).toEqual({ level: 'log', entry: expect.objectContaining({ enabled: true, topology: 'single_instance', outboxDispatcherIntervalSeconds: '1', lifecycleIntervalSeconds: '5' }) });
+    expect(settings({ NODE_ENV: 'development' }).startupSummary().level).toBe('log'); // local/dev default off is normal
+    expect(JSON.stringify(on.entry)).not.toMatch(/mongodb|secret|password/i);
   });
 
   it('development does not require the declaration', () => {

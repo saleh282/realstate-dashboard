@@ -83,7 +83,8 @@ export class FakeConnection {
 
 export const settingsFor = (overrides: Record<string, any> = {}): any => ({
   enabled: true, topology: 'single_instance', maxConnections: 100, maxConnectionsPerIp: 50, maxSubscriptionsPerSocket: 50, maxMessageBytes: 2_048,
-  messageRateLimit: 1_000, messageRateWindowMs: 10_000, heartbeatMs: 30_000, maxBufferedBytes: 1_048_576, allowedOrigins: true, ...overrides,
+  messageRateLimit: 1_000, messageRateWindowMs: 10_000, heartbeatMs: 30_000, maxBufferedBytes: 1_048_576, allowedOrigins: true,
+  startupSummary: () => ({ level: 'log', entry: { event: 'realtime_configuration' } }), ...overrides,
 });
 
 /** An event id (ObjectId) stamped with the given instant — used to give events a HOSTILE id (a clock that is years off): classification must not care. */

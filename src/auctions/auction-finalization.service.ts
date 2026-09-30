@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -11,6 +11,7 @@ import { TransactionAttemptConflict, retryConflict, runTransactionWithRetry } fr
 import { ClockService } from '../common/time/clock.service';
 import { auctionFinalizedEvent } from '../outbox/outbox-events';
 import { OutboxService } from '../outbox/outbox.service';
+import { OutboxWakeup } from '../outbox/outbox-wakeup';
 import { assertValidAuctionTransition } from './auction-transitions';
 import { AuctionStatus } from './auction.types';
 import { Auction, AuctionDocument } from './schemas/auction.schema';
@@ -83,15 +84,19 @@ export class AuctionFinalizationService {
     private readonly clock: ClockService,
     @InjectConnection() private readonly connection: Connection,
     private readonly outbox: OutboxService,
+    /** Realtime hardening: after-commit dispatch hint (optimisation only; the periodic dispatcher is the guarantee). */
+    @Optional() private readonly wakeup?: OutboxWakeup,
   ) {}
 
   async finalize(auctionId: string): Promise<AuctionFinalizationResult> {
     if (!Types.ObjectId.isValid(auctionId)) {
       throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
     }
-    return runTransactionWithRetry(this.connection, (session) => this.finalizeWithinTransaction(session, auctionId), {
+    const result = await runTransactionWithRetry(this.connection, (session) => this.finalizeWithinTransaction(session, auctionId), {
       retryExhausted: retryConflict('إنهاء المزاد قيد المعالجة؛ أعد المحاولة', AuctionErrorCode.STATE_CONFLICT),
     });
+    if (result.outcome === 'FINALIZED') this.wakeup?.notify(); // committed with its AUCTION_FINALIZED event
+    return result;
   }
 
   /**
