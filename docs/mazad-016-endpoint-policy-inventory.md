@@ -31,4 +31,14 @@ This inventory freezes the V1 authorization classification. Capability responses
 | `/admin/dashboard/metrics` | Admin-only read | `ADMIN_DASHBOARD_READ` |
 | `/admin/operations/status` | Admin-only read (Phase 13 operator diagnostics) | `ADMIN_DASHBOARD_READ` |
 
-Future auction, bid, and entry-payment modules must use `AUCTION_CREATE_OWN`, `BID_PLACE`, and `PAYMENT_ENTRY_INITIATE`. `assertBid` also enforces exact-account self-bid prevention. These hooks do not implement the later auction/payment tasks.
+| `POST /auctions` | Retired (MAZAD-035) | `AUCTION_CREATE_OWN` guard, then always `409 AUCTION_REVIEW_REQUIRED`; auctions are created only by Admin approval |
+| `POST /auction-requests` | Marketplace mutation (MAZAD-035) | `AUCTION_CREATE_OWN` + own-property predicate; submits directly to `pending_review` |
+| `GET /auction-requests/mine*`, `/auction-requests/eligible-properties` | Owner/resource-scoped read | `AUCTION_READ_OWN` plus advertiser predicate; foreign ids return not found |
+| `PATCH /auction-requests/mine/:id`, `POST …/resubmit`, `POST …/withdraw` | Owner/resource-scoped mutation | `AUCTION_MANAGE_OWN`, ACTIVE account, advertiser predicate, `expectedRevision` |
+| `GET /auctions/mine*`, `POST /auctions/mine/:id/cancel` | Owner/resource-scoped | `AUCTION_READ_OWN` / `AUCTION_MANAGE_OWN` plus advertiser predicate |
+| `/admin/auction-requests` reads | Admin-only read | `ADMIN_AUCTION_READ` |
+| `POST /admin/auction-requests/:id/review` | Admin review (ADMIN and SUPER_ADMIN) | `ADMIN_AUCTION_REVIEW`; approve sets the entry fee (0 = FREE), `expectedRevision` |
+| `/admin/auctions` reads (incl. `/:id/bids` staff ledger) | Admin-only read | `ADMIN_AUCTION_READ` |
+| `POST /admin/auctions/:id/cancel` | Admin mutation (ADMIN and SUPER_ADMIN) | `ADMIN_AUCTION_CANCEL`; structured reason code, `expectedStatus` |
+
+Bid and entry-payment routes use `BID_PLACE` and `PAYMENT_ENTRY_INITIATE`; `assertBid` also enforces exact-account self-bid prevention. `ADMIN_AUCTION_FEE_MANAGE` remains only for the legacy internal fee path (no route).

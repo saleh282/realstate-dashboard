@@ -424,8 +424,10 @@ describe('projections and privacy (MAZAD-030)', () => {
       const names = Object.getOwnPropertyNames(controller.prototype).filter((n) => n !== 'constructor');
       expect(names.filter((n) => /final|close|winner|complete|select|override/i.test(n))).toEqual([]);
     }
+    // MAZAD-035: the ONLY Admin mutation is cancellation (never a winner choice or bid edit); everything else is GET.
     const admin = Object.getOwnPropertyNames(AdminAuctionsController.prototype).filter((n) => n !== 'constructor');
-    for (const n of admin) expect(Reflect.getMetadata('method', (AdminAuctionsController.prototype as any)[n])).toBe(0); // RequestMethod.GET
+    for (const n of admin.filter((name) => name !== 'cancel')) expect(Reflect.getMetadata('method', (AdminAuctionsController.prototype as any)[n])).toBe(0); // RequestMethod.GET
+    expect(Reflect.getMetadata('path', (AdminAuctionsController.prototype as any).cancel)).toBe(':auctionId/cancel');
   });
 
   it('the finalization code is bid-read-only and adds no payment, realtime or promotion behaviour; its ONLY outbox use is the in-transaction OutboxService (MAZAD-031)', () => {

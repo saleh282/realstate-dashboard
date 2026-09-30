@@ -28,6 +28,9 @@ const ADMIN_CAPABILITIES = new Set<Capability>([
   Capability.ADMIN_MANAGED_MARKETING_MANAGE,
   Capability.ADMIN_AUCTION_READ,
   Capability.ADMIN_AUCTION_FEE_MANAGE,
+  // MAZAD-035: ordinary auction moderation is ADMIN work (SUPER_ADMIN inherits it), never SUPER_ADMIN-only.
+  Capability.ADMIN_AUCTION_REVIEW,
+  Capability.ADMIN_AUCTION_CANCEL,
 ]);
 
 const MARKETPLACE_MUTATIONS = new Set<Capability>([

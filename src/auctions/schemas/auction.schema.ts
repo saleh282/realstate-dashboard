@@ -47,16 +47,17 @@ const AuctionRuleSnapshotSchema = SchemaFactory.createForClass(AuctionRuleSnapsh
 
 /**
  * The admin-configured bidder entry fee for ONE auction (MAZAD-028).
- * Write-once (set only while the auction is SCHEDULED and has no fee, via a
- * conditional update in `AuctionEntryFeeService`), server-owned, and never
- * derived from a bidder-supplied amount. Absent = NOT configured = paid
- * bidding fails closed; it is never read as zero/free.
+ * Server-owned, never derived from a bidder-supplied amount. MAZAD-035: set by
+ * Admin approval when the Auction is created (legacy: write-once through
+ * `AuctionEntryFeeService`). `amountMinor: 0` is an EXPLICITLY configured FREE
+ * auction; an ABSENT fee is "not configured" and still fails closed — absence
+ * is never read as zero/free.
  */
 @Schema({ _id: false })
 export class AuctionEntryFee {
   @Prop({
     required: true,
-    validate: { validator: (value: unknown) => isMoneyMinorAmount(value, { positive: true }), message: 'entry fee amountMinor is outside the safe integer range' },
+    validate: { validator: (value: unknown) => isMoneyMinorAmount(value), message: 'entry fee amountMinor is outside the safe integer range' },
   })
   amountMinor: number;
   @Prop({ type: String, required: true, enum: [EGP_CURRENCY] }) currency: typeof EGP_CURRENCY;
@@ -65,6 +66,15 @@ export class AuctionEntryFee {
 }
 
 const AuctionEntryFeeSchema = SchemaFactory.createForClass(AuctionEntryFee);
+
+/** MAZAD-035: why the activation gate refused to start a due SCHEDULED auction. Excludes it from later claims (no starvation). */
+@Schema({ _id: false })
+export class AuctionActivationHold {
+  @Prop({ type: String, required: true, maxlength: 64 }) code: string;
+  @Prop({ type: Date, required: true }) at: Date;
+}
+
+const AuctionActivationHoldSchema = SchemaFactory.createForClass(AuctionActivationHold);
 
 /**
  * Persistence/domain foundation for auctions (MAZAD-023). Establishes the
@@ -129,9 +139,28 @@ export class Auction {
   // --- Immutable rule snapshot ---
   @Prop({ type: AuctionRuleSnapshotSchema, required: true, immutable: true }) ruleSnapshot: AuctionRuleSnapshot;
 
-  // --- Entry fee (MAZAD-028) ---
-  /** Bidder entry fee for this auction; absent until an admin configures it (the future Admin approval workflow supplies it via `AuctionEntryFeeService.configure`). Absent fails closed. */
+  // --- Entry fee (MAZAD-028 / MAZAD-035) ---
+  /** Bidder entry fee for this auction, embedded by Admin approval (0 = FREE). Absent (legacy rows only) fails closed and never activates. */
   @Prop({ type: AuctionEntryFeeSchema }) entryFee?: AuctionEntryFee;
+
+  // --- Review origin (MAZAD-035) ---
+  /** The AuctionRequest whose approval created this auction. Absent only on pre-MAZAD-035 (legacy) rows. */
+  @Prop({ type: Types.ObjectId, ref: 'AuctionRequest', immutable: true }) originRequestId?: Types.ObjectId;
+  /** The request revision that was approved (with `originRequestId`, unique: one approval creates at most one auction). */
+  @Prop({ type: Number, min: 1, immutable: true }) originRequestRevision?: number;
+  @Prop({ type: Types.ObjectId, ref: 'User', immutable: true }) approvedByActorId?: Types.ObjectId;
+  @Prop({ type: Date, immutable: true }) approvedAt?: Date;
+
+  // --- Activation gate (MAZAD-035) ---
+  @Prop({ type: AuctionActivationHoldSchema }) activationHold?: AuctionActivationHold;
+
+  /**
+   * MAZAD-035: incremented by every NEW entry-payment attempt, in the attempt's
+   * own transaction. It makes payment initiation write this document, so it
+   * conflicts with (and is serialised against) cancellation and the seller's
+   * pre-start revision, which must never miss a concurrently opened attempt.
+   */
+  @Prop({ type: Number, default: 0, min: 0 }) entryPaymentAttemptCount?: number;
 
   // --- Bidding state (MAZAD-027) ---
   /**
@@ -149,6 +178,11 @@ export class Auction {
   @Prop({ type: Types.ObjectId, ref: 'User' }) cancelledByActorId?: Types.ObjectId;
   @Prop() cancelledAt?: Date;
   @Prop({ trim: true, maxlength: 1000 }) cancellationReason?: string;
+  /** MAZAD-035: structured code (Admin reason code, SELLER_CANCELLED or TERMS_REVISED). */
+  @Prop({ type: String, maxlength: 64 }) cancellationReasonCode?: string;
+  @Prop({ type: String, enum: ['SELLER', 'ADMIN'] }) cancelledBySource?: 'SELLER' | 'ADMIN';
+  /** Admin-only cancellation note; never projected to the seller or the public. */
+  @Prop({ trim: true, maxlength: 1000 }) cancellationInternalNote?: string;
 
   // --- Completion / winner (MAZAD-030) ---
   /**
@@ -188,3 +222,8 @@ AuctionSchema.index({ status: 1, scheduledStartAt: 1 }, { name: 'auction_status_
 AuctionSchema.index({ status: 1, currentEndAt: 1 }, { name: 'auction_status_end_schedule' });
 // Public auction listing/discovery, newest first, filtered by status.
 AuctionSchema.index({ status: 1, createdAt: -1 }, { name: 'auction_public_listing_newest' });
+// MAZAD-035: one approval (request + approved revision) can create at most one auction.
+AuctionSchema.index(
+  { originRequestId: 1, originRequestRevision: 1 },
+  { unique: true, partialFilterExpression: { originRequestId: { $exists: true } }, name: 'auction_origin_request_revision' },
+);

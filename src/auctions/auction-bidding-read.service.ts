@@ -92,8 +92,16 @@ export class AuctionBiddingReadService {
         nextMinimumBidMinor: computeNextMinimumBidMinor(auction.startingPriceMinor, auction.minimumBidStepMinor, highest?.amountMinor),
         status: auction.status,
         currentEndAt: auction.currentEndAt as Date,
-        /** Whether a bidder must pay an entry fee (and how much). Safe, server-owned; no provider detail. */
-        entryFee: fee ? { required: true, amountMinor: fee.amountMinor as number, currency: fee.currency as string } : { required: false, configured: false },
+        /**
+         * Whether a bidder must pay an entry fee (and how much). Safe, server-owned; no provider detail.
+         * MAZAD-035: `required` means "a payment is required"; an explicit 0 fee is a configured FREE auction
+         * (`required: false, configured: true, free: true`), never confused with a missing fee (`configured: false`).
+         */
+        entryFee: fee
+          ? (fee.amountMinor === 0
+            ? { required: false, configured: true, free: true, amountMinor: 0, currency: fee.currency as string }
+            : { required: true, configured: true, free: false, amountMinor: fee.amountMinor as number, currency: fee.currency as string })
+          : { required: false, configured: false, free: false },
       };
     }
     /* unreachable: the loop returns or throws */

@@ -10,6 +10,7 @@ import { AuctionLifecycleService } from '../src/auctions/auction-lifecycle.servi
 import { AuctionsController } from '../src/auctions/auctions.controller';
 import { AuctionsQueryService } from '../src/auctions/auctions-query.service';
 import { AuctionsService } from '../src/auctions/auctions.service';
+import { AuctionAdminService } from '../src/auctions/auction-admin.service';
 import { RolesGuard } from '../src/auth/roles.guard';
 import { AuctionErrorCode } from '../src/common/errors/auction-error-codes';
 import { AccountType, BrokerStatus } from '../src/users/identity.types';
@@ -44,8 +45,10 @@ class TestJwtAuthGuard implements CanActivate {
 
 describe('auction HTTP contract (MAZAD-025)', () => {
   let app: INestApplication;
-  const auctions = { create: jest.fn() };
-  const lifecycle = { cancel: jest.fn() };
+  // MAZAD-035: direct creation is retired; the real (stateless) rejection runs so its HTTP shape is proven.
+  const auctions = { rejectDirectCreation: jest.fn(() => AuctionsService.prototype.rejectDirectCreation.call({})) };
+  const lifecycle = { cancel: jest.fn(), cancelByAdmin: jest.fn() };
+  const operations = { getDetail: jest.fn(), listBids: jest.fn() };
   const queries = {
     listMine: jest.fn(), getMine: jest.fn(), listPublic: jest.fn(), getPublic: jest.fn(), listForAdmin: jest.fn(), getForAdmin: jest.fn(),
   };
@@ -62,6 +65,7 @@ describe('auction HTTP contract (MAZAD-025)', () => {
         { provide: AuctionsService, useValue: auctions },
         { provide: AuctionLifecycleService, useValue: lifecycle },
         { provide: AuctionsQueryService, useValue: queries },
+        { provide: AuctionAdminService, useValue: operations },
       ],
     }).overrideGuard(JwtAuthGuard).useClass(TestJwtAuthGuard).compile();
     app = moduleRef.createNestApplication<NestExpressApplication>();
@@ -71,8 +75,10 @@ describe('auction HTTP contract (MAZAD-025)', () => {
   afterAll(() => app.close());
   beforeEach(() => {
     jest.clearAllMocks();
-    auctions.create.mockResolvedValue({ message: 'ok', auction: { id: AUCTION_ID } });
     lifecycle.cancel.mockResolvedValue({ message: 'ok', auction: { id: AUCTION_ID } });
+    lifecycle.cancelByAdmin.mockResolvedValue({ message: 'ok', auction: { id: AUCTION_ID } });
+    operations.getDetail.mockResolvedValue({ auction: { id: AUCTION_ID } });
+    operations.listBids.mockResolvedValue({ items: [], nextAfterSequence: null });
     for (const fn of Object.values(queries)) fn.mockResolvedValue({ items: [] });
   });
 
@@ -117,9 +123,11 @@ describe('auction HTTP contract (MAZAD-025)', () => {
       await server().post(`/api/v1/auctions/mine/${AUCTION_ID}/cancel`).send({}).expect(401);
     });
 
-    it('lets an eligible USER create, using the token identity', async () => {
-      await server().post('/api/v1/auctions').set('Authorization', 'Bearer user').send(body).expect(201);
-      expect(auctions.create).toHaveBeenCalledWith(ME, expect.objectContaining({ propertyId: PROPERTY_ID }), expect.anything());
+    it('MAZAD-035: POST /auctions is retired — an eligible USER gets 409 AUCTION_REVIEW_REQUIRED and nothing is created', async () => {
+      for (const payload of [body, { ...body, status: 'scheduled' }, {}]) {
+        const res = await server().post('/api/v1/auctions').set('Authorization', 'Bearer user').send(payload).expect(409);
+        expect(codeOf(res)).toBe(AuctionErrorCode.REVIEW_REQUIRED);
+      }
     });
 
     it.each(['admin', 'super-admin'])('rejects %s from create/read/cancel before any service runs', async (role) => {
@@ -128,7 +136,7 @@ describe('auction HTTP contract (MAZAD-025)', () => {
       await server().get('/api/v1/auctions/mine').set('Authorization', `Bearer ${role}`).expect(403);
       await server().get(`/api/v1/auctions/mine/${AUCTION_ID}`).set('Authorization', `Bearer ${role}`).expect(403);
       await server().post(`/api/v1/auctions/mine/${AUCTION_ID}/cancel`).set('Authorization', `Bearer ${role}`).send({}).expect(403);
-      expect(auctions.create).not.toHaveBeenCalled();
+      expect(auctions.rejectDirectCreation).not.toHaveBeenCalled();
       expect(lifecycle.cancel).not.toHaveBeenCalled();
       expect(queries.listMine).not.toHaveBeenCalled();
     });
@@ -137,15 +145,7 @@ describe('auction HTTP contract (MAZAD-025)', () => {
       await server().post('/api/v1/auctions').set('Authorization', 'Bearer pending-broker').send(body).expect(403);
       await server().post(`/api/v1/auctions/mine/${AUCTION_ID}/cancel`).set('Authorization', 'Bearer pending-broker').send({}).expect(403);
       await server().get('/api/v1/auctions/mine').set('Authorization', 'Bearer pending-broker').expect(200);
-      expect(auctions.create).not.toHaveBeenCalled();
-    });
-
-    it('rejects client-supplied attribution/state on create with AUCTION_REQUEST_INVALID', async () => {
-      for (const extra of [{ advertiserAccountId: '64b000000000000000000a02' }, { status: 'active' }, { propertyRevisionId: AUCTION_ID }]) {
-        const res = await server().post('/api/v1/auctions').set('Authorization', 'Bearer user').send({ ...body, ...extra }).expect(400);
-        expect(codeOf(res)).toBe(AuctionErrorCode.REQUEST_INVALID);
-      }
-      expect(auctions.create).not.toHaveBeenCalled();
+      expect(auctions.rejectDirectCreation).not.toHaveBeenCalled();
     });
 
     it('cancels via the lifecycle service with reason and optimistic expectedStatus', async () => {
@@ -180,11 +180,13 @@ describe('auction HTTP contract (MAZAD-025)', () => {
   });
 
   describe('admin routes', () => {
-    it('allow ADMIN and SUPER_ADMIN to read', async () => {
+    it('allow ADMIN and SUPER_ADMIN to read (list, operational detail, staff bid ledger)', async () => {
       await server().get('/api/v1/admin/auctions?status=cancelled').set('Authorization', 'Bearer admin').expect(200);
       await server().get(`/api/v1/admin/auctions/${AUCTION_ID}`).set('Authorization', 'Bearer super-admin').expect(200);
+      await server().get(`/api/v1/admin/auctions/${AUCTION_ID}/bids?afterSequence=3&limit=20`).set('Authorization', 'Bearer admin').expect(200);
       expect(queries.listForAdmin).toHaveBeenCalledWith(expect.objectContaining({ status: 'cancelled' }));
-      expect(queries.getForAdmin).toHaveBeenCalledWith(AUCTION_ID);
+      expect(operations.getDetail).toHaveBeenCalledWith(AUCTION_ID);
+      expect(operations.listBids).toHaveBeenCalledWith(AUCTION_ID, expect.objectContaining({ afterSequence: 3, limit: 20 }));
     });
 
     it('reject marketplace users and anonymous callers', async () => {
@@ -193,12 +195,25 @@ describe('auction HTTP contract (MAZAD-025)', () => {
       expect(queries.listForAdmin).not.toHaveBeenCalled();
     });
 
-    it('expose no mutation routes', async () => {
+    it('expose no mutation route except cancellation (no bid edit, no winner choice, no create)', async () => {
       for (const method of ['post', 'patch', 'put', 'delete'] as const) {
         const res = await (server() as any)[method](`/api/v1/admin/auctions/${AUCTION_ID}`).set('Authorization', 'Bearer admin').send({});
         expect(res.status).toBe(404);
       }
       await server().post('/api/v1/admin/auctions').set('Authorization', 'Bearer admin').send(body).expect(404);
+      for (const path of ['bids', 'winner', 'finalize']) {
+        await server().post(`/api/v1/admin/auctions/${AUCTION_ID}/${path}`).set('Authorization', 'Bearer admin').send({}).expect(404);
+      }
+    });
+
+    it('MAZAD-035: Admin cancel passes the structured reason, note and mandatory expectedStatus to the lifecycle service', async () => {
+      await server().post(`/api/v1/admin/auctions/${AUCTION_ID}/cancel`).set('Authorization', 'Bearer admin')
+        .send({ reasonCode: 'FRAUD_SUSPECTED', note: 'x', expectedStatus: 'active' }).expect(201);
+      expect(lifecycle.cancelByAdmin).toHaveBeenCalledWith(ME, AUCTION_ID, { reasonCode: 'FRAUD_SUSPECTED', note: 'x', expectedStatus: 'active' }, expect.anything());
+      const missing = await server().post(`/api/v1/admin/auctions/${AUCTION_ID}/cancel`).set('Authorization', 'Bearer admin').send({ reasonCode: 'OTHER' }).expect(400);
+      expect(codeOf(missing)).toBe(AuctionErrorCode.REQUEST_INVALID);
+      await server().post(`/api/v1/admin/auctions/${AUCTION_ID}/cancel`).set('Authorization', 'Bearer user').send({ reasonCode: 'OTHER', expectedStatus: 'active' }).expect(403);
+      expect(lifecycle.cancelByAdmin).toHaveBeenCalledTimes(1);
     });
 
     it('validates admin query filters', async () => {

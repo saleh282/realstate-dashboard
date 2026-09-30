@@ -97,8 +97,12 @@ export class AuctionEntryPaymentService {
       throw new ConflictException({ message: 'لا يمكن دفع رسوم الاشتراك لهذا المزاد', code: PaymentErrorCode.AUCTION_NOT_PAYABLE });
     }
     const fee = auction.entryFee;
-    if (!fee || !isMoneyMinorAmount(fee.amountMinor, { positive: true }) || fee.currency !== EGP_CURRENCY) {
+    if (!fee || !isMoneyMinorAmount(fee.amountMinor) || fee.currency !== EGP_CURRENCY) {
       throw new ConflictException({ message: 'لم يتم تحديد رسوم الاشتراك لهذا المزاد', code: PaymentErrorCode.ENTRY_FEE_NOT_CONFIGURED });
+    }
+    // MAZAD-035: a FREE auction (explicit 0 fee) never creates a payment record, real or fabricated.
+    if (fee.amountMinor === 0) {
+      throw new ConflictException({ message: 'هذا المزاد مجاني ولا يتطلب دفع رسوم اشتراك', code: PaymentErrorCode.NOT_REQUIRED });
     }
 
     const entitled = await this.entitlements.exists({ auctionId: auction._id, bidderAccountId: new Types.ObjectId(actorId) }).session(session).exec();
@@ -122,6 +126,18 @@ export class AuctionEntryPaymentService {
     this.assertProviderAvailable();
 
     const now = this.clock.now();
+    // MAZAD-035: write the Auction document (the aggregate's serialisation point) so this attempt conflicts with a
+    // concurrent cancellation or pre-start revision instead of slipping past their "no payments exist" checks.
+    const guarded = await this.auctions
+      .updateOne(
+        { _id: auction._id, status: { $in: [AuctionStatus.SCHEDULED, AuctionStatus.ACTIVE] } },
+        { $inc: { entryPaymentAttemptCount: 1 } },
+        { session },
+      )
+      .exec();
+    if (!guarded.matchedCount) {
+      throw new ConflictException({ message: 'لا يمكن دفع رسوم الاشتراك لهذا المزاد', code: PaymentErrorCode.AUCTION_NOT_PAYABLE });
+    }
     const [created] = await this.payments.create(
       [{
         auctionId: auction._id,

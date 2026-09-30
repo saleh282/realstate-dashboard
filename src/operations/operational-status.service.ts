@@ -15,6 +15,8 @@ export type OperationalStatus = {
   database: 'up' | 'down';
   migrations: { failed: string[]; running: string[]; lockHeld: boolean; complete: number };
   evidenceCleanup: { pending: number; oldestPendingAgeSeconds: number | null };
+  /** MAZAD-035: SCHEDULED auctions the activation gate refused to start (an Admin must decide, e.g. cancel). */
+  auctions: { activationHeld: number };
   counters: Record<string, number>;
   /** Names of the areas that need an operator's attention (empty when everything is quiet). */
   attention: string[];
@@ -45,11 +47,12 @@ export class OperationalStatusService {
       payment: { provider: this.provider.providerKey, configured: this.provider.configured },
       counters: operationalMetrics.snapshot(),
     };
-    if (!db) return { ...base, database: 'down', migrations: { failed: [], running: [], lockHeld: false, complete: 0 }, evidenceCleanup: { pending: 0, oldestPendingAgeSeconds: null }, attention: ['database'] };
+    if (!db) return { ...base, database: 'down', migrations: { failed: [], running: [], lockHeld: false, complete: 0 }, evidenceCleanup: { pending: 0, oldestPendingAgeSeconds: null }, auctions: { activationHeld: 0 }, attention: ['database'] };
 
     let database: 'up' | 'down' = 'up';
     let migrations: OperationalStatus['migrations'] = { failed: [], running: [], lockHeld: false, complete: 0 };
     let evidenceCleanup: OperationalStatus['evidenceCleanup'] = { pending: 0, oldestPendingAgeSeconds: null };
+    let auctions: OperationalStatus['auctions'] = { activationHeld: 0 };
     try {
       const ledger = await db.collection('migration_ledger').find({}, { projection: { migrationId: 1, status: 1 } }).toArray();
       const lock = await db.collection('migration_locks').findOne({ _id: 'global' as never, expiresAt: { $gt: now } });
@@ -65,6 +68,8 @@ export class OperationalStatusService {
         cleanup.find({ status: 'pending' }, { projection: { createdAt: 1 } }).sort({ createdAt: 1 }).limit(1).toArray(),
       ]);
       evidenceCleanup = { pending, oldestPendingAgeSeconds: oldest[0]?.createdAt ? Math.max(0, Math.floor((now.getTime() - new Date(oldest[0].createdAt).getTime()) / 1000)) : null };
+      // Served by the (status, scheduledStartAt) index; held auctions are few by construction.
+      auctions = { activationHeld: await db.collection('auctions').countDocuments({ status: 'scheduled', activationHold: { $exists: true } }) };
     } catch {
       database = 'down';
     }
@@ -76,6 +81,7 @@ export class OperationalStatusService {
     if (evidenceCleanup.oldestPendingAgeSeconds !== null && evidenceCleanup.oldestPendingAgeSeconds > alertAge) attention.push('evidence_cleanup_stalled');
     if ((base.counters.outbox_dead_lettered ?? 0) > 0) attention.push('outbox_dead_lettered');
     if ((base.counters.auction_anchor_unresolved ?? 0) > 0) attention.push('auction_anchor_unresolved');
-    return { ...base, database, migrations, evidenceCleanup, attention };
+    if (auctions.activationHeld > 0) attention.push('auction_activation_held');
+    return { ...base, database, migrations, evidenceCleanup, auctions, attention };
   }
 }

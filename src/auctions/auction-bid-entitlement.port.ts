@@ -17,7 +17,8 @@ import { BidErrorCode } from '../common/errors/bid-error-codes';
  * Mirrors the `AUCTION_BID_EXISTENCE_PORT` token pattern.
  */
 export interface AuctionBidEntitlementPort {
-  assertEntitled(context: { auctionId: string; bidderAccountId: string; session: ClientSession }): Promise<void>;
+  /** `entryFee` is the auction's configured fee as read in the acceptance transaction (MAZAD-035: 0 = FREE). */
+  assertEntitled(context: { auctionId: string; bidderAccountId: string; session: ClientSession; entryFee?: { amountMinor?: unknown; currency?: unknown } | null }): Promise<void>;
 }
 
 export const AUCTION_BID_ENTITLEMENT_PORT = Symbol('AUCTION_BID_ENTITLEMENT_PORT');

@@ -21,12 +21,11 @@ import { UsersService } from '../src/users/users.service';
 import { SystemRole } from '../src/auth/roles.enum';
 import { AccountStatus, AccountType, BrokerStatus, PrimaryIdentifierType, VerificationTrustState } from '../src/users/identity.types';
 import { hashPassword } from '../src/common/security/password-hashing';
-import { AuctionsService } from '../src/auctions/auctions.service';
+import { AuctionRequestsService } from '../src/auctions/auction-requests.service';
 import { AuctionLifecycleService } from '../src/auctions/auction-lifecycle.service';
 import { AuctionFinalizationService } from '../src/auctions/auction-finalization.service';
 import { AuctionBidAcceptanceService } from '../src/auctions/auction-bid-acceptance.service';
 import { AuctionsQueryService } from '../src/auctions/auctions-query.service';
-import { AuctionEntryFeeService } from '../src/payments/auction-entry-fee.service';
 import { AuctionEntryPaymentService } from '../src/payments/auction-entry-payment.service';
 import { AuctionPaymentConfirmationService } from '../src/payments/auction-payment-confirmation.service';
 import { ManagedMarketingPaymentService } from '../src/payments/managed-marketing-payment.service';
@@ -120,12 +119,14 @@ describeLocal('Phase 13 extended local E2E: property, auction, fake payments, bi
     const pending = await db.collection('property_revisions').findOne({ _id: new ObjectId(submitted.revisionId) });
     await properties.reviewForAdmin(propertyId, submitted.revisionId, pending!.decisionVersion, 'approved', undefined, adminId);
     now = new Date();
-    const created = await app.get(AuctionsService).create(ownerId, {
+    // MAZAD-035: seller request -> Admin approval with the fee (the only way an auction is created now).
+    const requests = app.get(AuctionRequestsService);
+    const submittedRequest = await requests.submit(ownerId, {
       propertyId, startingPriceMinor: 1_000_000, minimumBidStepMinor: 50_000,
-      scheduledStartAt: new Date(now.getTime() + 60_000), scheduledEndAt: new Date(now.getTime() + 3_600_000),
+      proposedStartAt: new Date(now.getTime() + 60_000), proposedEndAt: new Date(now.getTime() + 60_000 + 3_600_000),
     });
-    auctionId = created.auction.id;
-    await app.get(AuctionEntryFeeService).configure(adminId, auctionId, 50_000);
+    const approved = await requests.review(adminId, submittedRequest.request.id, { decision: 'approve', expectedRevision: submittedRequest.request.revision, entryFeeMinor: 50_000 });
+    auctionId = approved.request.auctionId!;
     expect((await db.collection('auctions').findOne({ _id: new ObjectId(auctionId) }))!.status).toBe('scheduled');
   }, 60000);
 

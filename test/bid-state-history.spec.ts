@@ -103,9 +103,12 @@ describe('current bid state (MAZAD-029)', () => {
   it('exposes only safe entry-fee information: required + amount when configured, a not-configured marker otherwise', async () => {
     const configured = build({ auction: { entryFee: { amountMinor: 25_000, currency: 'EGP', configuredByActorId: oid(ALICE), configuredAt: NOW } } });
     const { bidding } = await configured.service.getPublicBidState(AUCTION);
-    expect(bidding.entryFee).toEqual({ required: true, amountMinor: 25_000, currency: 'EGP' });
+    expect(bidding.entryFee).toEqual({ required: true, configured: true, free: false, amountMinor: 25_000, currency: 'EGP' });
+    // MAZAD-035: an explicit 0 is a configured FREE auction, not a required payment and not "not configured".
+    const free = build({ auction: { entryFee: { amountMinor: 0, currency: 'EGP', configuredByActorId: oid(ALICE), configuredAt: NOW } } });
+    expect((await free.service.getPublicBidState(AUCTION)).bidding.entryFee).toEqual({ required: false, configured: true, free: true, amountMinor: 0, currency: 'EGP' });
     expect(JSON.stringify(bidding)).not.toContain(ALICE);
-    expect((await build().service.getPublicBidState(AUCTION)).bidding.entryFee).toEqual({ required: false, configured: false });
+    expect((await build().service.getPublicBidState(AUCTION)).bidding.entryFee).toEqual({ required: false, configured: false, free: false });
   });
 
   it('never emits bidder identity, payment or provider data', async () => {

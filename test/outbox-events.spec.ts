@@ -63,6 +63,7 @@ describe('event catalogue: names, versions, aggregates (MAZAD-031)', () => {
       'AUCTION_ACTIVATED', 'AUCTION_CANCELLED', 'AUCTION_END_EXTENDED', 'AUCTION_ENDED_NO_BIDS', 'AUCTION_ENDED_PENDING_CLOSE', 'AUCTION_ENTRY_PAYMENT_CONFIRMED',
       'AUCTION_FINALIZED', 'BID_ACCEPTED', 'MANAGED_MARKETING_PAYMENT_CONFIRMED',
       'KYC_APPROVED', 'KYC_REJECTED', 'PROPERTY_APPROVED', 'PROPERTY_REJECTED',
+      'AUCTION_REQUEST_APPROVED', 'AUCTION_REQUEST_REJECTED',
     ].sort());
     for (const name of Object.values(OutboxEventType)) expect(name).toMatch(/^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/);
   });
@@ -78,9 +79,12 @@ describe('event catalogue: names, versions, aggregates (MAZAD-031)', () => {
     expect(Object.values(OutboxEventType).filter((t) => /PAYMENT/.test(t))).toEqual(['AUCTION_ENTRY_PAYMENT_CONFIRMED', 'MANAGED_MARKETING_PAYMENT_CONFIRMED']);
     expect(OUTBOX_EVENT_AGGREGATES[OutboxEventType.AUCTION_ENTRY_PAYMENT_CONFIRMED]).toBe(OutboxAggregateType.AUCTION_ENTRY_PAYMENT);
     expect(OUTBOX_EVENT_AGGREGATES[OutboxEventType.MANAGED_MARKETING_PAYMENT_CONFIRMED]).toBe(OutboxAggregateType.MANAGED_MARKETING_REQUEST);
-    for (const type of Object.values(OutboxEventType).filter((t) => t.startsWith('AUCTION_') && !/PAYMENT/.test(t))) {
+    for (const type of Object.values(OutboxEventType).filter((t) => t.startsWith('AUCTION_') && !/PAYMENT/.test(t) && !t.startsWith('AUCTION_REQUEST_'))) {
       expect(OUTBOX_EVENT_AGGREGATES[type]).toBe(OutboxAggregateType.AUCTION);
     }
+    // MAZAD-035: review decisions live on their own stream so the auction's realtime streamVersion never counts them.
+    expect(OUTBOX_EVENT_AGGREGATES[OutboxEventType.AUCTION_REQUEST_APPROVED]).toBe(OutboxAggregateType.AUCTION_REQUEST);
+    expect(OUTBOX_EVENT_AGGREGATES[OutboxEventType.AUCTION_REQUEST_REJECTED]).toBe(OutboxAggregateType.AUCTION_REQUEST);
     expect(OUTBOX_EVENT_AGGREGATES[OutboxEventType.BID_ACCEPTED]).toBe(OutboxAggregateType.AUCTION);
   });
 

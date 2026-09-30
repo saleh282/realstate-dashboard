@@ -37,6 +37,16 @@ function outcome(item: AuctionRecord) {
   };
 }
 
+/**
+ * MAZAD-035: the Admin-approved entry fee. `free` is true only for an explicitly
+ * configured 0; an absent fee is `configured: false` (fails closed), never free.
+ */
+export function entryFeeView(item: AuctionRecord) {
+  const fee = item.entryFee;
+  if (!fee || typeof fee.amountMinor !== 'number') return { configured: false, free: false, amountMinor: null, currency: item.currency };
+  return { configured: true, free: fee.amountMinor === 0, amountMinor: fee.amountMinor, currency: fee.currency };
+}
+
 function core(item: AuctionRecord) {
   return {
     id: item._id.toString(),
@@ -48,6 +58,7 @@ function core(item: AuctionRecord) {
     scheduledEndAt: item.scheduledEndAt,
     currentEndAt: item.currentEndAt,
     rules: publicRules(item),
+    entryFee: entryFeeView(item),
     ...(outcome(item) ? { result: outcome(item) } : {}),
   };
 }
@@ -76,12 +87,15 @@ export function toOwnAuction(item: AuctionRecord, property: unknown | null) {
     advertiserAccountTypeSnapshot: item.advertiserAccountTypeSnapshot,
     cancelledAt: item.cancelledAt,
     cancellationReason: item.cancellationReason,
+    cancellationReasonCode: item.cancellationReasonCode,
+    cancelledBySource: item.cancelledBySource,
+    originRequestId: item.originRequestId?.toString?.() ?? null,
     createdAt: item.createdAt,
     property,
   };
 }
 
-/** Read-only operational view for staff: attribution and cancellation actors included, no bid/payment/winner data (none exists yet). */
+/** Operational view for staff: attribution, approval, activation hold and cancellation details (incl. the Admin-only note). */
 export function toAdminAuction(item: AuctionRecord) {
   return {
     ...core(item),
@@ -93,6 +107,14 @@ export function toAdminAuction(item: AuctionRecord) {
     cancelledByActorId: item.cancelledByActorId?.toString?.(),
     cancelledAt: item.cancelledAt,
     cancellationReason: item.cancellationReason,
+    cancellationReasonCode: item.cancellationReasonCode,
+    cancelledBySource: item.cancelledBySource,
+    cancellationInternalNote: item.cancellationInternalNote,
+    acceptedBidCount: item.acceptedBidCount ?? 0,
+    originRequestId: item.originRequestId?.toString?.() ?? null,
+    approvedByActorId: item.approvedByActorId?.toString?.(),
+    approvedAt: item.approvedAt,
+    activationHold: item.activationHold ? { code: item.activationHold.code, at: item.activationHold.at } : null,
     // Staff-only winner references (MAZAD-030): read-only; nobody can choose or override the winner.
     ...(outcome(item)
       ? { winner: { accountId: item.winnerAccountId?.toString?.(), accountTypeSnapshot: item.winnerAccountTypeSnapshot, bidId: item.winningBidId?.toString?.(), acceptedAt: item.winningBidAcceptedAt } }

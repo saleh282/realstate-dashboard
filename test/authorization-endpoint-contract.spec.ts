@@ -18,6 +18,10 @@ import { AdminPropertyPurposeCategoriesController } from '../src/property-purpos
 import { AdminPropertyTypesController } from '../src/property-types/admin-property-types.controller';
 import { AdminPropertyAttributesController } from '../src/property-form-definitions/admin-property-attributes.controller';
 import { AdminPropertyFormDefinitionsController } from '../src/property-form-definitions/admin-property-form-definitions.controller';
+import { AdminAuctionRequestsController } from '../src/auctions/admin-auction-requests.controller';
+import { AdminAuctionsController } from '../src/auctions/admin-auctions.controller';
+import { AuctionRequestsController } from '../src/auctions/auction-requests.controller';
+import { AuctionsController } from '../src/auctions/auctions.controller';
 
 function capabilities(target: object, method?: string): Capability[] | undefined {
   return Reflect.getMetadata(
@@ -83,5 +87,16 @@ describe('MAZAD-016 endpoint policy contract', () => {
     expect(capabilities(BrokerApplicationsController, 'submit')).toEqual([
       Capability.BROKER_APPLICATION_SUBMIT,
     ]);
+  });
+
+  it('MAZAD-035: declares seller and Admin auction review policies (ordinary moderation is not SUPER_ADMIN-only)', () => {
+    expect(capabilities(AuctionRequestsController, 'submit')).toEqual([Capability.AUCTION_CREATE_OWN]);
+    for (const method of ['listMine', 'getMine', 'eligibleProperties']) expect(capabilities(AuctionRequestsController, method)).toEqual([Capability.AUCTION_READ_OWN]);
+    for (const method of ['update', 'resubmit', 'withdraw']) expect(capabilities(AuctionRequestsController, method)).toEqual([Capability.AUCTION_MANAGE_OWN]);
+    expect(capabilities(AdminAuctionRequestsController)).toEqual([Capability.ADMIN_AUCTION_READ]);
+    expect(capabilities(AdminAuctionRequestsController, 'review')).toEqual([Capability.ADMIN_AUCTION_REVIEW]);
+    expect(capabilities(AdminAuctionsController)).toEqual([Capability.ADMIN_AUCTION_READ]);
+    expect(capabilities(AdminAuctionsController, 'cancel')).toEqual([Capability.ADMIN_AUCTION_CANCEL]);
+    expect(capabilities(AuctionsController, 'create')).toEqual([Capability.AUCTION_CREATE_OWN]);
   });
 });

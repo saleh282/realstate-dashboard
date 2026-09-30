@@ -35,6 +35,7 @@ import { PHASE9_PROMOTED_FACET_KEYS, promotePhase9Facets, scanPhase9FacetPromoti
 import { backfillPhase9FacetsBatch, scanPhase9FacetBackfill } from '../031-phase9-facet-backfill';
 import { scanPhase10RegistrySeed, seedPhase10Registry } from '../032-phase10-unit-floor-level-registry';
 import { scanExistingAmenityCatalog, scanPhase11AmenitySeed, seedPhase11Amenities } from '../033-phase11-amenity-catalog';
+import { MAZAD035_INDEXES, scanMazad035LegacyAuctions } from '../036-mazad035-auction-review';
 
 function afterCheckpoint(checkpoint?: string): Record<string, unknown> {
   if (!checkpoint) return {};
@@ -1226,6 +1227,68 @@ export const phase13RetireSupersededListingIndexesMigration: MigrationDefinition
   },
 };
 
+async function mazad035IndexProblems(db: MigrationContext['db']) {
+  const missing: string[] = [];
+  const conflicting: string[] = [];
+  for (const collection of [...new Set(MAZAD035_INDEXES.map((index) => index.collection))]) {
+    const expected = MAZAD035_INDEXES.filter((index) => index.collection === collection);
+    const indexes = await existingIndexes(db, collection);
+    const problems = indexSetProblems(indexes, expected as unknown as NamedIndex[]);
+    missing.push(...problems.missing);
+    conflicting.push(...problems.conflicting);
+    // These options are part of the workflow's race guarantee, not just the key/name.
+    for (const spec of expected) {
+      const existing = indexes.find((index) => index.name === spec.options.name) as (ExistingIndex & { partialFilterExpression?: Record<string, unknown> }) | undefined;
+      if (existing && (Boolean(existing.unique) !== Boolean(spec.options.unique)
+        || JSON.stringify(existing.partialFilterExpression ?? null) !== JSON.stringify(spec.options.partialFilterExpression ?? null))) {
+        if (!conflicting.includes(spec.options.name)) conflicting.push(spec.options.name);
+      }
+    }
+  }
+  return { missing, conflicting };
+}
+
+/**
+ * MAZAD-035: the auction review workflow's indexes (AuctionRequest queue/history, the race-safe one-live-origination
+ * key, one auction per approval, per-auction payment reads). Additive only; legacy auctions are reported, not changed.
+ */
+export const mazad035AuctionReviewMigration: MigrationDefinition = {
+  id: '036-mazad035-auction-review-indexes',
+  version: 1,
+  description: 'MAZAD-035: create the auction_requests indexes (incl. the unique per-property live key), the unique (originRequestId, originRequestRevision) auction index and the per-auction payment index; report pre-review auctions',
+  dependencies: [],
+  rollback: {
+    kind: 'none',
+    remediation: 'The indexes are purely additive. Dropping auction_request_live_property or auction_origin_request_revision removes a race-safety guarantee of the review workflow; do not drop them while the workflow is deployed.',
+    restoreProcedure: 'No documents are modified. If a reviewed rollback is required, drop only the seven indexes named by this migration.',
+  },
+  async preflight({ db }) {
+    const { missing, conflicting } = await mazad035IndexProblems(db);
+    const legacy = await scanMazad035LegacyAuctions(db);
+    return {
+      eligible: missing.length,
+      alreadyApplied: MAZAD035_INDEXES.length - missing.length - conflicting.length,
+      blockers: [
+        ...(conflicting.length ? [{ code: 'MAZAD035_INDEX_CONFLICT', message: `An index named ${conflicting.join(', ')} exists with a different key or safety options` }] : []),
+        ...(legacy.duplicateLiveKeys.length ? [{ code: 'MAZAD035_DUPLICATE_LIVE_REQUEST', message: 'More than one live auction request exists for a property', sampleIds: legacy.duplicateLiveKeys }] : []),
+      ],
+      summary: { indexNames: MAZAD035_INDEXES.map((index) => index.options.name), legacyAuctions: legacy },
+    };
+  },
+  async migrateBatch({ db }) {
+    for (const index of MAZAD035_INDEXES) await db.collection(index.collection).createIndex(index.key as never, index.options);
+    return { scanned: MAZAD035_INDEXES.length, modified: MAZAD035_INDEXES.length, done: true };
+  },
+  async validate({ db }) {
+    const { missing, conflicting } = await mazad035IndexProblems(db);
+    return {
+      valid: !missing.length && !conflicting.length,
+      errors: [...missing, ...conflicting].map((name) => ({ code: 'MAZAD035_INDEX_MISSING', message: `Required auction review index ${name} is missing or has a different key or safety options` })),
+      summary: { missingIndexes: missing, conflictingIndexes: conflicting, legacyAuctions: await scanMazad035LegacyAuctions(db) },
+    };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
@@ -1250,6 +1313,7 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   phase11AmenityCatalogMigration,
   phase13SortableListingIndexesMigration,
   phase13RetireSupersededListingIndexesMigration,
+  mazad035AuctionReviewMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {

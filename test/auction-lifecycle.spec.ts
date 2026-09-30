@@ -11,6 +11,8 @@ import {
 } from '../src/auctions/auction-transitions';
 import { AuctionStatus } from '../src/auctions/auction.types';
 import { AuctionLifecycleService } from '../src/auctions/auction-lifecycle.service';
+import { AuctionActivationGate } from '../src/auctions/auction-activation-gate';
+import { AuctionParticipantsReader } from '../src/auctions/auction-participants.reader';
 import { BidLedgerService } from '../src/bids/bid-ledger.service';
 import { AuctionLifecycleWorker } from '../src/auctions/auction-lifecycle.worker';
 import { OutboxService } from '../src/outbox/outbox.service';
@@ -78,6 +80,7 @@ function matchesFilter(doc: Record<string, any>, filter: Record<string, any>): b
     if (cond && typeof cond === 'object') {
       if ('$in' in cond) return (cond.$in as unknown[]).includes(value);
       if ('$lte' in cond) return value instanceof Date && value.getTime() <= (cond.$lte as Date).getTime();
+      if ('$gt' in cond) return value instanceof Date && value.getTime() > (cond.$gt as Date).getTime();
       return true;
     }
     return value === cond;
@@ -139,6 +142,8 @@ function lifecycleService(options: {
   actor?: any;
   hasValidBids?: jest.Mock;
   now?: Date;
+  holdCode?: string | null;
+  participants?: string[];
 } = {}) {
   const store = fakeAuctionCollection(options.docs ?? [auctionDoc()]);
   const users = { findById: jest.fn(() => ({ lean: () => ({ exec: async () => (options.actor === undefined ? marketplaceUser() : options.actor) }) })) };
@@ -159,8 +164,11 @@ function lifecycleService(options: {
   // The outbox itself is covered against a transactional model in outbox-domain-events.spec.ts; here it is a spy.
   const outbox = { recordRequired: jest.fn().mockResolvedValue({ eventId: 'e', aggregateVersion: 1 }) };
   const instance = Object.create(AuctionLifecycleService.prototype) as any;
-  Object.assign(instance, { auctions: store.model, users, audit, clock, bidExistence, connection, outbox });
-  return { instance: instance as AuctionLifecycleService, store, users, audit, clock, bidExistence, session, outbox };
+  // MAZAD-035 collaborators: the activation gate passes by default; no paid/entitled bidders unless a test says so.
+  const activationGate = { evaluate: jest.fn(async () => (options.holdCode ?? null)) };
+  const participants = { forCancellation: jest.fn(async () => options.participants ?? []), financialActivity: jest.fn(async () => ({ livePayments: 0, flaggedPayments: 0, entitlements: 0 })) };
+  Object.assign(instance, { auctions: store.model, users, audit, clock, bidExistence, connection, outbox, activationGate, participants });
+  return { instance: instance as AuctionLifecycleService, store, users, audit, clock, bidExistence, session, outbox, activationGate, participants };
 }
 
 async function errorCode(action: () => Promise<unknown>): Promise<string | undefined> {
@@ -228,7 +236,7 @@ describe('AuctionLifecycleService.activateDueAuctions (MAZAD-024)', () => {
       docs: [auctionDoc({ scheduledStartAt: NOW })],
       now: NOW,
     });
-    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 1 });
+    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 1, held: 0 });
     expect(store.docs[0].status).toBe(AuctionStatus.ACTIVE);
     expect(audit.logSystemAction).toHaveBeenCalledWith(AuditAction.AUCTION_ACTIVATED, AUCTION_ID, expect.any(String), expect.anything());
     expect(outbox.recordRequired).toHaveBeenCalledWith(expect.objectContaining({
@@ -241,7 +249,7 @@ describe('AuctionLifecycleService.activateDueAuctions (MAZAD-024)', () => {
       docs: [auctionDoc({ scheduledStartAt: new Date(NOW.getTime() + 1) })],
       now: NOW,
     });
-    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 0 });
+    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 0, held: 0 });
     expect(store.docs[0].status).toBe(AuctionStatus.SCHEDULED);
     expect(audit.logSystemAction).not.toHaveBeenCalled();
   });
@@ -251,14 +259,14 @@ describe('AuctionLifecycleService.activateDueAuctions (MAZAD-024)', () => {
       docs: [auctionDoc({ scheduledStartAt: new Date(NOW.getTime() - 3_600_000) })],
       now: NOW,
     });
-    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 1 });
+    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 1, held: 0 });
     expect(store.docs[0].status).toBe(AuctionStatus.ACTIVE);
   });
 
   it('is idempotent: a second run finds nothing left to activate', async () => {
     const { instance } = lifecycleService({ docs: [auctionDoc({ scheduledStartAt: NOW })], now: NOW });
-    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 1 });
-    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 0 });
+    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 1, held: 0 });
+    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 0, held: 0 });
   });
 
   it('processes every due auction in a batch, one atomic claim per document', async () => {
@@ -270,7 +278,7 @@ describe('AuctionLifecycleService.activateDueAuctions (MAZAD-024)', () => {
       ],
       now: NOW,
     });
-    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 2 });
+    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 2, held: 0 });
     expect(store.docs.find((d) => d._id === 'a1')!.status).toBe(AuctionStatus.ACTIVE);
     expect(store.docs.find((d) => d._id === 'a2')!.status).toBe(AuctionStatus.ACTIVE);
     expect(store.docs.find((d) => d._id === 'a3')!.status).toBe(AuctionStatus.SCHEDULED);
@@ -281,7 +289,7 @@ describe('AuctionLifecycleService.activateDueAuctions (MAZAD-024)', () => {
       docs: [auctionDoc({ status: AuctionStatus.CANCELLED, scheduledStartAt: new Date(NOW.getTime() - 1000) })],
       now: NOW,
     });
-    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 0 });
+    await expect(instance.activateDueAuctions()).resolves.toEqual({ activated: 0, held: 0 });
     expect(store.docs[0].status).toBe(AuctionStatus.CANCELLED);
     expect(audit.logSystemAction).not.toHaveBeenCalled();
   });
@@ -289,7 +297,7 @@ describe('AuctionLifecycleService.activateDueAuctions (MAZAD-024)', () => {
   it('respects the batch limit', async () => {
     const docs = Array.from({ length: 5 }, (_, i) => auctionDoc({ _id: `a${i}`, scheduledStartAt: NOW }));
     const { instance } = lifecycleService({ docs, now: NOW });
-    await expect(instance.activateDueAuctions(2)).resolves.toEqual({ activated: 2 });
+    await expect(instance.activateDueAuctions(2)).resolves.toEqual({ activated: 2, held: 0 });
   });
 });
 
@@ -692,7 +700,7 @@ describe('AuctionLifecycleWorker dependency wiring', () => {
 
     const auctionModel = {
       findOneAndUpdate: jest.fn(() => ({ exec: async () => null })),
-      findOne: jest.fn(() => ({ sort: () => ({ select: () => ({ session: () => ({ lean: () => ({ exec: async () => null }) }) }) }) })),
+      findOne: jest.fn(() => { const chain: any = { sort: () => chain, select: () => chain, session: () => chain, lean: () => chain, exec: async () => null }; return chain; }),
     };
     // Expiry/activation now run in a transaction (MAZAD-031), so the provider graph needs a session-capable connection.
     const txSession = {
@@ -710,6 +718,8 @@ describe('AuctionLifecycleWorker dependency wiring', () => {
         ClockService,
         { provide: BidLedgerService, useValue: { hasAcceptedBids: async () => false } },
         { provide: AUCTION_BID_EXISTENCE_PORT, useClass: BidLedgerAuctionBidExistencePort },
+        { provide: AuctionActivationGate, useValue: { evaluate: async () => null } },
+        { provide: AuctionParticipantsReader, useValue: { forCancellation: async () => [], financialActivity: async () => ({ livePayments: 0, flaggedPayments: 0, entitlements: 0 }) } },
         AuctionLifecycleService,
         AuctionLifecycleWorker,
       ],
@@ -725,6 +735,22 @@ describe('AuctionLifecycleWorker dependency wiring', () => {
 });
 
 describe('AuctionLifecycleService.cancel optimistic expectedStatus (MAZAD-025)', () => {
+  it('seller cancellation fails after clock expiry even before the worker changes ACTIVE', async () => {
+    const { instance, store, audit } = lifecycleService({ docs: [auctionDoc({ status: AuctionStatus.ACTIVE, currentEndAt: NOW })], now: NOW });
+    expect(await errorCode(() => instance.cancel(ADVERTISER_ID, AUCTION_ID, 'too late'))).toBe(AuctionErrorCode.TRANSITION_INVALID);
+    expect(store.docs[0].status).toBe(AuctionStatus.ACTIVE);
+    expect(audit.logRequired).not.toHaveBeenCalled();
+  });
+
+  it('seller cancellation crossing the end boundary fails its transaction write', async () => {
+    const end = new Date(NOW.getTime() + 1);
+    const { instance, store, audit } = lifecycleService({ docs: [auctionDoc({ status: AuctionStatus.ACTIVE, currentEndAt: end })], now: NOW });
+    (instance as any).clock = { now: jest.fn().mockReturnValueOnce(NOW).mockReturnValue(end) };
+    expect(await errorCode(() => instance.cancel(ADVERTISER_ID, AUCTION_ID, 'racing expiry'))).toBe(AuctionErrorCode.STATE_CONFLICT);
+    expect(store.docs[0].status).toBe(AuctionStatus.ACTIVE);
+    expect(audit.logRequired).not.toHaveBeenCalled();
+  });
+
   it('cancels normally when expectedStatus matches the current status', async () => {
     const { instance, store } = lifecycleService({ docs: [auctionDoc({ status: AuctionStatus.SCHEDULED })] });
     await instance.cancel(ADVERTISER_ID, AUCTION_ID, undefined, undefined, AuctionStatus.SCHEDULED);

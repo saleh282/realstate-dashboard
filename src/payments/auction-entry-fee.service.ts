@@ -14,10 +14,12 @@ import { ClockService } from '../common/time/clock.service';
 import { User, UserDocument } from '../users/schemas/user.schema';
 
 /**
- * Internal domain service: the single place an auction's entry fee is written.
- * There is NO controller — the future Admin approval workflow calls
- * `configure` with the fee the admin chose. No default amount exists anywhere;
- * an auction without a configured fee cannot be paid for (fails closed).
+ * LEGACY internal domain service (MAZAD-028). Since MAZAD-035 the fee is set
+ * by Admin approval when the Auction is created (`AuctionRequestsService`), so
+ * every new auction already carries it; this remains only for auctions created
+ * before the review workflow. There is NO controller. No default amount exists
+ * anywhere; an auction without a configured fee cannot be paid for or
+ * activated (fails closed). 0 = an explicitly FREE auction.
  */
 @Injectable()
 export class AuctionEntryFeeService {
@@ -31,8 +33,8 @@ export class AuctionEntryFeeService {
 
   /** Write-once, only while the auction is SCHEDULED and has no fee. Requires `ADMIN_AUCTION_FEE_MANAGE`. */
   async configure(adminActorId: string, auctionId: string, amountMinor: unknown, ip?: string) {
-    if (!isMoneyMinorAmount(amountMinor, { positive: true })) {
-      throw new BadRequestException({ message: 'رسوم الاشتراك يجب أن تكون رقماً صحيحاً موجباً بوحدات العملة الصغرى ضمن النطاق الآمن', code: PaymentErrorCode.ENTRY_FEE_INVALID });
+    if (!isMoneyMinorAmount(amountMinor)) {
+      throw new BadRequestException({ message: 'رسوم الاشتراك يجب أن تكون رقماً صحيحاً غير سالب بوحدات العملة الصغرى ضمن النطاق الآمن', code: PaymentErrorCode.ENTRY_FEE_INVALID });
     }
     if (!Types.ObjectId.isValid(auctionId)) throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
     if (!Types.ObjectId.isValid(adminActorId)) throw new NotFoundException({ message: 'الحساب غير موجود', code: AuctionErrorCode.ACTOR_INVALID });

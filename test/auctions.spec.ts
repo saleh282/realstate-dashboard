@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AuthorizationErrorCode } from '../src/authorization/authorization-error-codes';
 import { SystemRole } from '../src/auth/roles.enum';
@@ -189,9 +190,13 @@ describe('Auction schema invariants (MAZAD-023)', () => {
     ]));
   });
 
-  it('does not invent an unrequested uniqueness constraint', () => {
+  it('declares exactly one uniqueness constraint: one auction per approval (MAZAD-035)', () => {
     const uniqueIndexes = AuctionSchema.indexes().filter(([, options]) => (options as any)?.unique);
-    expect(uniqueIndexes).toHaveLength(0);
+    expect(uniqueIndexes).toEqual([[{ originRequestId: 1, originRequestRevision: 1 }, expect.objectContaining({ name: 'auction_origin_request_revision', partialFilterExpression: { originRequestId: { $exists: true } } })]]);
+  });
+
+  it.each(['originRequestId', 'originRequestRevision', 'approvedByActorId', 'approvedAt'])('MAZAD-035: marks the approval link %s immutable', (field) => {
+    expect((AuctionSchema.path(field) as any)?.options?.immutable).toBeTruthy();
   });
 
   it.each([
@@ -240,111 +245,61 @@ describe('Auction schema invariants (MAZAD-023)', () => {
   });
 });
 
-describe('AuctionsService.create (MAZAD-023)', () => {
-  it('creates a SCHEDULED auction anchored to the property\'s attribution and current public revision', async () => {
+describe('AuctionsService.createApprovedWithinTransaction (MAZAD-035; replaces direct creation)', () => {
+  const approved = (overrides: Record<string, unknown> = {}) => ({
+    auctionId: new Types.ObjectId('64b000000000000000000901'),
+    propertyId: new Types.ObjectId(PROPERTY_ID),
+    propertyRevisionId: new Types.ObjectId(REVISION_ID),
+    advertiserAccountId: new Types.ObjectId(ADVERTISER_ID),
+    advertiserAccountTypeSnapshot: AccountType.USER,
+    createdByActorId: new Types.ObjectId(ACTOR_ID),
+    originRequestId: new Types.ObjectId('64b000000000000000000902'),
+    originRequestRevision: 3,
+    approvedByActorId: new Types.ObjectId('64b000000000000000000903'),
+    approvedAt: new Date('2026-01-20T00:00:00Z'),
+    entryFeeMinor: 25_000,
+    startingPriceMinor: 100_000,
+    minimumBidStepMinor: 5_000,
+    scheduledStartAt: new Date('2026-02-01T10:00:00Z'),
+    scheduledEndAt: new Date('2026-02-08T10:00:00Z'),
+    ...overrides,
+  });
+  const session = {} as any;
+
+  it('creates the SCHEDULED auction with its approved terms, frozen snapshot, explicit fee and approval link in one write', async () => {
     const { instance, auctions, audit } = service();
-    const result = await instance.create(ACTOR_ID, validInput());
-
+    await instance.createApprovedWithinTransaction(session, approved() as any);
     expect(auctions.create).toHaveBeenCalledTimes(1);
-    const [[docs]] = auctions.create.mock.calls;
+    const [[docs, options]] = auctions.create.mock.calls as any[];
+    expect(options).toEqual({ session });
     expect(docs[0]).toMatchObject({
-      propertyId: PROPERTY_ID,
-      propertyRevisionId: REVISION_ID,
-      advertiserAccountId: ADVERTISER_ID,
-      advertiserAccountTypeSnapshot: AccountType.USER,
-      createdByActorId: expect.anything(),
-      startingPriceMinor: 100_000,
-      minimumBidStepMinor: 5_000,
-      currency: 'EGP',
-      status: AuctionStatus.SCHEDULED,
-      scheduledStartAt: validInput().scheduledStartAt,
-      scheduledEndAt: validInput().scheduledEndAt,
-      currentEndAt: validInput().scheduledEndAt, // starts equal to scheduledEndAt; only anti-sniping (MAZAD-024) ever moves it
+      status: AuctionStatus.SCHEDULED, startingPriceMinor: 100_000, minimumBidStepMinor: 5_000, currency: 'EGP',
+      scheduledStartAt: new Date('2026-02-01T10:00:00Z'), scheduledEndAt: new Date('2026-02-08T10:00:00Z'), currentEndAt: new Date('2026-02-08T10:00:00Z'),
+      entryFee: { amountMinor: 25_000, currency: 'EGP' }, originRequestRevision: 3,
     });
+    expect(String(docs[0].originRequestId)).toBe('64b000000000000000000902');
     expect(Object.isFrozen(docs[0].ruleSnapshot)).toBe(true);
-    expect(result.auction).toMatchObject({ status: AuctionStatus.SCHEDULED, currency: 'EGP', ruleSnapshotVersion: AUCTION_RULE_SNAPSHOT_VERSION_V1 });
-    expect(audit.logRequired).toHaveBeenCalledWith(expect.objectContaining({ action: AuditAction.AUCTION_CREATED, actorUserId: ACTOR_ID }), expect.anything());
+    expect(audit.logRequired).toHaveBeenCalledWith(expect.objectContaining({ action: AuditAction.AUCTION_CREATED, metadata: expect.objectContaining({ entryFeeMinor: 25_000 }) }), session);
   });
 
-  it('rejects a malformed propertyId without looking up the property or the actor', async () => {
-    const { instance, properties } = service();
-    await expect(instance.create(ACTOR_ID, validInput({ propertyId: 'not-an-object-id' })))
-      .rejects.toMatchObject({ response: expect.objectContaining({ code: AuctionErrorCode.PROPERTY_NOT_ELIGIBLE }) });
-    expect(properties.getEligibleForAuctionAnchor).not.toHaveBeenCalled();
-  });
-
-  it('rejects when the property is not an eligible auction anchor (pending review / hidden / archived / admin-hidden / missing — anything getEligibleForAuctionAnchor rejects)', async () => {
-    const { instance, properties } = service({ anchor: null });
-    await expect(instance.create(ACTOR_ID, validInput()))
-      .rejects.toMatchObject({ response: expect.objectContaining({ code: AuctionErrorCode.PROPERTY_NOT_ELIGIBLE }) });
-    expect(properties.getEligibleForAuctionAnchor).toHaveBeenCalledWith(PROPERTY_ID);
-  });
-
-  it('rejects when the acting account does not exist', async () => {
-    const { instance } = service({ actor: null });
-    await expect(instance.create(ACTOR_ID, validInput()))
-      .rejects.toMatchObject({ response: expect.objectContaining({ code: AuctionErrorCode.ACTOR_INVALID }) });
-  });
-
-  it('denies a staff/admin account (AUCTION_CREATE_OWN is a marketplace-only capability)', async () => {
-    const { instance } = service({ actor: marketplaceUser({ systemRole: SystemRole.ADMIN }) });
-    await expect(forbiddenCode(() => instance.create(ACTOR_ID, validInput())))
-      .resolves.toBe(AuthorizationErrorCode.ADMIN_MARKETPLACE_FORBIDDEN);
-  });
-
-  it('denies an unapproved broker, same as PROPERTY_CREATE', async () => {
-    const { instance } = service({ actor: marketplaceUser({ accountType: AccountType.BROKER, brokerStatus: BrokerStatus.PENDING }) });
-    await expect(forbiddenCode(() => instance.create(ACTOR_ID, validInput())))
-      .resolves.toBe(AuthorizationErrorCode.BROKER_CAPABILITY_REQUIRED);
-  });
-
-  it('rejects an actor who is not the property\'s advertiser (self-service only, IDOR boundary)', async () => {
-    const { instance, auctions } = service({ anchor: anchor({ advertiserAccountId: OTHER_ADVERTISER_ID }) });
-    await expect(forbiddenCode(() => instance.create(ACTOR_ID, validInput())))
-      .resolves.toBe(AuthorizationErrorCode.RESOURCE_ACCESS_FORBIDDEN);
-    expect(auctions.create).not.toHaveBeenCalled();
-  });
-
-  it.each([0, -1, 1.5])('rejects a non-positive/non-integer starting price (%p) before touching the database', async (value) => {
+  it('persists an explicit 0 fee as a configured FREE fee (never absent)', async () => {
     const { instance, auctions } = service();
-    await expect(instance.create(ACTOR_ID, validInput({ startingPriceMinor: value })))
+    await instance.createApprovedWithinTransaction(session, approved({ entryFeeMinor: 0 }) as any);
+    expect(auctions.create.mock.calls[0][0][0].entryFee).toMatchObject({ amountMinor: 0, currency: 'EGP' });
+  });
+
+  it.each([0, -1, 1.5])('still rejects a non-positive/non-integer starting price (%p) through the rule snapshot', async (value) => {
+    const { instance, auctions } = service();
+    await expect(instance.createApprovedWithinTransaction(session, approved({ startingPriceMinor: value }) as any))
       .rejects.toMatchObject({ response: expect.objectContaining({ code: AuctionErrorCode.STARTING_PRICE_INVALID }) });
     expect(auctions.create).not.toHaveBeenCalled();
   });
 
-  it.each([0, -1, 1.5])('rejects a non-positive/non-integer minimum bid step (%p)', async (value) => {
-    const { instance, auctions } = service();
-    await expect(instance.create(ACTOR_ID, validInput({ minimumBidStepMinor: value })))
-      .rejects.toMatchObject({ response: expect.objectContaining({ code: AuctionErrorCode.MINIMUM_BID_STEP_INVALID }) });
-    expect(auctions.create).not.toHaveBeenCalled();
-  });
-
-  it('rejects a schedule where the end is not after the start', async () => {
-    const start = new Date('2026-03-01T00:00:00Z');
-    const { instance, auctions } = service();
-    await expect(instance.create(ACTOR_ID, validInput({ scheduledStartAt: start, scheduledEndAt: start })))
-      .rejects.toMatchObject({ response: expect.objectContaining({ code: AuctionErrorCode.SCHEDULE_INVALID }) });
-    expect(auctions.create).not.toHaveBeenCalled();
-  });
-
-  it('never includes private property evidence or any evidence-shaped field in the created record or its summary', async () => {
-    const { instance, createCalls } = service();
-    const result = await instance.create(ACTOR_ID, validInput());
-    const forbidden = /evidence|titledeed|deed/i;
-    expect(Object.keys(createCalls[0]).some((key) => forbidden.test(key))).toBe(false);
-    expect(Object.keys(result.auction).some((key) => forbidden.test(key))).toBe(false);
-  });
-
-  it('ends the Mongo session on the happy path', async () => {
-    const { instance, session } = service();
-    await instance.create(ACTOR_ID, validInput());
-    expect(session.endSession).toHaveBeenCalledTimes(1);
-  });
-
-  it('ends the Mongo session even when the write inside the transaction fails', async () => {
-    const { instance, session, auctions } = service();
-    auctions.create.mockRejectedValueOnce(new Error('connection reset'));
-    await expect(instance.create(ACTOR_ID, validInput())).rejects.toThrow('connection reset');
-    expect(session.endSession).toHaveBeenCalledTimes(1);
+  it('retired direct creation always answers AUCTION_REVIEW_REQUIRED', () => {
+    const { instance } = service();
+    try { instance.rejectDirectCreation(); throw new Error('expected rejection'); } catch (error) {
+      expect((error as any).getStatus()).toBe(409);
+      expect((error as any).getResponse().code).toBe(AuctionErrorCode.REVIEW_REQUIRED);
+    }
   });
 });

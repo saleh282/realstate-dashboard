@@ -1029,6 +1029,70 @@ export class PropertiesService {
   }
 
   /**
+   * MAZAD-035: the authoritative facts every auction origination decision
+   * (seller submission/edit, Admin approval, the activation gate) re-reads,
+   * optionally inside the caller's transaction. Never throws for an
+   * ineligible property: callers map the facts to their own stable codes.
+   * `operationType` is read from the CURRENT PUBLIC revision (the listing
+   * bidders see), not from a draft or pending revision.
+   */
+  async getAuctionOriginationFacts(id: string, session?: ClientSession): Promise<{
+    propertyId: Types.ObjectId;
+    advertiserAccountId: Types.ObjectId;
+    advertiserAccountTypeSnapshot: AccountType;
+    publiclyVisible: boolean;
+    currentPublicRevisionId: Types.ObjectId | null;
+    pendingRevisionId: Types.ObjectId | null;
+    operationType: string | null;
+    title: string | null;
+  } | null> {
+    if (!Types.ObjectId.isValid(id)) return null;
+    const item: any = await this.properties.findById(id).session(session ?? null).lean().exec();
+    if (!item) return null;
+    const advertiserAccountId = (item.advertiserAccountId ?? item.ownerId) as Types.ObjectId | undefined;
+    if (!advertiserAccountId) return null;
+    const visible = await this.properties.exists({ _id: item._id, ...this.publicVisibilityFilter() }).session(session ?? null).exec();
+    const revision: any = item.currentPublicRevisionId
+      ? await this.revisions.findOne({ _id: item.currentPublicRevisionId, propertyId: item._id }).select('operationType title').session(session ?? null).lean().exec()
+      : null;
+    return {
+      propertyId: item._id as Types.ObjectId,
+      advertiserAccountId,
+      advertiserAccountTypeSnapshot: item.advertiserAccountTypeSnapshot ?? AccountType.USER,
+      publiclyVisible: Boolean(visible) && Boolean(revision),
+      currentPublicRevisionId: revision ? (item.currentPublicRevisionId as Types.ObjectId) : null,
+      pendingRevisionId: (item.pendingRevisionId as Types.ObjectId | undefined) ?? null,
+      operationType: revision?.operationType ?? null,
+      title: revision?.title ?? item.title ?? null,
+    };
+  }
+
+  /** MAZAD-035 activation gate: the auction's anchored revision still exists and belongs to its property. */
+  async resolveAuctionAnchor(propertyId: string, revisionId: string, session?: ClientSession): Promise<{ operationType: string } | null> {
+    if (!Types.ObjectId.isValid(propertyId) || !Types.ObjectId.isValid(revisionId)) return null;
+    const revision: any = await this.revisions
+      .findOne({ _id: new Types.ObjectId(revisionId), propertyId: new Types.ObjectId(propertyId) })
+      .select('operationType')
+      .session(session ?? null)
+      .lean()
+      .exec();
+    return revision ? { operationType: revision.operationType } : null;
+  }
+
+  /** MAZAD-035: the seller's own non-archived properties that currently have an approved public revision (auction candidates). */
+  async listOwnAuctionCandidates(actorId: string, limit = 100) {
+    if (!Types.ObjectId.isValid(actorId)) return [];
+    const accountId = new Types.ObjectId(actorId);
+    return this.properties
+      .find({ $or: [{ advertiserAccountId: accountId }, { advertiserAccountId: { $exists: false }, ownerId: accountId }], currentPublicRevisionId: { $exists: true } })
+      .select('_id')
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit)
+      .lean()
+      .exec();
+  }
+
+  /**
    * Mongo match for "properties an auction may be publicly listed under"
    * (MAZAD-025): the shared public-visibility gate plus the same catalog
    * dimension filters public search already validates (governorate, city,

@@ -3,7 +3,7 @@ export enum PaymentErrorCode {
   ENTRY_FEE_NOT_CONFIGURED = 'PAYMENT_ENTRY_FEE_NOT_CONFIGURED',
   /** An entry fee was already configured for this auction; it is write-once. */
   ENTRY_FEE_ALREADY_CONFIGURED = 'PAYMENT_ENTRY_FEE_ALREADY_CONFIGURED',
-  /** The fee amount is not a positive integer within the platform money bounds. */
+  /** The fee amount is not a non-negative integer within the platform money bounds (0 = explicitly FREE). */
   ENTRY_FEE_INVALID = 'PAYMENT_ENTRY_FEE_INVALID',
   /** The auction can no longer accept entry payments (ended, cancelled, completed). */
   AUCTION_NOT_PAYABLE = 'PAYMENT_AUCTION_NOT_PAYABLE',
@@ -24,4 +24,6 @@ export enum PaymentErrorCode {
   REQUEST_NOT_PAYABLE = 'PAYMENT_REQUEST_NOT_PAYABLE',
   /** The request is parked for operator reconciliation; no further payment action is accepted automatically. */
   RECONCILIATION_REQUIRED = 'PAYMENT_RECONCILIATION_REQUIRED',
+  /** MAZAD-035: the auction's configured entry fee is explicitly 0 (FREE auction); there is nothing to pay. */
+  NOT_REQUIRED = 'PAYMENT_NOT_REQUIRED',
 }

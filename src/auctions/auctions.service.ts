@@ -1,123 +1,105 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, Model, Types } from 'mongoose';
+import { ConflictException, Injectable } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { ClientSession, Model, Types } from 'mongoose';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
-import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
-import { Capability } from '../authorization/capability';
 import { AuctionErrorCode } from '../common/errors/auction-error-codes';
 import { EGP_CURRENCY } from '../common/money/money';
-import { PropertiesService } from '../properties/properties.service';
-import { User, UserDocument } from '../users/schemas/user.schema';
+import { AccountType } from '../users/identity.types';
 import { AuctionRuleSnapshotInput, buildAuctionRuleSnapshot } from './auction-rule-snapshot';
 import { AuctionStatus } from './auction.types';
 import { Auction, AuctionDocument } from './schemas/auction.schema';
 
 export type CreateAuctionInput = AuctionRuleSnapshotInput & { propertyId: string };
 
+/** Everything an Admin approval fixes for the auction it creates (MAZAD-035). */
+export type ApprovedAuctionInput = AuctionRuleSnapshotInput & {
+  auctionId: Types.ObjectId;
+  propertyId: Types.ObjectId;
+  propertyRevisionId: Types.ObjectId;
+  advertiserAccountId: Types.ObjectId;
+  advertiserAccountTypeSnapshot: AccountType;
+  /** The seller who submitted the request (the auction's creator of record). */
+  createdByActorId: Types.ObjectId;
+  originRequestId: Types.ObjectId;
+  originRequestRevision: number;
+  approvedByActorId: Types.ObjectId;
+  approvedAt: Date;
+  /** Explicit, Admin-chosen entry fee; 0 = FREE. */
+  entryFeeMinor: number;
+};
+
 /**
- * MAZAD-023 foundation service. Only auction *creation* is implemented —
- * enough to exercise the schema, the immutable rule snapshot, the property
- * attribution anchor, and the authorization foundation
- * (`AUCTION_CREATE_OWN` / `assertOwnResource`, both seeded in earlier
- * tasks specifically for this). Bid acceptance, anti-sniping extension,
- * scheduling/closing workers, cancellation and winner selection are later
- * tasks (MAZAD-024+) and are deliberately not implemented here. There is
- * also no controller yet — this is consumed directly (e.g. by tests, and by
- * whatever later task adds the HTTP layer).
+ * Auction creation. MAZAD-035 retired direct seller creation: an Auction now
+ * exists only because an Admin approved an `AuctionRequest`, and it is born
+ * SCHEDULED with its approved terms, frozen rule snapshot and explicit entry
+ * fee (including 0 = FREE) all at once — nothing is configured afterwards.
  */
 @Injectable()
 export class AuctionsService {
   constructor(
     @InjectModel(Auction.name) private readonly auctions: Model<AuctionDocument>,
-    @InjectModel(User.name) private readonly users: Model<UserDocument>,
-    private readonly properties: PropertiesService,
     private readonly audit: AuditLogService,
-    @InjectConnection() private readonly connection: Connection,
   ) {}
 
-  /** Self-service only: the authenticated actor creates an auction for their own eligible property. */
-  async create(actorId: string, input: CreateAuctionInput, ip?: string) {
-    if (!Types.ObjectId.isValid(input.propertyId)) {
-      throw new NotFoundException({ message: 'العقار غير موجود أو غير مؤهل لإنشاء مزاد عليه', code: AuctionErrorCode.PROPERTY_NOT_ELIGIBLE });
-    }
-    const [actor, anchor] = await Promise.all([
-      this.users.findById(actorId).lean().exec(),
-      this.properties.getEligibleForAuctionAnchor(input.propertyId),
-    ]);
-    if (!actor) throw new NotFoundException({ message: 'الحساب غير موجود', code: AuctionErrorCode.ACTOR_INVALID });
-    if (!anchor) throw new NotFoundException({ message: 'العقار غير موجود أو غير مؤهل لإنشاء مزاد عليه', code: AuctionErrorCode.PROPERTY_NOT_ELIGIBLE });
-
-    // Reuses the existing authorization foundation rather than inventing a
-    // second one: AUCTION_CREATE_OWN follows the same marketplace/broker
-    // eligibility rules as PROPERTY_CREATE, and assertOwnResource is the
-    // same own-resource/IDOR boundary every other "my resource" action uses.
-    AuthorizationPolicyService.assert(actor, Capability.AUCTION_CREATE_OWN);
-    AuthorizationPolicyService.assertOwnResource(actor, anchor.advertiserAccountId.toString());
-
-    const ruleSnapshot = buildAuctionRuleSnapshot(input);
-
-    const session = await this.connection.startSession();
-    try {
-      let created!: AuctionDocument;
-      await session.withTransaction(async () => {
-        [created] = await this.auctions.create(
-          [{
-            propertyId: anchor.propertyId,
-            propertyRevisionId: anchor.currentPublicRevisionId,
-            advertiserAccountId: anchor.advertiserAccountId,
-            advertiserAccountTypeSnapshot: anchor.advertiserAccountTypeSnapshot,
-            createdByActorId: new Types.ObjectId(actorId),
-            startingPriceMinor: ruleSnapshot.startingPriceMinor,
-            minimumBidStepMinor: ruleSnapshot.minimumBidStepMinor,
-            currency: EGP_CURRENCY,
-            scheduledStartAt: ruleSnapshot.scheduledStartAt,
-            scheduledEndAt: ruleSnapshot.scheduledEndAt,
-            currentEndAt: ruleSnapshot.scheduledEndAt,
-            status: AuctionStatus.SCHEDULED,
-            ruleSnapshot,
-          }],
-          { session },
-        );
-        await this.audit.logRequired(
-          {
-            action: AuditAction.AUCTION_CREATED,
-            actorUserId: actorId,
-            targetResourceId: created._id.toString(),
-            reason: 'auction created',
-            ip,
-            metadata: {
-              propertyId: anchor.propertyId.toString(),
-              propertyRevisionId: anchor.currentPublicRevisionId.toString(),
-              startingPriceMinor: ruleSnapshot.startingPriceMinor,
-              minimumBidStepMinor: ruleSnapshot.minimumBidStepMinor,
-            },
-          },
-          session,
-        );
-      });
-      return { message: 'تم إنشاء المزاد بنجاح', auction: this.toSummary(created.toObject()) };
-    } finally {
-      await session.endSession();
-    }
+  /** `POST /auctions` compatibility: creating an auction without review is no longer possible. */
+  rejectDirectCreation(): never {
+    throw new ConflictException({
+      message: 'إنشاء المزاد يتطلب مراجعة الإدارة؛ أرسل طلب مزاد عبر /auction-requests',
+      code: AuctionErrorCode.REVIEW_REQUIRED,
+    });
   }
 
-  private toSummary(item: any) {
-    return {
-      id: item._id.toString(),
-      propertyId: item.propertyId.toString(),
-      propertyRevisionId: item.propertyRevisionId.toString(),
-      advertiserAccountId: item.advertiserAccountId.toString(),
-      advertiserAccountTypeSnapshot: item.advertiserAccountTypeSnapshot,
-      status: item.status,
-      startingPriceMinor: item.startingPriceMinor,
-      minimumBidStepMinor: item.minimumBidStepMinor,
-      currency: item.currency,
-      scheduledStartAt: item.scheduledStartAt,
-      scheduledEndAt: item.scheduledEndAt,
-      currentEndAt: item.currentEndAt,
-      ruleSnapshotVersion: item.ruleSnapshot?.version,
-      createdAt: item.createdAt,
-    };
+  /**
+   * Called ONLY from the Admin approval transaction, after every eligibility
+   * re-check passed and after the request's own conditional write. The
+   * `(originRequestId, originRequestRevision)` unique index is the backstop
+   * against a duplicate auction for one approval.
+   */
+  async createApprovedWithinTransaction(session: ClientSession, input: ApprovedAuctionInput): Promise<AuctionDocument> {
+    const ruleSnapshot = buildAuctionRuleSnapshot(input);
+    const [created] = await this.auctions.create(
+      [{
+        _id: input.auctionId,
+        propertyId: input.propertyId,
+        propertyRevisionId: input.propertyRevisionId,
+        advertiserAccountId: input.advertiserAccountId,
+        advertiserAccountTypeSnapshot: input.advertiserAccountTypeSnapshot,
+        createdByActorId: input.createdByActorId,
+        startingPriceMinor: ruleSnapshot.startingPriceMinor,
+        minimumBidStepMinor: ruleSnapshot.minimumBidStepMinor,
+        currency: EGP_CURRENCY,
+        scheduledStartAt: ruleSnapshot.scheduledStartAt,
+        scheduledEndAt: ruleSnapshot.scheduledEndAt,
+        currentEndAt: ruleSnapshot.scheduledEndAt,
+        status: AuctionStatus.SCHEDULED,
+        ruleSnapshot,
+        entryFee: { amountMinor: input.entryFeeMinor, currency: EGP_CURRENCY, configuredByActorId: input.approvedByActorId, configuredAt: input.approvedAt },
+        originRequestId: input.originRequestId,
+        originRequestRevision: input.originRequestRevision,
+        approvedByActorId: input.approvedByActorId,
+        approvedAt: input.approvedAt,
+      }],
+      { session },
+    );
+    await this.audit.logRequired(
+      {
+        action: AuditAction.AUCTION_CREATED,
+        actorUserId: input.approvedByActorId.toString(),
+        targetResourceId: created._id.toString(),
+        reason: 'auction created by approval',
+        metadata: {
+          originRequestId: input.originRequestId.toString(),
+          originRequestRevision: input.originRequestRevision,
+          propertyId: input.propertyId.toString(),
+          propertyRevisionId: input.propertyRevisionId.toString(),
+          startingPriceMinor: ruleSnapshot.startingPriceMinor,
+          minimumBidStepMinor: ruleSnapshot.minimumBidStepMinor,
+          entryFeeMinor: input.entryFeeMinor,
+        },
+      },
+      session,
+    );
+    return created;
   }
 }

@@ -70,3 +70,5 @@ AuctionEntryPaymentSchema.index(
 // Reconciliation sweeps: stale INITIATED attempts.
 AuctionEntryPaymentSchema.index({ status: 1, initiatedAt: 1 }, { name: 'entry_payment_status_initiated' });
 AuctionEntryPaymentSchema.index({ bidderAccountId: 1, createdAt: -1 }, { name: 'entry_payment_bidder_history' });
+// MAZAD-035: per-auction operational reads (Admin payment summary, pre-start revision safety check).
+AuctionEntryPaymentSchema.index({ auctionId: 1, status: 1 }, { name: 'entry_payment_auction_status' });

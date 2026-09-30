@@ -32,6 +32,9 @@ function build(opts: { hasBids?: boolean | ((id: string) => Promise<boolean>) } 
   const hasValidBids = jest.fn(async (id: string) => (typeof opts.hasBids === 'function' ? opts.hasBids(id) : Boolean(opts.hasBids)));
   const lifecycle = Object.assign(Object.create(AuctionLifecycleService.prototype), {
     auctions: mongo.model('auctions'), users: mongo.model('users'), audit, clock, bidExistence: { hasValidBids }, connection: mongo.connection, outbox: mongo.outbox.service,
+    // MAZAD-035 collaborators (covered in mazad035 specs): the activation gate passes; no paid/entitled bidders.
+    activationGate: { evaluate: async () => null },
+    participants: { forCancellation: async () => [], financialActivity: async () => ({ livePayments: 0, flaggedPayments: 0, entitlements: 0 }) },
   }) as AuctionLifecycleService;
   const seed = (overrides: Record<string, unknown> = {}) => mongo.seedAuction({
     propertyId: oid(PROPERTY), scheduledStartAt: START, scheduledEndAt: END, currentEndAt: END, acceptedBidCount: 0,
@@ -46,7 +49,7 @@ describe('SCHEDULED → ACTIVE emits AUCTION_ACTIVATED (MAZAD-031)', () => {
   it('commits the activation and exactly one event together, with the authoritative facts', async () => {
     const { mongo, lifecycle, seed, audit } = build();
     seed();
-    await expect(lifecycle.activateDueAuctions()).resolves.toEqual({ activated: 1 });
+    await expect(lifecycle.activateDueAuctions()).resolves.toEqual({ activated: 1, held: 0 });
     expect(auctionDoc(mongo).status).toBe(AuctionStatus.ACTIVE);
     expect(events(mongo)).toHaveLength(1);
     expect(events(mongo)[0]).toMatchObject({
@@ -78,7 +81,7 @@ describe('SCHEDULED → ACTIVE emits AUCTION_ACTIVATED (MAZAD-031)', () => {
     const { mongo, lifecycle, seed } = build();
     seed();
     seed({ _id: oid(AUCTION_2) });
-    await expect(lifecycle.activateDueAuctions()).resolves.toEqual({ activated: 2 });
+    await expect(lifecycle.activateDueAuctions()).resolves.toEqual({ activated: 2, held: 0 });
     expect(events(mongo).map((e) => [e.aggregateId, e.aggregateVersion]).sort()).toEqual([[AUCTION, 1], [AUCTION_2, 1]]);
   });
 
@@ -107,7 +110,7 @@ describe('SCHEDULED → ACTIVE emits AUCTION_ACTIVATED (MAZAD-031)', () => {
       session.commitTransaction = async () => { if (lost-- > 0) throw transient('commit lost'); return commit.call(session); };
       return session;
     };
-    await expect(lifecycle.activateDueAuctions()).resolves.toEqual({ activated: 1 });
+    await expect(lifecycle.activateDueAuctions()).resolves.toEqual({ activated: 1, held: 0 });
     expect(events(mongo)).toHaveLength(1);
     expect(events(mongo)[0].aggregateVersion).toBe(1);
   });

@@ -278,6 +278,10 @@ export async function runIntegrityChecks(db: Db, now: Date = new Date()): Promis
     propertyOptionDriftFinding(db),
     propertyFacetDriftFinding(db),
     auctionAnchorFinding(db),
+    // MAZAD-035: a scheduled/active auction without a configured fee (legacy, pre-review data) can never be paid for or activated.
+    filterFinding(db.collection('auctions'), { status: { $in: ['scheduled', 'active'] }, entryFee: { $exists: false } }, 'AUCTION_LIVE_WITHOUT_FEE', 'warning', 'Scheduled/active auctions have no configured entry fee (pre-review data): they never activate or accept payment; cancel them from Admin'),
+    filterFinding(db.collection('auctions'), { status: 'scheduled', activationHold: { $exists: true } }, 'AUCTION_ACTIVATION_HELD', 'warning', 'Scheduled auctions were refused activation by the activation gate and need an Admin decision'),
+    filterFinding(db.collection('auction_requests'), { status: 'withdrawn', liveKey: { $exists: true } }, 'AUCTION_REQUEST_LIVE_KEY_LEAK', 'error', 'Withdrawn auction requests still hold the per-property live key'),
     filterFinding(properties, { $or: [{ isOwnerVisible: { $exists: true, $nin: [true, false, null] } }, { lifecycleStatus: { $exists: true, $nin: ['active', 'archived', 'admin_hidden', null] } }] }, 'PROPERTY_VISIBILITY_FIELD_INVALID', 'error', 'Property isOwnerVisible/lifecycleStatus hold values the public listing predicates do not recognise (they would be silently hidden)'),
   ]);
   const findings = candidates.filter((finding): finding is IntegrityFinding => finding !== null);

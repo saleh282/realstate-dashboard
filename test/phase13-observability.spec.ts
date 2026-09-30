@@ -76,12 +76,13 @@ describe('Phase 13 operational status', () => {
   const now = new Date('2026-06-01T12:00:00Z');
   const provider = { providerKey: 'unconfigured', configured: false } as any;
   const config = (values: Record<string, unknown> = {}) => ({ get: (key: string) => ({ NODE_ENV: 'production', DEPLOYMENT_ENV: 'production', ...values })[key] }) as any;
-  const connection = (data: { ledger?: any[]; lock?: any; cleanup?: any[]; failing?: boolean }) => ({
+  const connection = (data: { ledger?: any[]; lock?: any; cleanup?: any[]; failing?: boolean; held?: number }) => ({
     db: {
       collection: (name: string) => {
         if (data.failing) throw new Error('down');
         if (name === 'migration_ledger') return { find: () => ({ toArray: async () => data.ledger ?? [] }) };
         if (name === 'migration_locks') return { findOne: async () => data.lock ?? null };
+        if (name === 'auctions') return { countDocuments: async () => data.held ?? 0 };
         return {
           countDocuments: async () => (data.cleanup ?? []).length,
           find: () => ({ sort: () => ({ limit: () => ({ toArray: async () => (data.cleanup ?? []).slice(0, 1) }) }) }),
@@ -105,6 +106,12 @@ describe('Phase 13 operational status', () => {
     expect(status.attention).toEqual(['migrations_failed', 'migrations_interrupted', 'evidence_cleanup_stalled']);
     expect(status.migrations).toMatchObject({ failed: ['022'], running: ['023'] });
     expect(status.evidenceCleanup).toEqual({ pending: 1, oldestPendingAgeSeconds: 7200 });
+  });
+
+  it('MAZAD-035: flags SCHEDULED auctions the activation gate held, with their count', async () => {
+    const status = await new OperationalStatusService(connection({ ledger: [], held: 2 }), config(), provider).status(now);
+    expect(status.auctions).toEqual({ activationHeld: 2 });
+    expect(status.attention).toEqual(['auction_activation_held']);
   });
 
   it('a running migration WITH a live lock is normal progress, not an alert', async () => {

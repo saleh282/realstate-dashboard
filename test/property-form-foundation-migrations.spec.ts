@@ -388,7 +388,7 @@ describe('DPF-013/014 migration registry', () => {
   it('registers M-A -> M-B, the manual report, the area backfill, the Phase 8/9/10/11 registry seeds and the Phase 13 listing indexes in order', () => {
     validateMigrationRegistry();
     const ids = CORE_MIGRATIONS.map((migration) => migration.id);
-    expect(ids.slice(-11)).toEqual([
+    expect(ids.slice(-12)).toEqual([
       '025-property-attribute-registry',
       '026-legacy-property-form-definitions',
       '027-legacy-property-data-report',
@@ -400,6 +400,7 @@ describe('DPF-013/014 migration registry', () => {
       '033-phase11-amenity-catalog',
       '034-phase13-sortable-listing-indexes',
       '035-phase13-retire-superseded-listing-indexes',
+      '036-mazad035-auction-review-indexes',
     ]);
     expect(legacyPropertyFormDefinitionsMigration.dependencies).toEqual(['025-property-attribute-registry']);
     expect(propertyAreaBackfillMigration.dependencies).toEqual(['015-property-attribution-revisions']);

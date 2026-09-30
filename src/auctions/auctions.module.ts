@@ -26,6 +26,13 @@ import { AuctionsController } from './auctions.controller';
 import { AuctionsQueryService } from './auctions-query.service';
 import { AuctionsService } from './auctions.service';
 import { Auction, AuctionSchema } from './schemas/auction.schema';
+import { AuctionRequest, AuctionRequestSchema } from './schemas/auction-request.schema';
+import { AuctionActivationGate } from './auction-activation-gate';
+import { AuctionAdminService } from './auction-admin.service';
+import { AuctionParticipantsReader } from './auction-participants.reader';
+import { AuctionRequestsController } from './auction-requests.controller';
+import { AuctionRequestsService } from './auction-requests.service';
+import { AdminAuctionRequestsController } from './admin-auction-requests.controller';
 
 /**
  * Registers the `Auction` schema/collection plus:
@@ -50,9 +57,15 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
  *  - `OutboxModule` (MAZAD-031): lifecycle, bid acceptance and finalization write their domain
  *    events to the transactional outbox inside their own transactions.
  *  - `AuctionsQueryService` + `AuctionsController` / `AdminAuctionsController`
- *    — the HTTP contract (MAZAD-025): public discovery, own auctions, create,
- *    cancel, and a read-only staff view. Mutations still go exclusively
- *    through `AuctionsService.create` and `AuctionLifecycleService`.
+ *    — the HTTP contract (MAZAD-025): public discovery, own auctions, cancel,
+ *    and the staff view.
+ *  - MAZAD-035: the `AuctionRequest` aggregate (`AuctionRequestsService`,
+ *    seller `AuctionRequestsController`, `AdminAuctionRequestsController`):
+ *    auctions are created only by Admin approval, with an explicit fee
+ *    (0 = FREE). `AuctionActivationGate` guards activation,
+ *    `AuctionParticipantsReader` supplies cancellation recipients and the
+ *    payment-safety facts, `AuctionAdminService` the Admin operational reads
+ *    and Admin cancellation goes through `AuctionLifecycleService`.
  */
 @Module({
   imports: [
@@ -63,9 +76,9 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
     BidsModule,
     PaymentsModule,
     OutboxModule,
-    MongooseModule.forFeature([{ name: Auction.name, schema: AuctionSchema }]),
+    MongooseModule.forFeature([{ name: Auction.name, schema: AuctionSchema }, { name: AuctionRequest.name, schema: AuctionRequestSchema }]),
   ],
-  controllers: [AuctionsController, AuctionBidsController, AdminAuctionsController, AuctionEntryPaymentsController],
+  controllers: [AuctionsController, AuctionBidsController, AdminAuctionsController, AuctionEntryPaymentsController, AuctionRequestsController, AdminAuctionRequestsController],
   providers: [
     AuctionsService,
     AuctionsQueryService,
@@ -78,9 +91,13 @@ import { Auction, AuctionSchema } from './schemas/auction.schema';
     AuctionFinalizationService,
     AuctionFinalizationWorker,
     ClockService,
+    AuctionRequestsService,
+    AuctionActivationGate,
+    AuctionParticipantsReader,
+    AuctionAdminService,
     { provide: AUCTION_BID_ENTITLEMENT_PORT, useExisting: PersistentBidEntitlementPort },
     { provide: AUCTION_BID_EXISTENCE_PORT, useClass: BidLedgerAuctionBidExistencePort },
   ],
-  exports: [AuctionsService, AuctionsQueryService, AuctionLifecycleService, AuctionBidAcceptanceService, AuctionFinalizationService],
+  exports: [AuctionsService, AuctionsQueryService, AuctionLifecycleService, AuctionBidAcceptanceService, AuctionFinalizationService, AuctionRequestsService],
 })
 export class AuctionsModule {}

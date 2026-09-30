@@ -83,7 +83,12 @@ describe('auction entry fee configuration (MAZAD-028)', () => {
     expect(mongo.auction().entryFee).toMatchObject({ amountMinor: 30_000, currency: 'EGP' });
     expect(mongo.audits.map((a) => a.action)).toContain(AuditAction.AUCTION_ENTRY_FEE_CONFIGURED);
   });
-  it.each([0, -1, 1.5, '100', null, undefined, NaN, MONEY_MINOR_MAX + 1])('rejects invalid fee %p', async (bad) => {
+  it('MAZAD-035: accepts an explicit 0 as a configured FREE fee (legacy path; never "not configured")', async () => {
+    const { mongo, feeService } = build({}, { fee: null });
+    await feeService.configure(ADMIN, AUCTION, 0);
+    expect(mongo.auction().entryFee).toMatchObject({ amountMinor: 0, currency: 'EGP' });
+  });
+  it.each([-1, 1.5, '100', null, undefined, NaN, MONEY_MINOR_MAX + 1])('rejects invalid fee %p', async (bad) => {
     const { mongo, feeService } = build({}, { fee: null });
     expect(await codeOf(() => feeService.configure(ADMIN, AUCTION, bad))).toBe(PaymentErrorCode.ENTRY_FEE_INVALID);
     expect(mongo.auction().entryFee).toBeUndefined();
@@ -311,6 +316,8 @@ describe('late success (MAZAD-028)', () => {
     it(`success after the auction is ${status} keeps the truthful record but never touches the auction, bids or eligibility`, async () => {
       const ctx = build();
       const p = await ctx.initiation.initiate(ALICE, AUCTION);
+      // MAZAD-035: initiation itself writes the auction (its payment-attempt guard counter); only confirmation is under test.
+      ctx.mongo.auctionWrites = 0;
       const before = { ...ctx.mongo.auction(), status };
       ctx.mongo.data.auctions.get(AUCTION)!.doc = before;
       ctx.succeed();
@@ -512,5 +519,40 @@ describe('AUCTION_ENTRY payment domain event — transactional outbox (MAZAD-031
     const ctx = await pending(); ctx.succeed();
     await ctx.confirmation.confirm(ctx.paymentId);
     expect(ctx.mongo.outbox.events('MANAGED_MARKETING_PAYMENT_CONFIRMED')).toHaveLength(0);
+  });
+});
+
+describe('MAZAD-035 FREE auctions (explicit 0 fee) vs missing fee', () => {
+  const session = async (mongo: FakeMongo) => { const s = await mongo.connection.startSession(); s.startTransaction(); return s; };
+
+  it('a FREE auction never creates a payment record: initiation answers PAYMENT_NOT_REQUIRED and nothing is written', async () => {
+    const { mongo, initiation, state } = build({}, { fee: 0 });
+    expect(await codeOf(() => initiation.initiate(ALICE, AUCTION))).toBe(PaymentErrorCode.NOT_REQUIRED);
+    expect(mongo.data.payments.size).toBe(0);
+    expect(mongo.auctionWrites).toBe(0);
+    expect(state.initiateCalls).toHaveLength(0);
+  });
+
+  it('FREE still enforces bidding policy before anything else (advertiser self-bid, staff)', async () => {
+    const { initiation } = build({}, { fee: 0 });
+    expect(await codeOf(() => initiation.initiate(ADVERTISER, AUCTION))).toBe('SELF_BID_FORBIDDEN');
+    expect(await codeOf(() => initiation.initiate(ADMIN, AUCTION))).toBe('ADMIN_MARKETPLACE_FORBIDDEN');
+  });
+
+  it('the bid entitlement port passes an explicit 0 EGP fee without a lookup, but a MISSING fee fails closed', async () => {
+    const { mongo, port } = build({}, { fee: 0 });
+    const s = await session(mongo);
+    await expect(port.assertEntitled({ auctionId: AUCTION, bidderAccountId: ALICE, session: s, entryFee: { amountMinor: 0, currency: 'EGP' } })).resolves.toBeUndefined();
+    for (const missing of [undefined, null, {}, { amountMinor: 0 }, { amountMinor: '0', currency: 'EGP' }, { amountMinor: 25_000, currency: 'EGP' }]) {
+      expect(await codeOf(() => port.assertEntitled({ auctionId: AUCTION, bidderAccountId: ALICE, session: s, entryFee: missing as any }))).toBe('BID_ENTITLEMENT_REQUIRED');
+    }
+  });
+
+  it('a new paid attempt increments the auction guard counter (serialises with cancellation / pre-start revision)', async () => {
+    const { mongo, initiation } = build();
+    await initiation.initiate(ALICE, AUCTION);
+    expect(mongo.auction().entryPaymentAttemptCount).toBe(1);
+    await initiation.initiate(ALICE, AUCTION); // reuse of the live attempt: no new attempt, no increment
+    expect(mongo.auction().entryPaymentAttemptCount).toBe(1);
   });
 });

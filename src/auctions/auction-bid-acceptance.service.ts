@@ -216,7 +216,7 @@ export class AuctionBidAcceptanceService {
       throw new ConflictException({ message: 'انتهى وقت المزاد', code: BidErrorCode.AUCTION_ENDED });
     }
 
-    await this.entitlement.assertEntitled({ auctionId, bidderAccountId: actorId, session });
+    await this.entitlement.assertEntitled({ auctionId, bidderAccountId: actorId, session, entryFee: (auction as any).entryFee ?? null });
 
     // (5) Write the Auction first: CAS on the exact state the decision rests on.
     const acquired = await this.auctions

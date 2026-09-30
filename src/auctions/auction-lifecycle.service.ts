@@ -4,6 +4,7 @@ import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
 import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
+import { Capability } from '../authorization/capability';
 import { AuctionErrorCode } from '../common/errors/auction-error-codes';
 import { retryConflict, runTransactionWithRetry } from '../common/mongo/transaction-runner';
 import { ClockService } from '../common/time/clock.service';
@@ -16,7 +17,15 @@ import {
 } from '../outbox/outbox-events';
 import { OutboxService } from '../outbox/outbox.service';
 import { User, UserDocument } from '../users/schemas/user.schema';
+import { AuctionActivationGate } from './auction-activation-gate';
 import { AUCTION_BID_EXISTENCE_PORT, AuctionBidExistencePort } from './auction-bid-existence.port';
+import { AuctionParticipantsReader } from './auction-participants.reader';
+import {
+  AdminAuctionCancellationCode,
+  AuctionCancellationSource,
+  SystemAuctionCancellationCode,
+  assertReasonWithNote,
+} from './auction-request.types';
 import { assertValidAuctionTransition } from './auction-transitions';
 import { AuctionStatus } from './auction.types';
 import { Auction, AuctionDocument } from './schemas/auction.schema';
@@ -61,6 +70,8 @@ export class AuctionLifecycleService {
     @Inject(AUCTION_BID_EXISTENCE_PORT) private readonly bidExistence: AuctionBidExistencePort,
     @InjectConnection() private readonly connection: Connection,
     private readonly outbox: OutboxService,
+    private readonly activationGate: AuctionActivationGate,
+    private readonly participants: AuctionParticipantsReader,
   ) {}
 
   // -----------------------------------------------------------------------
@@ -70,54 +81,81 @@ export class AuctionLifecycleService {
   /**
    * Activates every SCHEDULED auction whose `scheduledStartAt` has arrived
    * ("arrived" is inclusive: exactly `scheduledStartAt` activates, one
-   * millisecond before does not). Each claim is a single atomic
+   * millisecond before does not). Each activation is a conditional
    * `findOneAndUpdate` filtered on `status: SCHEDULED`, so two workers (or
    * two overlapping ticks of the same worker) racing on the same document
-   * can never both activate it — whichever wins the Mongo-level race
-   * succeeds, the loser's filter simply no longer matches and it moves on.
-   * Re-running finds nothing left to claim (idempotent).
+   * can never both activate it. Re-running finds nothing left (idempotent).
    *
    * MAZAD-031: each claim runs in its own transaction together with its
    * `AUCTION_ACTIVATED` outbox event, so the transition and its event commit
    * or abort as one. The best-effort audit telemetry stays after the commit.
+   *
+   * MAZAD-035 activation gate: inside that transaction `AuctionActivationGate`
+   * re-checks the fee (0 = FREE is configured; absent is not), the seller's
+   * eligibility, the property and the anchored SALE revision. A failing
+   * auction is NOT activated and NOT cancelled: it gets an `activationHold`
+   * marker (surfaced to Admin operations) and the candidate query excludes
+   * held auctions, so one bad row can never starve the ones behind it.
    */
-  async activateDueAuctions(limit = DEFAULT_BATCH_SIZE): Promise<{ activated: number }> {
+  async activateDueAuctions(limit = DEFAULT_BATCH_SIZE): Promise<{ activated: number; held: number }> {
     const batchSize = clampBatch(limit);
     let activated = 0;
+    let held = 0;
     for (let i = 0; i < batchSize; i++) {
-      // One transaction per auction (MAZAD-031): the SCHEDULED → ACTIVE claim and its AUCTION_ACTIVATED
-      // outbox event commit together or not at all.
-      const claimed = await runTransactionWithRetry(
+      const outcome = await runTransactionWithRetry(
         this.connection,
         async (session) => {
           const now = this.clock.now();
+          const candidate = await this.auctions
+            .findOne({ status: AuctionStatus.SCHEDULED, scheduledStartAt: { $lte: now }, activationHold: { $exists: false } })
+            .sort({ scheduledStartAt: 1 })
+            .session(session)
+            .exec();
+          if (!candidate) return { kind: 'NONE' as const };
+          const holdCode = await this.activationGate.evaluate(candidate, session);
+          if (holdCode) {
+            const heldDoc = await this.auctions
+              .findOneAndUpdate(
+                { _id: candidate._id, status: AuctionStatus.SCHEDULED, activationHold: { $exists: false } },
+                { $set: { activationHold: { code: holdCode, at: now } } },
+                { new: true, session },
+              )
+              .exec();
+            return heldDoc ? { kind: 'HELD' as const, doc: heldDoc, holdCode, now } : { kind: 'RACED' as const };
+          }
           const doc = await this.auctions
             .findOneAndUpdate(
-              { status: AuctionStatus.SCHEDULED, scheduledStartAt: { $lte: now } },
+              { _id: candidate._id, status: AuctionStatus.SCHEDULED, scheduledStartAt: { $lte: now }, activationHold: { $exists: false } },
               { $set: { status: AuctionStatus.ACTIVE } },
-              { sort: { scheduledStartAt: 1 }, new: true, session },
+              { new: true, session },
             )
             .exec();
-          if (!doc) return null;
+          if (!doc) return { kind: 'RACED' as const };
           await this.outbox.recordRequired(auctionActivatedEvent({
             auctionId: doc._id.toString(), occurredAt: now, currentEndAt: doc.currentEndAt,
             advertiserAccountId: doc.advertiserAccountId.toString(),
           }), session);
-          return { doc, now };
+          return { kind: 'ACTIVATED' as const, doc, now };
         },
         { retryExhausted: retryConflict('تحديث حالة المزاد قيد المعالجة؛ أعد المحاولة', AuctionErrorCode.STATE_CONFLICT) },
       );
-      if (!claimed) break;
+      if (outcome.kind === 'NONE') break;
+      if (outcome.kind === 'RACED') continue;
+      if (outcome.kind === 'HELD') {
+        held += 1;
+        await this.audit.logSystemAction(AuditAction.AUCTION_ACTIVATION_HELD, outcome.doc._id.toString(), 'auction activation held by the activation gate', { code: outcome.holdCode, heldAt: outcome.now });
+        continue;
+      }
       activated += 1;
       // Best-effort telemetry, unchanged from MAZAD-024: only after the transition and its event committed.
       await this.audit.logSystemAction(
         AuditAction.AUCTION_ACTIVATED,
-        claimed.doc._id.toString(),
+        outcome.doc._id.toString(),
         'auction activated at scheduled start',
-        { scheduledStartAt: claimed.doc.scheduledStartAt, activatedAt: claimed.now },
+        { scheduledStartAt: outcome.doc.scheduledStartAt, activatedAt: outcome.now },
       );
     }
-    return { activated };
+    return { activated, held };
   }
 
   /**
@@ -197,19 +235,11 @@ export class AuctionLifecycleService {
   // -----------------------------------------------------------------------
 
   /**
-   * Self-service cancellation (frozen V1 rules): the advertiser may cancel
-   * before or after start; an ACTIVE cancellation requires a reason;
-   * CANCELLED is terminal, preserves whatever bid history exists (nothing
-   * here deletes or touches bids — there is nothing to touch yet), and
-   * carries no winner. A cancelled auction is never reused — re-auctioning
-   * means creating a brand-new `Auction` via `AuctionsService.create`;
-   * this method never mutates a document into a different auction.
-   *
-   * There is no admin marketplace-participation capability for auctions
-   * today — MAZAD-023 seeded only `AUCTION_CREATE_OWN`, a marketplace-only
-   * capability with no admin-operational counterpart — so, per "do not
-   * invent a new marketplace actor model", this remains self-service only
-   * until an authoritative admin operational contract exists.
+   * Self-service cancellation (frozen V1 rules, Product decision 7): the
+   * advertiser may cancel a SCHEDULED auction, or an ACTIVE one with a reason;
+   * never after it ended. CANCELLED is terminal, preserves bid history and
+   * carries no winner; re-auctioning means a new request and a new review.
+   * Payments and entitlements are left untouched (no refund policy exists).
    */
   async cancel(actorId: string, auctionId: string, reason: string | undefined, ip?: string, expectedStatus?: AuctionStatus) {
     if (!Types.ObjectId.isValid(auctionId)) {
@@ -230,13 +260,142 @@ export class AuctionLifecycleService {
       throw new ConflictException({ message: 'تغيرت حالة المزاد؛ أعد التحميل', code: AuctionErrorCode.STATE_CONFLICT });
     }
     assertValidAuctionTransition(auction.status, AuctionStatus.CANCELLED);
+    if (this.clock.now().getTime() >= auction.currentEndAt.getTime()) {
+      throw new ConflictException({ message: "انتهى وقت المزاد؛ لم يعد إلغاؤه ممكنًا", code: AuctionErrorCode.TRANSITION_INVALID });
+    }
 
     const trimmedReason = reason?.trim();
     if (auction.status === AuctionStatus.ACTIVE && !trimmedReason) {
       throw new BadRequestException({ message: 'يجب ذكر سبب إلغاء المزاد النشط', code: AuctionErrorCode.CANCELLATION_REASON_REQUIRED });
     }
 
-    const fromStatus = auction.status;
+    const updated = await this.commitCancellation({
+      auctionId,
+      fromStatus: auction.status,
+      actorId,
+      ip,
+      set: {
+        ...(trimmedReason ? { cancellationReason: trimmedReason } : {}),
+        cancellationReasonCode: SystemAuctionCancellationCode.SELLER_CANCELLED,
+        cancelledBySource: AuctionCancellationSource.SELLER,
+      },
+      auditReason: trimmedReason || 'auction cancelled',
+      auditMetadata: { source: AuctionCancellationSource.SELLER },
+      propertyId: auction.propertyId.toString(),
+      notifyAdvertiser: true,
+      requireUnexpired: true,
+    });
+    return { message: 'تم إلغاء المزاد بنجاح', auction: this.toSummary(updated.toObject()) };
+  }
+
+  /**
+   * MAZAD-035 Admin cancellation (Product decision 8): SCHEDULED or ACTIVE
+   * only, a structured reason code is mandatory and OTHER needs a note. The
+   * note is Admin-only. Bids are never touched and no winner is chosen.
+   * `expectedStatus` is mandatory so a stale Admin screen cannot cancel an
+   * auction that has since moved on.
+   */
+  async cancelByAdmin(
+    adminActorId: string,
+    auctionId: string,
+    input: { reasonCode: unknown; note?: string; expectedStatus: AuctionStatus },
+    ip?: string,
+  ) {
+    if (!Types.ObjectId.isValid(auctionId)) throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
+    const actor = await this.users.findById(adminActorId).lean().exec();
+    if (!actor) throw new NotFoundException({ message: 'الحساب غير موجود', code: AuctionErrorCode.ACTOR_INVALID });
+    AuthorizationPolicyService.assert(actor, Capability.ADMIN_AUCTION_CANCEL);
+    const { reasonCode, note } = assertReasonWithNote(input.reasonCode, Object.values(AdminAuctionCancellationCode), input.note);
+
+    const auction = await this.auctions.findById(auctionId).exec();
+    if (!auction) throw new NotFoundException({ message: 'المزاد غير موجود', code: AuctionErrorCode.NOT_FOUND });
+    if (auction.status !== input.expectedStatus) {
+      throw new ConflictException({ message: 'تغيرت حالة المزاد؛ أعد التحميل', code: AuctionErrorCode.STATE_CONFLICT });
+    }
+    assertValidAuctionTransition(auction.status, AuctionStatus.CANCELLED);
+
+    const updated = await this.commitCancellation({
+      auctionId,
+      fromStatus: auction.status,
+      actorId: adminActorId,
+      ip,
+      set: {
+        cancellationReasonCode: reasonCode,
+        cancelledBySource: AuctionCancellationSource.ADMIN,
+        ...(note ? { cancellationInternalNote: note } : {}),
+      },
+      auditReason: `admin cancelled auction: ${reasonCode}`,
+      auditMetadata: { source: AuctionCancellationSource.ADMIN, reasonCode, ...(note ? { note } : {}) },
+      propertyId: auction.propertyId.toString(),
+      notifyAdvertiser: true,
+      requireUnexpired: false,
+    });
+    return { message: 'تم إلغاء المزاد', auction: this.toSummary(updated.toObject()) };
+  }
+
+  /**
+   * MAZAD-035 (Product decision 6), called inside the seller's revision
+   * transaction: the approved auction must not have started, and it is
+   * cancelled as TERMS_REVISED so the old approval can never activate. Fails
+   * closed — and so aborts the whole revision — when any payment attempt,
+   * reconciliation flag or entitlement exists: changing terms under a
+   * financial obligation is a policy question, not something to guess.
+   * Payment initiation writes the Auction document (`entryPaymentAttemptCount`),
+   * so a concurrently opened attempt conflicts with this write instead of
+   * slipping past the check.
+   */
+  async supersedeForRevisionWithinTransaction(session: ClientSession, input: { auctionId: Types.ObjectId; actorId: string; now: Date }) {
+    const updated = await this.auctions
+      .findOneAndUpdate(
+        { _id: input.auctionId, status: AuctionStatus.SCHEDULED, scheduledStartAt: { $gt: input.now } },
+        {
+          $set: {
+            status: AuctionStatus.CANCELLED,
+            cancelledByActorId: new Types.ObjectId(input.actorId),
+            cancelledAt: input.now,
+            cancellationReasonCode: SystemAuctionCancellationCode.TERMS_REVISED,
+            cancelledBySource: AuctionCancellationSource.SELLER,
+          },
+        },
+        { new: true, session },
+      )
+      .exec();
+    if (!updated) {
+      const current = await this.auctions.findById(input.auctionId).session(session).lean().exec();
+      if (current && current.status !== AuctionStatus.SCHEDULED) {
+        throw new ConflictException({ message: 'لا يمكن تعديل شروط مزاد بدأ أو انتهى أو أُلغي', code: AuctionErrorCode.ALREADY_STARTED });
+      }
+      throw new ConflictException({ message: 'حان موعد بدء المزاد؛ لم يعد تعديل شروطه ممكنًا', code: AuctionErrorCode.ALREADY_STARTED });
+    }
+    const activity = await this.participants.financialActivity(input.auctionId.toString(), session);
+    if (activity.livePayments || activity.flaggedPayments || activity.entitlements) {
+      throw new ConflictException({
+        message: 'لا يمكن تعديل شروط المزاد بعد بدء المشاركين في دفع رسوم الاشتراك؛ تواصل مع الإدارة',
+        code: AuctionErrorCode.REVISION_BLOCKED_BY_PAYMENTS,
+      });
+    }
+    await this.audit.logRequired(
+      {
+        action: AuditAction.AUCTION_CANCELLED,
+        actorUserId: input.actorId,
+        targetResourceId: updated._id.toString(),
+        reason: 'approved auction superseded by a seller revision before start',
+        metadata: { fromStatus: AuctionStatus.SCHEDULED, source: AuctionCancellationSource.SELLER, reasonCode: SystemAuctionCancellationCode.TERMS_REVISED, propertyId: updated.propertyId.toString() },
+      },
+      session,
+    );
+    // Public subscribers of this auction learn it is gone; the seller (who asked for it) is not notified.
+    await this.outbox.recordRequired(auctionCancelledEvent({
+      auctionId: updated._id.toString(), occurredAt: input.now, previousStatus: AuctionStatus.SCHEDULED,
+      participantAccountIds: await this.participants.forCancellation(updated._id.toString(), session),
+    }), session);
+    return updated;
+  }
+
+  private async commitCancellation(input: {
+    auctionId: string; fromStatus: AuctionStatus; actorId: string; ip?: string; set: Record<string, unknown>;
+    auditReason: string; auditMetadata: Record<string, unknown>; propertyId: string; notifyAdvertiser: boolean; requireUnexpired: boolean;
+  }): Promise<AuctionDocument> {
     const session = await this.connection.startSession();
     try {
       let updated: AuctionDocument | null = null;
@@ -244,15 +403,8 @@ export class AuctionLifecycleService {
         const cancelledAt = this.clock.now();
         updated = await this.auctions
           .findOneAndUpdate(
-            { _id: auctionId, status: fromStatus },
-            {
-              $set: {
-                status: AuctionStatus.CANCELLED,
-                cancelledByActorId: new Types.ObjectId(actorId),
-                cancelledAt,
-                ...(trimmedReason ? { cancellationReason: trimmedReason } : {}),
-              },
-            },
+            { _id: input.auctionId, status: input.fromStatus, ...(input.requireUnexpired ? { currentEndAt: { $gt: cancelledAt } } : {}) },
+            { $set: { status: AuctionStatus.CANCELLED, cancelledByActorId: new Types.ObjectId(input.actorId), cancelledAt, ...input.set } },
             { new: true, session },
           )
           .exec();
@@ -265,21 +417,24 @@ export class AuctionLifecycleService {
         await this.audit.logRequired(
           {
             action: AuditAction.AUCTION_CANCELLED,
-            actorUserId: actorId,
-            targetResourceId: auctionId,
-            reason: trimmedReason || 'auction cancelled',
-            ip,
-            metadata: { fromStatus, propertyId: auction.propertyId.toString() },
+            actorUserId: input.actorId,
+            targetResourceId: input.auctionId,
+            reason: input.auditReason,
+            ip: input.ip,
+            metadata: { fromStatus: input.fromStatus, propertyId: input.propertyId, ...input.auditMetadata },
           },
           session,
         );
         // MAZAD-031: the domain event commits with the cancellation and its audit row (the reason is not in it).
+        // MAZAD-035: paid/entitled bidders and bidders are routed privately for the cancellation notification.
+        const participantAccountIds = await this.participants.forCancellation(input.auctionId, session);
         await this.outbox.recordRequired(auctionCancelledEvent({
-          auctionId: updated!._id.toString(), occurredAt: cancelledAt, previousStatus: fromStatus,
-          advertiserAccountId: updated!.advertiserAccountId.toString(),
+          auctionId: updated!._id.toString(), occurredAt: cancelledAt, previousStatus: input.fromStatus,
+          ...(input.notifyAdvertiser ? { advertiserAccountId: updated!.advertiserAccountId.toString() } : {}),
+          participantAccountIds,
         }), session);
       });
-      return { message: 'تم إلغاء المزاد بنجاح', auction: this.toSummary(updated!.toObject()) };
+      return updated!;
     } finally {
       await session.endSession();
     }
@@ -390,6 +545,8 @@ export class AuctionLifecycleService {
       currentEndAt: item.currentEndAt,
       cancelledAt: item.cancelledAt,
       cancellationReason: item.cancellationReason,
+      cancellationReasonCode: item.cancellationReasonCode,
+      cancelledBySource: item.cancelledBySource,
     };
   }
 }

@@ -142,7 +142,10 @@ describe('MAZAD-025 route policy contract', () => {
     expect(Reflect.getMetadata(CAPABILITIES_KEY, AdminAuctionsController)).toEqual([Capability.ADMIN_AUCTION_READ]);
     expect(Reflect.getMetadata(ROLES_KEY, AdminAuctionsController)).toEqual([SystemRole.ADMIN]);
     expect(Reflect.getMetadata('__guards__', AdminAuctionsController)).toHaveLength(3);
-    expect(Object.getOwnPropertyNames(AdminAuctionsController.prototype).filter((n) => n !== 'constructor').sort()).toEqual(['get', 'list']);
+    // MAZAD-035: + the read-only staff ledger and Admin cancellation (its own narrower capability); nothing else mutates.
+    expect(Object.getOwnPropertyNames(AdminAuctionsController.prototype).filter((n) => n !== 'constructor').sort()).toEqual(['cancel', 'get', 'ledger', 'list']);
+    expect(Reflect.getMetadata(CAPABILITIES_KEY, (AdminAuctionsController.prototype as any).cancel)).toEqual([Capability.ADMIN_AUCTION_CANCEL]);
+    expect(Reflect.getMetadata(CAPABILITIES_KEY, (AdminAuctionsController.prototype as any).ledger)).toBeUndefined();
   });
 });
 
@@ -287,8 +290,11 @@ describe('MAZAD-025 projections (whitelist, no leakage)', () => {
   it('public projection exposes only the whitelisted browsing facts', () => {
     const view = toPublicAuction(rawAuction({ status: AuctionStatus.ACTIVE }), PUBLIC_PROPERTY);
     expect(Object.keys(view).sort()).toEqual([
-      'currency', 'currentEndAt', 'id', 'minimumBidStepMinor', 'property', 'rules', 'scheduledEndAt', 'scheduledStartAt', 'startingPriceMinor', 'status',
+      'currency', 'currentEndAt', 'entryFee', 'id', 'minimumBidStepMinor', 'property', 'rules', 'scheduledEndAt', 'scheduledStartAt', 'startingPriceMinor', 'status',
     ]);
+    // MAZAD-035: the Admin-approved fee is public (bidders must know it before paying); a missing fee is never "free".
+    expect(view.entryFee).toEqual({ configured: false, free: false, amountMinor: null, currency: 'EGP' });
+    expect(toPublicAuction(rawAuction({ entryFee: { amountMinor: 0, currency: 'EGP' } }), PUBLIC_PROPERTY).entryFee).toEqual({ configured: true, free: true, amountMinor: 0, currency: 'EGP' });
     for (const key of FORBIDDEN_PUBLIC_KEYS) expect(view).not.toHaveProperty(key);
     expect(view.id).toBe(AUCTION_ID);
     expect(view.property).toBe(PUBLIC_PROPERTY);
@@ -578,7 +584,7 @@ describe('AuctionsQueryService — admin operational reads (MAZAD-025)', () => {
 
 describe('AuctionsController delegation (MAZAD-025)', () => {
   function controller() {
-    const auctions = { create: jest.fn().mockResolvedValue({ ok: 'created' }) };
+    const auctions = { rejectDirectCreation: jest.fn(() => { throw new Error('AUCTION_REVIEW_REQUIRED'); }) };
     const lifecycle = { cancel: jest.fn().mockResolvedValue({ ok: 'cancelled' }) };
     const queries = {
       listMine: jest.fn().mockResolvedValue('mine'), getMine: jest.fn().mockResolvedValue('one'),
@@ -588,17 +594,10 @@ describe('AuctionsController delegation (MAZAD-025)', () => {
   }
   const req = { user: { userId: ME }, ip: '203.0.113.9' };
 
-  it('creates with the token-derived actor and parsed dates — never a body-supplied account', async () => {
+  it('MAZAD-035: create is retired and delegates only to the review-required rejection (no auction can be created here)', () => {
     const { ctrl, auctions } = controller();
-    await ctrl.create(req, {
-      propertyId: PROPERTY_ID, startingPriceMinor: 100_000, minimumBidStepMinor: 5_000,
-      scheduledStartAt: '2026-03-02T10:00:00.000Z', scheduledEndAt: '2026-03-09T10:00:00.000Z',
-    });
-    expect(auctions.create).toHaveBeenCalledWith(
-      ME,
-      { propertyId: PROPERTY_ID, startingPriceMinor: 100_000, minimumBidStepMinor: 5_000, scheduledStartAt: new Date('2026-03-02T10:00:00.000Z'), scheduledEndAt: new Date('2026-03-09T10:00:00.000Z') },
-      '203.0.113.9',
-    );
+    expect(() => ctrl.create()).toThrow();
+    expect(auctions.rejectDirectCreation).toHaveBeenCalledTimes(1);
   });
 
   it('cancels through AuctionLifecycleService (never mutating status itself), passing reason, ip and the optimistic expectedStatus', async () => {

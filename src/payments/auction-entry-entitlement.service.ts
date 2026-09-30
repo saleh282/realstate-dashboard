@@ -18,6 +18,11 @@ import { AuctionEntryPayment, AuctionEntryPaymentDocument } from './schemas/auct
 export enum EntryEntitlementState {
   /** The auction has no admin-configured fee. Fail-closed: this is NOT "free", and no bid can be accepted. */
   FEE_NOT_CONFIGURED = 'FEE_NOT_CONFIGURED',
+  /**
+   * MAZAD-035: the Admin explicitly configured a 0 fee (FREE auction). No payment exists or is needed; the
+   * bidder still has to pass every bidding policy check (`blockedReason` reports the first failing one).
+   */
+  FREE_ENTRY = 'FREE_ENTRY',
   /** A fee is configured and this account has neither paid nor started paying. */
   PAYMENT_REQUIRED = 'PAYMENT_REQUIRED',
   /** An attempt was opened and the server has not confirmed it (initiated / pending at the provider). */
@@ -66,7 +71,9 @@ export class AuctionEntryEntitlementService {
     const flagged = await this.payments.findOne({ ...scope, reconciliationFlag: { $exists: true } }).lean().exec();
 
     const fee = auction.entryFee;
-    const feeConfigured = Boolean(fee) && isMoneyMinorAmount(fee.amountMinor, { positive: true }) && fee.currency === EGP_CURRENCY;
+    // MAZAD-035: 0 is a configured (FREE) fee; only an absent/invalid fee is "not configured".
+    const feeConfigured = Boolean(fee) && isMoneyMinorAmount(fee.amountMinor) && fee.currency === EGP_CURRENCY;
+    const free = feeConfigured && fee.amountMinor === 0;
     const entitled = Boolean(entitlement);
     const now = this.clock.now();
 
@@ -76,14 +83,22 @@ export class AuctionEntryEntitlementService {
     else if (live && live.status === EntryPaymentStatus.INITIATED) state = EntryEntitlementState.PAYMENT_PENDING;
     else if (latest && latest.status === EntryPaymentStatus.FAILED) state = EntryEntitlementState.PAYMENT_FAILED;
     else if (!feeConfigured) state = EntryEntitlementState.FEE_NOT_CONFIGURED;
+    else if (free) state = EntryEntitlementState.FREE_ENTRY;
     else state = EntryEntitlementState.PAYMENT_REQUIRED;
 
-    const blockedReason = this.blockedReason({ actor, auction, entitled, feeConfigured, flagged: Boolean(flagged), now });
+    const blockedReason = this.blockedReason({ actor, auction, entitled, feeConfigured, free, flagged: Boolean(flagged), now });
     return {
       auctionId: auction._id.toString(),
       auctionStatus: auction.status,
       state,
-      entryFee: feeConfigured ? { configured: true, amountMinor: fee.amountMinor, currency: fee.currency } : { configured: false },
+      entryFee: feeConfigured ? { configured: true, free, amountMinor: fee.amountMinor, currency: fee.currency } : { configured: false, free: false },
+      /** MAZAD-035: false for a FREE auction (and when no fee is configured, which fails closed instead). */
+      paymentRequired: feeConfigured && !free,
+      /**
+       * MAZAD-035 guidance for a FREE auction: every bidding policy check passed (the bid itself still re-checks
+       * everything, including ACTIVE status and time). Always false for paid auctions — they use `entitled`.
+       */
+      freeBiddingEligible: free && blockedReason === PaymentErrorCode.NOT_REQUIRED,
       entitled,
       entitledAt: entitled ? entitlement.grantedAt : null,
       payment: latest
@@ -107,7 +122,7 @@ export class AuctionEntryEntitlementService {
     };
   }
 
-  private blockedReason(input: { actor: any; auction: any; entitled: boolean; feeConfigured: boolean; flagged: boolean; now: Date }): string | null {
+  private blockedReason(input: { actor: any; auction: any; entitled: boolean; feeConfigured: boolean; free: boolean; flagged: boolean; now: Date }): string | null {
     if (input.entitled) return PaymentErrorCode.ALREADY_PAID;
     try {
       AuthorizationPolicyService.assertBid(input.actor, input.auction.advertiserAccountId.toString());
@@ -119,6 +134,8 @@ export class AuctionEntryEntitlementService {
       && !(input.auction.status === AuctionStatus.ACTIVE && input.auction.currentEndAt && input.now.getTime() >= new Date(input.auction.currentEndAt).getTime());
     if (!open) return PaymentErrorCode.AUCTION_NOT_PAYABLE;
     if (!input.feeConfigured) return PaymentErrorCode.ENTRY_FEE_NOT_CONFIGURED;
+    // A FREE auction has nothing to initiate: the bidder passed every policy check above.
+    if (input.free) return PaymentErrorCode.NOT_REQUIRED;
     if (input.flagged) return PaymentErrorCode.RECONCILIATION_REQUIRED;
     return null;
   }

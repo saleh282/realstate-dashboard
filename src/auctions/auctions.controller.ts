@@ -10,7 +10,6 @@ import { AuctionsService } from './auctions.service';
 import { ParseAuctionIdPipe } from './dto/parse-auction-id.pipe';
 import { auctionValidation } from './dto/auction-validation.pipe';
 import { CancelAuctionDto } from './dto/cancel-auction.dto';
-import { CreateAuctionDto } from './dto/create-auction.dto';
 import { ListOwnAuctionsDto, ListPublicAuctionsDto } from './dto/list-auctions.dto';
 
 /**
@@ -28,22 +27,17 @@ export class AuctionsController {
     private readonly queries: AuctionsQueryService,
   ) {}
 
+  /**
+   * MAZAD-035: retired. Creating a SCHEDULED auction without Admin review is no
+   * longer possible; this route answers 409 AUCTION_REVIEW_REQUIRED (after the
+   * same authentication/capability checks as before) and clients submit an
+   * auction request via `POST /auction-requests` instead.
+   */
   @Post()
   @UseGuards(JwtAuthGuard, CapabilityGuard)
   @RequireCapabilities(Capability.AUCTION_CREATE_OWN)
-  create(@Req() req: any, @Body(auctionValidation(CreateAuctionDto, AuctionErrorCode.REQUEST_INVALID)) dto: Record<string, any>) {
-    const input = dto as CreateAuctionDto;
-    return this.auctions.create(
-      req.user.userId,
-      {
-        propertyId: input.propertyId,
-        startingPriceMinor: input.startingPriceMinor,
-        minimumBidStepMinor: input.minimumBidStepMinor,
-        scheduledStartAt: new Date(input.scheduledStartAt),
-        scheduledEndAt: new Date(input.scheduledEndAt),
-      },
-      req.ip,
-    );
+  create() {
+    return this.auctions.rejectDirectCreation();
   }
 
   @Get('mine')

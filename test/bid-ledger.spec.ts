@@ -352,9 +352,11 @@ describe('no bid HTTP surface (MAZAD-026)', () => {
       Object.getOwnPropertyNames(controller.prototype)
         .filter((name) => name !== 'constructor')
         .map((name) => [Reflect.getMetadata('method', controller.prototype[name]), Reflect.getMetadata('path', controller.prototype[name])]);
-    const all = [...routes(AuctionsController), ...routes(AdminAuctionsController)];
-    expect(JSON.stringify(all)).not.toMatch(/bid/i);
+    expect(JSON.stringify(routes(AuctionsController))).not.toMatch(/bid/i);
     expect(routes(AuctionsController)).toHaveLength(6);
-    expect(routes(AdminAuctionsController)).toHaveLength(2);
+    // MAZAD-035 adds a READ-only staff ledger view (GET :auctionId/bids) and Admin cancellation; nothing writes a bid.
+    const admin = routes(AdminAuctionsController);
+    expect(admin).toHaveLength(4);
+    expect(admin.filter(([, path]) => /bid/i.test(path))).toEqual([[0 /* GET */, ':auctionId/bids']]);
   });
 });
