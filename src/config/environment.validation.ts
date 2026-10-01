@@ -3,6 +3,7 @@ import { REALTIME_MAX_MESSAGE_BYTES_HARD_CAP, REALTIME_TOPOLOGY_SINGLE_INSTANCE 
 import { parseTrustProxy } from './trust-proxy.config';
 import { PROTECTED_ENVS, deploymentEnvironmentErrors, resolveDeploymentEnv } from './deployment-environment';
 import { paymentProviderErrors } from '../payments/payment-provider.config';
+import { paymentReconciliationErrors } from '../payments/payment-reconciliation.config';
 import {
   PASSWORD_POLICY_MESSAGE,
   isValidPassword,
@@ -64,6 +65,7 @@ export function validateEnvironment(config: Environment): Environment {
   );
   errors.push(...deploymentEnvironmentErrors(config));
   errors.push(...paymentProviderErrors(config));
+  errors.push(...paymentReconciliationErrors(config));
 
   for (const key of ['JWT_ACCESS_EXPIRES_IN', 'JWT_REFRESH_EXPIRES_IN']) {
     const value = valueOf(config, key);

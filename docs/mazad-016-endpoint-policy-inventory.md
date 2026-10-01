@@ -42,3 +42,5 @@ This inventory freezes the V1 authorization classification. Capability responses
 | `POST /admin/auctions/:id/cancel` | Admin mutation (ADMIN and SUPER_ADMIN) | `ADMIN_AUCTION_CANCEL`; structured reason code, `expectedStatus` |
 
 Bid and entry-payment routes use `BID_PLACE` and `PAYMENT_ENTRY_INITIATE`; `assertBid` also enforces exact-account self-bid prevention. `ADMIN_AUCTION_FEE_MANAGE` remains only for the legacy internal fee path (no route).
+
+MAZAD-028 adds `POST /managed-marketing/requests/:requestId/payment` (`MANAGED_MARKETING_REQUEST`, the request's own advertiser only, empty body) and the development-only `POST /dev/fake-payments/:paymentId/settle` (404 unless the fake payment provider runs in local/development; then authenticated and payment-owner scoped). Neither confirms a payment: no route does.

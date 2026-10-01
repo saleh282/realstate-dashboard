@@ -13,7 +13,8 @@ import { ManagedMarketingRequest, ManagedMarketingRequestDocument } from '../man
 import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from './auction-payment-provider.port';
 import { MM_PAYMENT_UNIQUE_INDEXES } from './managed-marketing-payment.service';
 import { decideOutcome } from './payment-verification';
-import { EntryPaymentStatus, PaymentReconciliationFlag, VerifiedProviderOutcome } from './payment.types';
+import { EntryPaymentStatus, PaymentPurpose, PaymentReconciliationFlag, VerifiedProviderOutcome } from './payment.types';
+import { PaymentLifecyclePort } from './payment-lifecycle.port';
 import { ManagedMarketingPayment, ManagedMarketingPaymentDocument } from './schemas/managed-marketing-payment.schema';
 
 export type ManagedMarketingPaymentConfirmationResult = {
@@ -41,9 +42,15 @@ type Outcome = { result: ManagedMarketingPaymentConfirmationResult; rejection?: 
  * auction entitlement, auction, or bid — this service does not even inject
  * those models. Any disagreement or ambiguity parks the request in
  * `RECONCILIATION_REQUIRED` (operator action), granting nothing.
+ *
+ * Expiry (`expire`) moves the attempt INITIATED → EXPIRED and the request
+ * back to `paymentStatus: FAILED` — the existing "payable and cancellable
+ * again" state — so a new attempt can be initiated.
  */
 @Injectable()
-export class ManagedMarketingPaymentConfirmationService {
+export class ManagedMarketingPaymentConfirmationService implements PaymentLifecyclePort {
+  readonly purpose = PaymentPurpose.MANAGED_MARKETING;
+
   constructor(
     @InjectModel(ManagedMarketingRequest.name) private readonly requests: Model<ManagedMarketingRequestDocument>,
     @InjectModel(ManagedMarketingPayment.name) private readonly payments: Model<ManagedMarketingPaymentDocument>,
@@ -59,6 +66,10 @@ export class ManagedMarketingPaymentConfirmationService {
     const payment: any = await this.payments.findById(paymentId).lean().exec();
     if (!payment) throw this.notFound();
     if (payment.status === EntryPaymentStatus.SUCCEEDED) return this.apply(paymentId, undefined); // replay: no provider call
+    if (!payment.providerReference && payment.status !== EntryPaymentStatus.INITIATED) {
+      // A terminal attempt that never reached the provider (failed while opening): nothing can be asked, nothing changes.
+      return { paymentId, requestId: payment.requestId.toString(), status: payment.status, alreadyProcessed: true, pending: false, requestPaid: false };
+    }
     if (!payment.providerReference) {
       throw new ConflictException({ message: 'عملية الدفع لم تُفتح لدى مزود الدفع بعد', code: PaymentErrorCode.STATE_INCONSISTENT });
     }
@@ -102,6 +113,12 @@ export class ManagedMarketingPaymentConfirmationService {
     if (payment.status === EntryPaymentStatus.FAILED) {
       if (outcome.status !== 'SUCCEEDED') return done(EntryPaymentStatus.FAILED, { alreadyProcessed: true });
       return this.flag(session, payment, PaymentReconciliationFlag.CONFIRMED_AFTER_FAILURE, PaymentErrorCode.CONFIRMED_AFTER_FAILURE, 'تم تأكيد دفعة مسجلة كفاشلة وتحتاج مراجعة يدوية', outcome, now);
+    }
+
+    if (payment.status === EntryPaymentStatus.EXPIRED) {
+      // The attempt expired locally; a success now is the provider's truth arriving late. It is recorded, never applied.
+      if (outcome.status !== 'SUCCEEDED') return done(EntryPaymentStatus.EXPIRED, { alreadyProcessed: true });
+      return this.flag(session, payment, PaymentReconciliationFlag.CONFIRMED_AFTER_EXPIRY, PaymentErrorCode.CONFIRMED_AFTER_EXPIRY, 'تم تأكيد دفعة انتهت مهلتها وتحتاج مراجعة يدوية', outcome, now);
     }
 
     const decision = decideOutcome(payment, outcome);
@@ -172,9 +189,61 @@ export class ManagedMarketingPaymentConfirmationService {
     return done(EntryPaymentStatus.SUCCEEDED, { requestPaid: true });
   }
 
+  /**
+   * The worker's INITIATED → EXPIRED transition, with the request returned to a payable AND cancellable state
+   * (`paymentStatus: FAILED`), atomically. Called only after a final provider verification still answered PENDING.
+   */
+  async expire(paymentId: string): Promise<boolean> {
+    return this.close(paymentId, { reconciliationFlag: { $exists: false } }, { status: EntryPaymentStatus.EXPIRED }, 'expiredAt', AuditAction.MANAGED_MARKETING_PAYMENT_EXPIRED, 'managed-marketing payment expired');
+  }
+
+  /** Fails an INITIATED attempt that never received a provider reference (no hand-off ever reached a client) and frees the request. */
+  async failAbandoned(paymentId: string): Promise<boolean> {
+    return this.close(paymentId, { providerReference: { $exists: false } }, { status: EntryPaymentStatus.FAILED, failureCode: 'PROVIDER_INITIATION_ABANDONED' }, 'failedAt', AuditAction.MANAGED_MARKETING_PAYMENT_FAILED, 'managed-marketing payment abandoned before the provider opened it');
+  }
+
+  private close(paymentId: string, guard: Record<string, unknown>, set: Record<string, unknown>, stamp: 'expiredAt' | 'failedAt', action: AuditAction, reason: string): Promise<boolean> {
+    return runTransactionWithRetry(
+      this.connection,
+      async (session) => {
+        const now = this.clock.now();
+        const closed: any = await this.payments
+          .findOneAndUpdate(
+            { _id: new Types.ObjectId(paymentId), status: EntryPaymentStatus.INITIATED, ...guard },
+            { $set: { ...set, [stamp]: now, lastVerifiedAt: now }, $unset: { isLive: '', initiationClaimedAt: '' } },
+            { new: true, session },
+          )
+          .lean().exec();
+        if (!closed) return false;
+        // Back to the existing "payable and cancellable" state. A request that is not PENDING is left exactly as it is.
+        await this.requests
+          .findOneAndUpdate({ _id: closed.requestId, paymentStatus: ManagedMarketingPaymentStatus.PENDING }, { $set: { paymentStatus: ManagedMarketingPaymentStatus.FAILED } }, { new: true, session })
+          .lean().exec();
+        await this.audit.logSystemRequired(
+          { action, targetResourceId: closed.requestId.toString(), targetUserId: closed.advertiserAccountId.toString(), reason, metadata: { paymentId, provider: closed.provider, initiatedAt: closed.initiatedAt, ...(set.failureCode ? { failureCode: set.failureCode } : {}) } },
+          session,
+        );
+        return true;
+      },
+      { uniqueIndexNames: MM_PAYMENT_UNIQUE_INDEXES, retryExhausted: retryConflict('تأكيد الدفع قيد المعالجة؛ أعد المحاولة', PaymentErrorCode.RETRY_EXHAUSTED) },
+    );
+  }
+
   /** Records the disagreement, parks the request for the operator (RECONCILIATION_REQUIRED), commits, then rejects. Grants nothing. */
   private async flag(session: ClientSession, payment: any, flag: PaymentReconciliationFlag, code: PaymentErrorCode, message: string, outcome: VerifiedProviderOutcome, now: Date): Promise<Outcome> {
-    await this.payments.updateOne({ _id: payment._id, status: payment.status }, { $set: { reconciliationFlag: flag, lastVerifiedAt: now } }, { session }).exec();
+    const rejected: Outcome = {
+      result: { paymentId: payment._id.toString(), requestId: payment.requestId.toString(), status: payment.status, alreadyProcessed: false, pending: false, requestPaid: false },
+      rejection: { code, message },
+    };
+    // Already recorded: a repeated trigger keeps answering the rejection without writing a second flag/audit row.
+    if (payment.reconciliationFlag === flag) return rejected;
+    await this.payments
+      .updateOne(
+        { _id: payment._id, status: payment.status },
+        { $set: { reconciliationFlag: flag, lastVerifiedAt: now, ...(outcome.providerEventId ? { providerEventId: outcome.providerEventId.slice(0, 200) } : {}) } },
+        { session },
+      )
+      .exec();
     await this.requests
       .findOneAndUpdate(
         { _id: payment.requestId, status: ManagedMarketingRequestStatus.APPROVED, paymentStatus: { $in: [ManagedMarketingPaymentStatus.PENDING, ManagedMarketingPaymentStatus.FAILED] } },
@@ -188,13 +257,10 @@ export class ManagedMarketingPaymentConfirmationService {
         targetResourceId: payment.requestId.toString(),
         targetUserId: payment.advertiserAccountId.toString(),
         reason: 'managed-marketing payment verification rejected',
-        metadata: { paymentId: payment._id.toString(), flag, expectedAmountMinor: payment.amountMinor, expectedCurrency: payment.currency, reportedAmountMinor: outcome.amountMinor, reportedCurrency: outcome.currency, reportedStatus: outcome.status },
+        metadata: { paymentId: payment._id.toString(), flag, paymentStatus: payment.status, expectedAmountMinor: payment.amountMinor, expectedCurrency: payment.currency, reportedAmountMinor: outcome.amountMinor, reportedCurrency: outcome.currency, reportedStatus: outcome.status, providerEventId: outcome.providerEventId },
       },
       session,
     );
-    return {
-      result: { paymentId: payment._id.toString(), requestId: payment.requestId.toString(), status: payment.status, alreadyProcessed: false, pending: false, requestPaid: false },
-      rejection: { code, message },
-    };
+    return rejected;
   }
 }

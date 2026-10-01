@@ -76,13 +76,20 @@ describe('Phase 13 operational status', () => {
   const now = new Date('2026-06-01T12:00:00Z');
   const provider = { providerKey: 'unconfigured', configured: false } as any;
   const config = (values: Record<string, unknown> = {}) => ({ get: (key: string) => ({ NODE_ENV: 'production', DEPLOYMENT_ENV: 'production', ...values })[key] }) as any;
-  const connection = (data: { ledger?: any[]; lock?: any; cleanup?: any[]; failing?: boolean; held?: number }) => ({
+  const connection = (data: { ledger?: any[]; lock?: any; cleanup?: any[]; failing?: boolean; held?: number; payments?: Record<string, any[]> }) => ({
     db: {
       collection: (name: string) => {
         if (data.failing) throw new Error('down');
         if (name === 'migration_ledger') return { find: () => ({ toArray: async () => data.ledger ?? [] }) };
         if (name === 'migration_locks') return { findOne: async () => data.lock ?? null };
         if (name === 'auctions') return { countDocuments: async () => data.held ?? 0 };
+        if (name === 'auction_entry_payments' || name === 'managed_marketing_payments') {
+          return { countDocuments: async (filter: Record<string, any>) => (data.payments?.[name] ?? []).filter((row) => Object.entries(filter).every(([key, expected]) => {
+            if (expected && typeof expected === 'object' && '$exists' in expected) return (row[key] !== undefined) === expected.$exists;
+            if (expected && typeof expected === 'object' && '$lte' in expected) return row[key] !== undefined && row[key].getTime() <= expected.$lte.getTime();
+            return row[key] === expected;
+          })).length };
+        }
         return {
           countDocuments: async () => (data.cleanup ?? []).length,
           find: () => ({ sort: () => ({ limit: () => ({ toArray: async () => (data.cleanup ?? []).slice(0, 1) }) }) }),

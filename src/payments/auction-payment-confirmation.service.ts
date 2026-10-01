@@ -14,7 +14,8 @@ import { OutboxService } from '../outbox/outbox.service';
 import { decideOutcome } from './payment-verification';
 import { PAYMENT_UNIQUE_INDEXES } from './auction-entry-payment.service';
 import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from './auction-payment-provider.port';
-import { EntryPaymentStatus, PaymentReconciliationFlag, VerifiedProviderOutcome } from './payment.types';
+import { EntryPaymentStatus, PaymentPurpose, PaymentReconciliationFlag, VerifiedProviderOutcome } from './payment.types';
+import { PaymentLifecyclePort } from './payment-lifecycle.port';
 import { AuctionBidEntitlement, AuctionBidEntitlementDocument } from './schemas/auction-bid-entitlement.schema';
 import { AuctionEntryPayment, AuctionEntryPaymentDocument } from './schemas/auction-entry-payment.schema';
 
@@ -48,10 +49,19 @@ type Outcome = { result: PaymentConfirmationResult; rejection?: { code: PaymentE
  * genuinely succeeded after the auction ended, the truthful SUCCEEDED record and
  * the entitlement are kept (audited as `lateConfirmation`, for refund/
  * reconciliation) — the entitlement is inert because MAZAD-027 still requires
- * ACTIVE + before end + an eligible bidder on every bid.
+ * ACTIVE + before end + an eligible bidder on every bid. The payment row is
+ * additionally marked `lateConfirmation` so operations can see it; no refund
+ * is implied or performed (legal/product follow-up).
+ *
+ * Expiry (`expire`) is the reconciliation worker's INITIATED → EXPIRED
+ * transition. It is only ever called after a final provider verification
+ * still answered PENDING; a provider success observed afterwards is flagged
+ * `CONFIRMED_AFTER_EXPIRY` and grants nothing.
  */
 @Injectable()
-export class AuctionPaymentConfirmationService {
+export class AuctionPaymentConfirmationService implements PaymentLifecyclePort {
+  readonly purpose = PaymentPurpose.AUCTION_ENTRY;
+
   constructor(
     @InjectModel(Auction.name) private readonly auctions: Model<AuctionDocument>,
     @InjectModel(AuctionEntryPayment.name) private readonly payments: Model<AuctionEntryPaymentDocument>,
@@ -68,6 +78,10 @@ export class AuctionPaymentConfirmationService {
     const payment: any = await this.payments.findById(paymentId).lean().exec();
     if (!payment) throw new NotFoundException({ message: 'عملية الدفع غير موجودة', code: PaymentErrorCode.NOT_FOUND });
     if (payment.status === EntryPaymentStatus.SUCCEEDED) return this.apply(paymentId, undefined); // idempotent replay: no provider call needed
+    if (!payment.providerReference && payment.status !== EntryPaymentStatus.INITIATED) {
+      // A terminal attempt that never reached the provider (failed while opening): nothing can be asked, nothing changes.
+      return { paymentId, status: payment.status, alreadyProcessed: true, pending: false, entitlementGranted: false };
+    }
     if (!payment.providerReference) {
       throw new ConflictException({ message: 'عملية الدفع لم تُفتح لدى مزود الدفع بعد', code: PaymentErrorCode.STATE_INCONSISTENT });
     }
@@ -105,6 +119,12 @@ export class AuctionPaymentConfirmationService {
       return this.flag(session, payment, PaymentReconciliationFlag.CONFIRMED_AFTER_FAILURE, PaymentErrorCode.CONFIRMED_AFTER_FAILURE, 'تم تأكيد دفعة مسجلة كفاشلة وتحتاج مراجعة يدوية', outcome, now);
     }
 
+    if (payment.status === EntryPaymentStatus.EXPIRED) {
+      // The attempt expired locally; a success now is the provider's truth arriving late. It is recorded, never applied.
+      if (outcome.status !== 'SUCCEEDED') return done(EntryPaymentStatus.EXPIRED, { alreadyProcessed: true });
+      return this.flag(session, payment, PaymentReconciliationFlag.CONFIRMED_AFTER_EXPIRY, PaymentErrorCode.CONFIRMED_AFTER_EXPIRY, 'تم تأكيد دفعة انتهت مهلتها وتحتاج مراجعة يدوية', outcome, now);
+    }
+
     // payment is INITIATED. Verify the provider's answer against the SERVER-owned record (shared rules).
     const decision = decideOutcome(payment, outcome);
     if (decision.kind === 'MISMATCH') {
@@ -131,21 +151,30 @@ export class AuctionPaymentConfirmationService {
     }
 
     // Verified SUCCESS (reference, currency and amount all equal the server-owned snapshot).
-    // The payment write comes FIRST: it is the document concurrent confirmations collide on.
+    // Read-only: was this a late confirmation (the auction can no longer be bid on)? The auction is never written here.
+    const auction: any = await this.auctions.findById(payment.auctionId).session(session).select('status currentEndAt').lean().exec();
+    const lateConfirmation = !auction
+      || (auction.status !== AuctionStatus.SCHEDULED && auction.status !== AuctionStatus.ACTIVE)
+      || (auction.status === AuctionStatus.ACTIVE && Boolean(auction.currentEndAt) && now.getTime() >= new Date(auction.currentEndAt).getTime());
+
+    // The payment write comes FIRST among the writes: it is the document concurrent confirmations collide on.
     const confirmed = await this.payments
       .findOneAndUpdate(
         { _id: payment._id, status: EntryPaymentStatus.INITIATED },
-        { $set: { status: EntryPaymentStatus.SUCCEEDED, confirmedAt: now, lastVerifiedAt: now, ...(outcome.providerEventId ? { providerEventId: outcome.providerEventId.slice(0, 200) } : {}) } },
+        {
+          $set: {
+            status: EntryPaymentStatus.SUCCEEDED, confirmedAt: now, lastVerifiedAt: now,
+            ...(outcome.providerEventId ? { providerEventId: outcome.providerEventId.slice(0, 200) } : {}),
+            // The truthful paid fact is kept; the row is marked for operator review (no refund is implied here).
+            ...(lateConfirmation ? { lateConfirmation: true } : {}),
+          },
+        },
         { new: true, session },
       )
       .lean().exec();
     if (!confirmed) throw new TransactionAttemptConflict('payment changed under a success confirmation');
 
     await this.ensureEntitlement(session, confirmed, now, true);
-
-    // Read-only, for the audit trail: was this a late confirmation? The auction is never written here.
-    const auction: any = await this.auctions.findById(payment.auctionId).session(session).select('status').lean().exec();
-    const lateConfirmation = !auction || (auction.status !== AuctionStatus.SCHEDULED && auction.status !== AuctionStatus.ACTIVE);
     await this.audit.logSystemRequired(
       { action: AuditAction.AUCTION_ENTRY_PAYMENT_CONFIRMED, targetResourceId: payment.auctionId.toString(), targetUserId: payment.bidderAccountId.toString(), reason: 'entry payment confirmed', metadata: { paymentId, provider: payment.provider, amountMinor: payment.amountMinor, currency: payment.currency, providerEventId: outcome.providerEventId, lateConfirmation, auctionStatus: auction?.status } },
       session,
@@ -188,9 +217,77 @@ export class AuctionPaymentConfirmationService {
     return true;
   }
 
+  /**
+   * The worker's INITIATED → EXPIRED transition (terminal; frees the live slot; the row is kept). The caller has just
+   * verified with the provider and was told PENDING. Returns false when the attempt was no longer an unflagged INITIATED
+   * one (a concurrent confirmation won): nothing is written then.
+   */
+  async expire(paymentId: string): Promise<boolean> {
+    return runTransactionWithRetry(
+      this.connection,
+      async (session) => {
+        const now = this.clock.now();
+        const expired: any = await this.payments
+          .findOneAndUpdate(
+            { _id: new Types.ObjectId(paymentId), status: EntryPaymentStatus.INITIATED, reconciliationFlag: { $exists: false } },
+            { $set: { status: EntryPaymentStatus.EXPIRED, expiredAt: now, lastVerifiedAt: now }, $unset: { isLive: '', initiationClaimedAt: '' } },
+            { new: true, session },
+          )
+          .lean().exec();
+        if (!expired) return false;
+        await this.audit.logSystemRequired(
+          { action: AuditAction.AUCTION_ENTRY_PAYMENT_EXPIRED, targetResourceId: expired.auctionId.toString(), targetUserId: expired.bidderAccountId.toString(), reason: 'entry payment expired', metadata: { paymentId, provider: expired.provider, initiatedAt: expired.initiatedAt } },
+          session,
+        );
+        return true;
+      },
+      { uniqueIndexNames: PAYMENT_UNIQUE_INDEXES, retryExhausted: retryConflict('تأكيد الدفع قيد المعالجة؛ أعد المحاولة', PaymentErrorCode.RETRY_EXHAUSTED) },
+    );
+  }
+
+  /**
+   * Fails an INITIATED attempt that never received a provider reference (the opening request died before the provider
+   * answered, so no hand-off ever reached a client). Compare-and-set: an attempt that gained a reference is left alone.
+   */
+  async failAbandoned(paymentId: string): Promise<boolean> {
+    return runTransactionWithRetry(
+      this.connection,
+      async (session) => {
+        const now = this.clock.now();
+        const failed: any = await this.payments
+          .findOneAndUpdate(
+            { _id: new Types.ObjectId(paymentId), status: EntryPaymentStatus.INITIATED, providerReference: { $exists: false } },
+            { $set: { status: EntryPaymentStatus.FAILED, failedAt: now, failureCode: 'PROVIDER_INITIATION_ABANDONED' }, $unset: { isLive: '', initiationClaimedAt: '' } },
+            { new: true, session },
+          )
+          .lean().exec();
+        if (!failed) return false;
+        await this.audit.logSystemRequired(
+          { action: AuditAction.AUCTION_ENTRY_PAYMENT_FAILED, targetResourceId: failed.auctionId.toString(), targetUserId: failed.bidderAccountId.toString(), reason: 'entry payment abandoned before the provider opened it', metadata: { paymentId, provider: failed.provider, failureCode: 'PROVIDER_INITIATION_ABANDONED' } },
+          session,
+        );
+        return true;
+      },
+      { uniqueIndexNames: PAYMENT_UNIQUE_INDEXES, retryExhausted: retryConflict('تأكيد الدفع قيد المعالجة؛ أعد المحاولة', PaymentErrorCode.RETRY_EXHAUSTED) },
+    );
+  }
+
   /** Records the disagreement (flag + audit, committed) and returns a rejection; grants nothing. */
   private async flag(session: ClientSession, payment: any, flag: PaymentReconciliationFlag, code: PaymentErrorCode, message: string, outcome: VerifiedProviderOutcome, now: Date): Promise<Outcome> {
-    await this.payments.updateOne({ _id: payment._id, status: payment.status }, { $set: { reconciliationFlag: flag, lastVerifiedAt: now } }, { session }).exec();
+    const rejected: Outcome = {
+      result: { paymentId: payment._id.toString(), status: payment.status, alreadyProcessed: false, pending: false, entitlementGranted: false },
+      rejection: { code, message },
+    };
+    // Already recorded: a repeated trigger keeps answering the rejection without writing a second flag/audit row.
+    if (payment.reconciliationFlag === flag) return rejected;
+    await this.payments
+      .updateOne(
+        { _id: payment._id, status: payment.status },
+        // The provider's own event id is kept with the flag (the provider's truth, for the operator); never the raw payload.
+        { $set: { reconciliationFlag: flag, lastVerifiedAt: now, ...(outcome.providerEventId ? { providerEventId: outcome.providerEventId.slice(0, 200) } : {}) } },
+        { session },
+      )
+      .exec();
     await this.audit.logSystemRequired(
       {
         action: AuditAction.AUCTION_ENTRY_PAYMENT_REJECTED,
@@ -198,13 +295,10 @@ export class AuctionPaymentConfirmationService {
         targetUserId: payment.bidderAccountId.toString(),
         reason: 'entry payment verification rejected',
         // Only the disagreeing scalars — never the raw provider payload.
-        metadata: { paymentId: payment._id.toString(), flag, expectedAmountMinor: payment.amountMinor, expectedCurrency: payment.currency, reportedAmountMinor: outcome.amountMinor, reportedCurrency: outcome.currency, reportedStatus: outcome.status },
+        metadata: { paymentId: payment._id.toString(), flag, paymentStatus: payment.status, expectedAmountMinor: payment.amountMinor, expectedCurrency: payment.currency, reportedAmountMinor: outcome.amountMinor, reportedCurrency: outcome.currency, reportedStatus: outcome.status, providerEventId: outcome.providerEventId },
       },
       session,
     );
-    return {
-      result: { paymentId: payment._id.toString(), status: payment.status, alreadyProcessed: false, pending: false, entitlementGranted: false },
-      rejection: { code, message },
-    };
+    return rejected;
   }
 }

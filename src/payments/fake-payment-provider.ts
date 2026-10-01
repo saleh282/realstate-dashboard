@@ -36,6 +36,12 @@ export class FakePaymentProvider implements AuctionPaymentProviderPort {
   /** Resolve a PENDING payment to a terminal outcome for its next `verify`. */
   settle(providerReference: string, outcome: 'success' | 'failed'): void { this.settlements.set(providerReference, outcome); }
 
+  /** True for a reference THIS provider issued in the `pending` scenario: the only kind `settle` can resolve. */
+  isSettleable(providerReference: string): boolean {
+    const [prefix, scenario] = providerReference.split('~');
+    return prefix === 'fake' && scenario === 'pending';
+  }
+
   /** Make the next `count` verify calls throw, simulating a gateway outage during reconciliation. */
   failNextVerifications(count = 1): void { this.verifyFailures += count; }
 

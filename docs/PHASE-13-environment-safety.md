@@ -47,6 +47,7 @@ migration without a recovery point. Everything below is implemented in
 | destructive reset (harnesses, drills) | `DESTRUCTIVE_CONFIRM=RESET_DISPOSABLE_DATABASE` | **refused** | **refused** | **refused** |
 | local E2E suites | yes | yes | **refused** | **refused** |
 | fake payment provider | yes | yes | **refused** | **refused** |
+| fake payment settle route (`/dev/fake-payments`) | yes (fake provider bound) | yes (fake provider bound) | **404** | **404** |
 
 The disposable/engineering tools (`phase13-scale-harness`, `phase13-migration-rehearsal`, `phase13-restore-drill`)
 additionally require a **localhost** database named `mazad_phase13_*` (`src/scripts/disposable-target.ts`).
@@ -64,3 +65,10 @@ adding an `ACTION_RULES` entry and calling `guardAction(...)` first; the table t
 `PAYMENT_PROVIDER` is `none` (default, fail closed) or `fake`. `fake` is rejected by environment validation **and**
 by the provider factory in staging/production/unresolved environments (two independent layers). No real gateway is
 selectable until an adapter exists.
+
+The development settle route `POST /dev/fake-payments/:paymentId/settle` (MAZAD-028) is a third layer on top: its guard
+answers 404 before authentication unless the bound provider is a `FakePaymentProvider` instance, the process is not a
+protected one and the `fake-payments` action is allowed. It changes fake provider truth only.
+
+`PAYMENT_ATTEMPT_TTL_SECONDS` (payment attempt lifetime) has no default in staging/production: attempts never expire
+there unless it is set, and startup refuses `PAYMENT_RECONCILIATION_WORKER_ENABLED=true` without it.

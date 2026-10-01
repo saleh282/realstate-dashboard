@@ -83,7 +83,8 @@ describeLocal('Phase 13 extended local E2E: property, auction, fake payments, bi
     if (uri !== PHASE12_URI) assertDisposableTarget(uri);
     if (process.env.PHASE12_DISPOSABLE_DB !== '1' && !uri?.includes('mazad_phase13_')) throw new Error('Refused: set PHASE12_DISPOSABLE_DB=1 for the Phase 12 database');
     if (process.env.NODE_ENV !== 'development' || process.env.DEPLOYMENT_ENV !== 'local') throw new Error('Refused: the local E2E requires NODE_ENV=development and DEPLOYMENT_ENV=local');
-    Object.assign(process.env, { PAYMENT_PROVIDER: 'fake', AUCTION_LIFECYCLE_WORKER_ENABLED: 'false', AUCTION_FINALIZATION_WORKER_ENABLED: 'false', OUTBOX_DISPATCHER_ENABLED: 'false' });
+    // MAZAD-028: this suite confirms payments by hand, so the live reconciliation worker stays off (it is exercised by mazad028-payment-e2e).
+    Object.assign(process.env, { PAYMENT_PROVIDER: 'fake', AUCTION_LIFECYCLE_WORKER_ENABLED: 'false', AUCTION_FINALIZATION_WORKER_ENABLED: 'false', OUTBOX_DISPATCHER_ENABLED: 'false', PAYMENT_RECONCILIATION_WORKER_ENABLED: 'false' });
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ClockService).useValue(clock)
       .overrideProvider(CloudinaryAssetService).useValue({

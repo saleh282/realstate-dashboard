@@ -9,16 +9,18 @@ import { ManagedMarketingService } from './managed-marketing.service';
 import { ManagedMarketingController } from './managed-marketing.controller';
 import { AdminManagedMarketingController } from './admin-managed-marketing.controller';
 import { RolesGuard } from '../auth/roles.guard';
+import { PaymentsModule } from '../payments/payments.module';
+import { ClockService } from '../common/time/clock.service';
 
 @Module({
-  imports: [AuditModule, MongooseModule.forFeature([
+  imports: [AuditModule, PaymentsModule, MongooseModule.forFeature([
     { name: ManagedMarketingPackage.name, schema: ManagedMarketingPackageSchema },
     { name: ManagedMarketingRequest.name, schema: ManagedMarketingRequestSchema },
     { name: Property.name, schema: PropertySchema },
     { name: PropertyRevision.name, schema: PropertyRevisionSchema },
   ])],
   controllers: [ManagedMarketingController, AdminManagedMarketingController],
-  providers: [ManagedMarketingService, RolesGuard],
+  providers: [ManagedMarketingService, RolesGuard, ClockService],
   exports: [MongooseModule],
 })
 export class ManagedMarketingModule {}

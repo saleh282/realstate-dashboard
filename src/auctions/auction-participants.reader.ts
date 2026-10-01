@@ -28,11 +28,15 @@ export class AuctionParticipantsReader {
     private readonly ledger: BidLedgerService,
   ) {}
 
-  /** Bidders to tell about a cancellation: entitled, server-confirmed payers, and anyone with an accepted bid (free auctions). */
+  /**
+   * Bidders to tell about a cancellation: entitled, server-confirmed payers, bidders whose payment attempt is still
+   * pending (they could otherwise complete a payment for a cancelled auction unaware), and anyone with an accepted bid
+   * (free auctions). Routing only: the notification says the auction was cancelled and nothing about money or refunds.
+   */
   async forCancellation(auctionId: string, session?: ClientSession): Promise<string[]> {
     const id = new Types.ObjectId(auctionId);
     const entitled = await this.entitlements.distinct('bidderAccountId', { auctionId: id }).session(session ?? null).exec();
-    const paid = await this.payments.distinct('bidderAccountId', { auctionId: id, status: EntryPaymentStatus.SUCCEEDED }).session(session ?? null).exec();
+    const paid = await this.payments.distinct('bidderAccountId', { auctionId: id, status: { $in: [EntryPaymentStatus.SUCCEEDED, EntryPaymentStatus.INITIATED] } }).session(session ?? null).exec();
     const bidders = await this.ledger.distinctBidderAccountIdsForAuction(auctionId, { session });
     return [...new Set([...entitled, ...paid].map((value) => value.toString()).concat(bidders))].sort();
   }

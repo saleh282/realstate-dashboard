@@ -45,3 +45,12 @@ export class ReviewManagedMarketingRequestDto {
   @ValidateIf((dto: ReviewManagedMarketingRequestDto) => dto.status === 'REJECTED')
   @IsString() @MinLength(5) @MaxLength(1000) reason?: string;
 }
+
+/**
+ * Body of `POST /managed-marketing/requests/:requestId/payment` (MAZAD-028): deliberately EMPTY. The amount, currency,
+ * payer and outcome are all server-owned; the strict validation pipe rejects any field a client tries to send.
+ * `_none` exists only because class-validator refuses a class with no decorated property.
+ */
+export class InitiateManagedMarketingPaymentDto {
+  @IsOptional() @IsIn([]) _none?: never;
+}

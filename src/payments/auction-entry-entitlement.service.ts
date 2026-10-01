@@ -27,7 +27,10 @@ export enum EntryEntitlementState {
   PAYMENT_REQUIRED = 'PAYMENT_REQUIRED',
   /** An attempt was opened and the server has not confirmed it (initiated / pending at the provider). */
   PAYMENT_PENDING = 'PAYMENT_PENDING',
-  /** The latest attempt definitively failed; a new attempt may be started. */
+  /**
+   * The latest attempt definitively ended without a payment — it FAILED, or it EXPIRED locally — and a new attempt may
+   * be started. One wire state on purpose (older app builds reject unknown states); `payment.status` tells which.
+   */
   PAYMENT_FAILED = 'PAYMENT_FAILED',
   /** Server-side verification disagreed with the payment; an operator must reconcile. No new attempt is accepted. */
   RECONCILIATION_REQUIRED = 'RECONCILIATION_REQUIRED',
@@ -81,7 +84,7 @@ export class AuctionEntryEntitlementService {
     if (entitled) state = EntryEntitlementState.ENTITLED;
     else if (flagged) state = EntryEntitlementState.RECONCILIATION_REQUIRED;
     else if (live && live.status === EntryPaymentStatus.INITIATED) state = EntryEntitlementState.PAYMENT_PENDING;
-    else if (latest && latest.status === EntryPaymentStatus.FAILED) state = EntryEntitlementState.PAYMENT_FAILED;
+    else if (latest && (latest.status === EntryPaymentStatus.FAILED || latest.status === EntryPaymentStatus.EXPIRED)) state = EntryEntitlementState.PAYMENT_FAILED;
     else if (!feeConfigured) state = EntryEntitlementState.FEE_NOT_CONFIGURED;
     else if (free) state = EntryEntitlementState.FREE_ENTRY;
     else state = EntryEntitlementState.PAYMENT_REQUIRED;
@@ -110,6 +113,7 @@ export class AuctionEntryEntitlementService {
             initiatedAt: latest.initiatedAt,
             confirmedAt: latest.confirmedAt ?? null,
             failedAt: latest.failedAt ?? null,
+            expiredAt: latest.expiredAt ?? null,
             requiresReconciliation: Boolean(flagged),
           }
         : null,

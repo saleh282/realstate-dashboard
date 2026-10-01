@@ -35,7 +35,8 @@ import { PHASE9_PROMOTED_FACET_KEYS, promotePhase9Facets, scanPhase9FacetPromoti
 import { backfillPhase9FacetsBatch, scanPhase9FacetBackfill } from '../031-phase9-facet-backfill';
 import { scanPhase10RegistrySeed, seedPhase10Registry } from '../032-phase10-unit-floor-level-registry';
 import { scanExistingAmenityCatalog, scanPhase11AmenitySeed, seedPhase11Amenities } from '../033-phase11-amenity-catalog';
-import { MAZAD035_INDEXES, scanMazad035LegacyAuctions } from '../036-mazad035-auction-review';
+import { MAZAD035_INDEXES, MigrationIndexSpec, scanMazad035LegacyAuctions } from '../036-mazad035-auction-review';
+import { MAZAD028_PAYMENT_INDEXES, scanMazad028Duplicates, scanMazad028PaymentState } from '../037-mazad028-payment-lifecycle';
 
 function afterCheckpoint(checkpoint?: string): Record<string, unknown> {
   if (!checkpoint) return {};
@@ -1227,11 +1228,12 @@ export const phase13RetireSupersededListingIndexesMigration: MigrationDefinition
   },
 };
 
-async function mazad035IndexProblems(db: MigrationContext['db']) {
+/** Missing / conflicting indexes of a frozen spec list, where uniqueness and the partial filter are part of the contract. */
+async function safetyIndexProblems(db: MigrationContext['db'], specs: readonly MigrationIndexSpec[]) {
   const missing: string[] = [];
   const conflicting: string[] = [];
-  for (const collection of [...new Set(MAZAD035_INDEXES.map((index) => index.collection))]) {
-    const expected = MAZAD035_INDEXES.filter((index) => index.collection === collection);
+  for (const collection of [...new Set(specs.map((index) => index.collection))]) {
+    const expected = specs.filter((index) => index.collection === collection);
     const indexes = await existingIndexes(db, collection);
     const problems = indexSetProblems(indexes, expected as unknown as NamedIndex[]);
     missing.push(...problems.missing);
@@ -1247,6 +1249,8 @@ async function mazad035IndexProblems(db: MigrationContext['db']) {
   }
   return { missing, conflicting };
 }
+
+const mazad035IndexProblems = (db: MigrationContext['db']) => safetyIndexProblems(db, MAZAD035_INDEXES);
 
 /**
  * MAZAD-035: the auction review workflow's indexes (AuctionRequest queue/history, the race-safe one-live-origination
@@ -1289,6 +1293,48 @@ export const mazad035AuctionReviewMigration: MigrationDefinition = {
   },
 };
 
+/**
+ * MAZAD-028: the payment lifecycle's indexes — the critical unique indexes (until now present only if Mongoose autoIndex
+ * built them) and the reconciliation/operational ones. Additive only: no document is modified, no TTL, no backfill.
+ */
+export const mazad028PaymentLifecycleMigration: MigrationDefinition = {
+  id: '037-mazad028-payment-lifecycle-indexes',
+  version: 1,
+  description: 'MAZAD-028: migration-manage the payment/entitlement unique indexes and create the reconciliation (status, nextVerifyAt) and operational indexes on auction_entry_payments, auction_bid_entitlements and managed_marketing_payments',
+  dependencies: [],
+  rollback: {
+    kind: 'none',
+    remediation: 'The indexes are purely additive. Dropping a unique payment or entitlement index removes the "pays once" / "entitled once" guarantee; do not drop them while payments are enabled. The (status, nextVerifyAt) indexes may be dropped only with the reconciliation worker disabled.',
+    restoreProcedure: 'No documents are modified. If a reviewed rollback is required, drop only the non-unique indexes this migration introduced (entry_payment_status_next_verify, entry_payment_reconciliation_flag, entry_payment_late_confirmation, mm_payment_status_next_verify, mm_payment_reconciliation_flag).',
+  },
+  async preflight({ db }) {
+    const { missing, conflicting } = await safetyIndexProblems(db, MAZAD028_PAYMENT_INDEXES);
+    // A duplicate only matters for a unique index that still has to be built.
+    const duplicates = (await scanMazad028Duplicates(db)).filter((finding) => missing.includes(finding.index));
+    return {
+      eligible: missing.length,
+      alreadyApplied: MAZAD028_PAYMENT_INDEXES.length - missing.length - conflicting.length,
+      blockers: [
+        ...(conflicting.length ? [{ code: 'MAZAD028_INDEX_CONFLICT', message: `An index named ${conflicting.join(', ')} exists with a different key or safety options` }] : []),
+        ...duplicates.map((finding) => ({ code: 'MAZAD028_DUPLICATE_KEY', message: `Existing documents violate the unique index ${finding.index}; an operator must resolve them before it can be built`, sampleIds: finding.sampleIds })),
+      ],
+      summary: { indexNames: MAZAD028_PAYMENT_INDEXES.map((index) => index.options.name), missingIndexes: missing, paymentState: await scanMazad028PaymentState(db) },
+    };
+  },
+  async migrateBatch({ db }) {
+    for (const index of MAZAD028_PAYMENT_INDEXES) await db.collection(index.collection).createIndex(index.key as never, index.options);
+    return { scanned: MAZAD028_PAYMENT_INDEXES.length, modified: MAZAD028_PAYMENT_INDEXES.length, done: true };
+  },
+  async validate({ db }) {
+    const { missing, conflicting } = await safetyIndexProblems(db, MAZAD028_PAYMENT_INDEXES);
+    return {
+      valid: !missing.length && !conflicting.length,
+      errors: [...missing, ...conflicting].map((name) => ({ code: 'MAZAD028_INDEX_MISSING', message: `Required payment lifecycle index ${name} is missing or has a different key or safety options` })),
+      summary: { missingIndexes: missing, conflictingIndexes: conflicting, paymentState: await scanMazad028PaymentState(db) },
+    };
+  },
+};
+
 export const CORE_MIGRATIONS: MigrationDefinition[] = [
   propertyMoneyMigration,
   userIdentityMigration,
@@ -1314,6 +1360,7 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   phase13SortableListingIndexesMigration,
   phase13RetireSupersededListingIndexesMigration,
   mazad035AuctionReviewMigration,
+  mazad028PaymentLifecycleMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {

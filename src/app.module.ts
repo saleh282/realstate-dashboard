@@ -30,6 +30,7 @@ import { AuctionsModule } from './auctions/auctions.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { FakePaymentsDevModule } from './payments/dev/fake-payments-dev.module';
 
 @Module({
   imports: [
@@ -68,6 +69,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     RealtimeModule,
     NotificationsModule,
     HealthModule,
+    // MAZAD-028: development-only fake-payment settle route; its guard answers 404 outside local/development with the fake provider.
+    FakePaymentsDevModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }, EnvironmentGuardService],
 })

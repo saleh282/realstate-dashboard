@@ -16,6 +16,10 @@ export enum PaymentErrorCode {
   VERIFICATION_MISMATCH = 'PAYMENT_VERIFICATION_MISMATCH',
   /** The provider reported success for a payment the server had already recorded as failed; needs manual reconciliation. */
   CONFIRMED_AFTER_FAILURE = 'PAYMENT_CONFIRMED_AFTER_FAILURE',
+  /** The provider reported success for a payment the server had already expired locally; needs manual reconciliation. */
+  CONFIRMED_AFTER_EXPIRY = 'PAYMENT_CONFIRMED_AFTER_EXPIRY',
+  /** Another request is opening this very attempt with the provider right now; re-read the state shortly. */
+  INITIATION_IN_PROGRESS = 'PAYMENT_INITIATION_IN_PROGRESS',
   /** Concurrent confirmation kept invalidating the attempt; safe to retry. */
   RETRY_EXHAUSTED = 'PAYMENT_RETRY_EXHAUSTED',
   /** Persistent state disagrees with itself (e.g. entitlement/payment mismatch); never retried. */

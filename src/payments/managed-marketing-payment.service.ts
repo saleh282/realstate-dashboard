@@ -13,6 +13,7 @@ import { ManagedMarketingPaymentStatus, ManagedMarketingRequestStatus } from '..
 import { ManagedMarketingRequest, ManagedMarketingRequestDocument } from '../managed-marketing/schemas/managed-marketing-request.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from './auction-payment-provider.port';
+import { INITIATION_CLAIM_LEASE_MS, openAttemptWithProvider } from './payment-attempt-opening';
 import { EntryPaymentStatus, PaymentPurpose } from './payment.types';
 import { ManagedMarketingPayment, ManagedMarketingPaymentDocument } from './schemas/managed-marketing-payment.schema';
 
@@ -64,19 +65,18 @@ export class ManagedMarketingPaymentService {
       (session) => this.openAttempt(session, actorId, requestId, ip),
       { uniqueIndexNames: MM_PAYMENT_UNIQUE_INDEXES, retryExhausted: retryConflict('عملية الدفع قيد المعالجة؛ أعد المحاولة', PaymentErrorCode.RETRY_EXHAUSTED) },
     );
-    if (reused && payment.providerReference) return this.toResult(payment, true);
-
-    try {
-      const opened = await this.provider.initiate({ purpose: PaymentPurpose.MANAGED_MARKETING, paymentId: payment._id.toString(), amountMinor: payment.amountMinor, currency: payment.currency });
-      await this.payments
-        .updateOne({ _id: payment._id, status: EntryPaymentStatus.INITIATED, providerReference: { $exists: false } }, { $set: { providerReference: opened.providerReference } })
-        .exec();
-      return this.toResult({ ...payment, providerReference: opened.providerReference }, reused, opened.clientHandoff);
-    } catch (error) {
-      // Only a reference-less attempt may be failed here: one with a reference may already be paid at the gateway.
-      if (!payment.providerReference) await this.failUnreferenced(payment._id, requestId);
-      throw error;
-    }
+    // One provider order per attempt, and only a PERSISTED reference is ever returned (see `openAttemptWithProvider`).
+    // Only a reference-less attempt may be failed on a provider error: one with a reference may already be paid at the gateway.
+    const opened = await openAttemptWithProvider({
+      payments: this.payments,
+      provider: this.provider,
+      purpose: PaymentPurpose.MANAGED_MARKETING,
+      attempt: payment,
+      reused,
+      now: () => this.clock.now(),
+      onProviderFailure: (paymentId) => this.failUnreferenced(paymentId, requestId),
+    });
+    return this.toResult(opened.payment, opened.reused);
   }
 
   private async openAttempt(session: ClientSession, actorId: string, requestId: string, ip?: string) {
@@ -120,6 +120,7 @@ export class ManagedMarketingPaymentService {
       .lean().exec();
     if (!moved) throw new ConflictException({ message: 'تغيرت حالة الطلب؛ أعد المحاولة', code: PaymentErrorCode.REQUEST_NOT_PAYABLE });
 
+    const now = this.clock.now();
     const [created] = await this.payments.create(
       [{
         purpose: PaymentPurpose.MANAGED_MARKETING,
@@ -129,8 +130,12 @@ export class ManagedMarketingPaymentService {
         currency: EGP_CURRENCY,
         status: EntryPaymentStatus.INITIATED,
         isLive: true,
-        initiatedAt: this.clock.now(),
+        initiatedAt: now,
         provider: this.provider.providerKey,
+        // This request holds the right to open the attempt with the provider; the worker leaves it alone meanwhile.
+        initiationClaimedAt: now,
+        nextVerifyAt: new Date(now.getTime() + INITIATION_CLAIM_LEASE_MS),
+        verifyAttempts: 0,
       }],
       { session },
     );
@@ -177,7 +182,7 @@ export class ManagedMarketingPaymentService {
     }
   }
 
-  private toResult(payment: any, reused: boolean, clientHandoff?: string): InitiatedManagedMarketingPayment {
+  private toResult(payment: any, reused: boolean): InitiatedManagedMarketingPayment {
     return {
       paymentId: payment._id.toString(),
       requestId: payment.requestId.toString(),
@@ -185,7 +190,7 @@ export class ManagedMarketingPaymentService {
       currency: payment.currency,
       status: payment.status,
       providerReference: payment.providerReference,
-      clientHandoff,
+      clientHandoff: payment.clientHandoff,
       reused,
     };
   }

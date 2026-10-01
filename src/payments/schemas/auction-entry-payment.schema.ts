@@ -16,9 +16,9 @@ export type AuctionEntryPaymentDocument = HydratedDocument<AuctionEntryPayment>;
  * server-side services' conditional updates.
  *
  * `isLive` is true while the attempt is INITIATED or SUCCEEDED and is unset
- * on FAILED; a partial unique index over it guarantees at most one live
+ * on FAILED and EXPIRED; a partial unique index over it guarantees at most one live
  * attempt per (auction, bidder) — "a bidder pays once per auction" — while
- * still allowing a fresh attempt after a failure.
+ * still allowing a fresh attempt after a failure or an expiry.
  */
 @Schema({ timestamps: true, collection: 'auction_entry_payments', versionKey: false })
 export class AuctionEntryPayment {
@@ -53,6 +53,29 @@ export class AuctionEntryPayment {
 
   @Prop({ type: String, enum: PaymentReconciliationFlag }) reconciliationFlag?: PaymentReconciliationFlag;
   @Prop({ type: Date }) lastVerifiedAt?: Date;
+
+  /** Set only by the reconciliation worker's expiry (INITIATED → EXPIRED). The row is kept for history. */
+  @Prop({ type: Date }) expiredAt?: Date;
+
+  /**
+   * The provider adapter's opaque, provider-neutral hand-off (e.g. a checkout URL), stored only so the SAME live attempt
+   * can be handed back to its owner after a lost response or an app restart. Presentation only: it is never proof of
+   * payment and is never read by confirmation. No card data, credentials or raw provider payloads.
+   */
+  @Prop({ type: String, maxlength: 2000 }) clientHandoff?: string;
+
+  /** Reconciliation schedule (MAZAD-028): when the worker should next ask the provider about this INITIATED attempt. Doubles as the worker's claim lease. */
+  @Prop({ type: Date }) nextVerifyAt?: Date;
+  /** How many reconciliation passes claimed this attempt (drives the backoff). */
+  @Prop({ type: Number, default: 0, min: 0 }) verifyAttempts?: number;
+  /** In-flight marker of the ONE request allowed to open this attempt with the provider (a lease, not a lock). */
+  @Prop({ type: Date }) initiationClaimedAt?: Date;
+
+  /**
+   * The provider confirmed this payment when the auction could no longer be bid on (cancelled / ended). The truthful
+   * SUCCEEDED fact is kept; the entitlement is inert. Marked for operator review — refund policy is a legal/product decision.
+   */
+  @Prop({ type: Boolean }) lateConfirmation?: boolean;
 }
 
 export const AuctionEntryPaymentSchema = SchemaFactory.createForClass(AuctionEntryPayment);
@@ -70,5 +93,10 @@ AuctionEntryPaymentSchema.index(
 // Reconciliation sweeps: stale INITIATED attempts.
 AuctionEntryPaymentSchema.index({ status: 1, initiatedAt: 1 }, { name: 'entry_payment_status_initiated' });
 AuctionEntryPaymentSchema.index({ bidderAccountId: 1, createdAt: -1 }, { name: 'entry_payment_bidder_history' });
+// MAZAD-028 reconciliation worker: due INITIATED attempts, oldest first.
+AuctionEntryPaymentSchema.index({ status: 1, nextVerifyAt: 1 }, { name: 'entry_payment_status_next_verify' });
+// Operational visibility: the (few) attempts parked for an operator, and late confirmations.
+AuctionEntryPaymentSchema.index({ reconciliationFlag: 1 }, { partialFilterExpression: { reconciliationFlag: { $exists: true } }, name: 'entry_payment_reconciliation_flag' });
+AuctionEntryPaymentSchema.index({ lateConfirmation: 1 }, { partialFilterExpression: { lateConfirmation: true }, name: 'entry_payment_late_confirmation' });
 // MAZAD-035: per-auction operational reads (Admin payment summary, pre-start revision safety check).
 AuctionEntryPaymentSchema.index({ auctionId: 1, status: 1 }, { name: 'entry_payment_auction_status' });

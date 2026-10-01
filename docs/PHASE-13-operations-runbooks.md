@@ -75,6 +75,12 @@ has **no automatic rollback** it says so. Structured events are single-line JSON
   (amount/currency/reference, success after failure): an operator must reconcile before another attempt can be opened.
 * **Repair:** entitlements are created only by a verified success and are unique per (auction, bidder); there is no manual path that
   grants one.
+* **MAZAD-028 lifecycle** (see `docs/MAZAD-028-payment-lifecycle.md`): the reconciliation worker verifies INITIATED attempts of both
+  purposes with a database lease and backoff, and expires them (`EXPIRED`, kept forever) only after a final verification still says
+  pending. `PAYMENT_ATTEMPT_TTL_SECONDS` has **no production default**; a protected deployment must set it before enabling the worker.
+  The operations status reports `payments.{pending,due,stale,expired,flagged,confirmedAfterExpiry,lateConfirmed}`.
+  `payments_reconciliation_required` / `payments_late_confirmed` need **manual** operator review (no Admin tooling yet, no automatic
+  refund, refund policy pending legal review); `payments_stale` means the worker is not keeping up or expiry is not configured.
 
 ## 8. Auction anchors, finalization, idempotency, account deletion, notifications
 
@@ -127,4 +133,11 @@ PHASE13_LOCAL_E2E=1 NODE_ENV=development DEPLOYMENT_ENV=local MONGO_URI='mongodb
 npx jest test/phase13-local-e2e.spec.ts
 ```
 Skipped unless `PHASE13_LOCAL_E2E=1`; refuses non-disposable targets. Uses the `FakePaymentProvider` (deterministic scenarios `success`, `failed`, `pending`, `error`;
-`settle()` resolves a pending payment; `failNextVerifications()` simulates a gateway outage).
+`settle()` resolves a pending payment; `failNextVerifications()` simulates a gateway outage). This suite confirms payments by hand.
+
+The complete lifecycle with the LIVE reconciliation worker, real HTTP and realtime (MAZAD-028):
+
+```bash
+MAZAD028_LOCAL_E2E=1 NODE_ENV=development DEPLOYMENT_ENV=local MONGO_URI='mongodb://127.0.0.1:<port>/mazad_phase13_<name>?replicaSet=<rs>' \
+npx jest test/mazad028-payment-e2e.spec.ts
+```

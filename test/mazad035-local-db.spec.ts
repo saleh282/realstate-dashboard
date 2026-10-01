@@ -125,6 +125,7 @@ describeLocal('MAZAD-035 auction review on a real MongoDB replica set', () => {
     if (process.env.NODE_ENV !== 'development' || process.env.DEPLOYMENT_ENV !== 'local') throw new Error('Refused: requires NODE_ENV=development and DEPLOYMENT_ENV=local');
     Object.assign(process.env, {
       PAYMENT_PROVIDER: 'fake', AUCTION_LIFECYCLE_WORKER_ENABLED: 'false', AUCTION_FINALIZATION_WORKER_ENABLED: 'false', OUTBOX_DISPATCHER_ENABLED: 'false', TRUST_PROXY: 'loopback',
+      PAYMENT_RECONCILIATION_WORKER_ENABLED: 'false', // MAZAD-028: this suite confirms payments by hand; the live worker is exercised by mazad028-payment-e2e
     });
     // Belt and braces: resolve the configuration exactly as AppModule will and refuse unless it is the disposable target.
     const probe = await Test.createTestingModule({ imports: [ConfigModule.forRoot({ isGlobal: true, validate: validateEnvironment })] }).compile();

@@ -14,6 +14,7 @@ import { retryConflict, runTransactionWithRetry } from '../common/mongo/transact
 import { ClockService } from '../common/time/clock.service';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from './auction-payment-provider.port';
+import { INITIATION_CLAIM_LEASE_MS, openAttemptWithProvider } from './payment-attempt-opening';
 import { EntryPaymentStatus, PaymentPurpose } from './payment.types';
 import { AuctionBidEntitlement, AuctionBidEntitlementDocument } from './schemas/auction-bid-entitlement.schema';
 import { AuctionEntryPayment, AuctionEntryPaymentDocument } from './schemas/auction-entry-payment.schema';
@@ -61,22 +62,18 @@ export class AuctionEntryPaymentService {
       { uniqueIndexNames: PAYMENT_UNIQUE_INDEXES, retryExhausted: retryConflict('عملية الدفع قيد المعالجة؛ أعد المحاولة', PaymentErrorCode.RETRY_EXHAUSTED) },
     );
 
-    if (reused && payment.providerReference) return this.toResult(payment, true);
-
-    try {
-      const opened = await this.provider.initiate({ purpose: PaymentPurpose.AUCTION_ENTRY, paymentId: payment._id.toString(), amountMinor: payment.amountMinor, currency: payment.currency });
-      await this.payments
-        .updateOne(
-          { _id: payment._id, status: EntryPaymentStatus.INITIATED, providerReference: { $exists: false } },
-          { $set: { providerReference: opened.providerReference } },
-        )
-        .exec();
-      return this.toResult({ ...payment, providerReference: opened.providerReference }, reused, opened.clientHandoff);
-    } catch (error) {
-      // Only a reference-less attempt may be failed here: one that already has a reference may be paid at the gateway.
-      if (!payment.providerReference) await this.failUnreferenced(payment._id);
-      throw error;
-    }
+    // One provider order per attempt, and only a PERSISTED reference is ever returned (see `openAttemptWithProvider`).
+    // Only a reference-less attempt may be failed on a provider error: one that has a reference may be paid at the gateway.
+    const opened = await openAttemptWithProvider({
+      payments: this.payments,
+      provider: this.provider,
+      purpose: PaymentPurpose.AUCTION_ENTRY,
+      attempt: payment,
+      reused,
+      now: () => this.clock.now(),
+      onProviderFailure: (paymentId) => this.failUnreferenced(paymentId),
+    });
+    return this.toResult(opened.payment, opened.reused);
   }
 
   private async openAttempt(session: ClientSession, actorId: string, auctionId: string, ip?: string) {
@@ -149,6 +146,10 @@ export class AuctionEntryPaymentService {
         initiatedAt: now,
         provider: this.provider.providerKey,
         purpose: PaymentPurpose.AUCTION_ENTRY,
+        // This request holds the right to open the attempt with the provider; the worker leaves it alone meanwhile.
+        initiationClaimedAt: now,
+        nextVerifyAt: new Date(now.getTime() + INITIATION_CLAIM_LEASE_MS),
+        verifyAttempts: 0,
       }],
       { session },
     );
@@ -185,7 +186,7 @@ export class AuctionEntryPaymentService {
     }
   }
 
-  private toResult(payment: any, reused: boolean, clientHandoff?: string): InitiatedEntryPayment {
+  private toResult(payment: any, reused: boolean): InitiatedEntryPayment {
     return {
       paymentId: payment._id.toString(),
       auctionId: payment.auctionId.toString(),
@@ -193,7 +194,8 @@ export class AuctionEntryPaymentService {
       currency: payment.currency,
       status: payment.status,
       providerReference: payment.providerReference,
-      clientHandoff,
+      // The stored hand-off of THIS live attempt (presentation only; never proof of payment).
+      clientHandoff: payment.clientHandoff,
       reused,
     };
   }

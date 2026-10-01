@@ -15,6 +15,9 @@ import { paymentProviderPortFactory } from './payment-provider.factory';
 import { ManagedMarketingPaymentConfirmationService } from './managed-marketing-payment-confirmation.service';
 import { ManagedMarketingPaymentService } from './managed-marketing-payment.service';
 import { PersistentBidEntitlementPort } from './persistent-bid-entitlement.port';
+import { PaymentConfirmationRouter } from './payment-confirmation-router.service';
+import { PaymentReconciliationService } from './payment-reconciliation.service';
+import { PaymentReconciliationWorker } from './payment-reconciliation.worker';
 import { AuctionBidEntitlement, AuctionBidEntitlementSchema } from './schemas/auction-bid-entitlement.schema';
 import { ManagedMarketingPayment, ManagedMarketingPaymentSchema } from './schemas/managed-marketing-payment.schema';
 import { AuctionEntryPayment, AuctionEntryPaymentSchema } from './schemas/auction-entry-payment.schema';
@@ -27,6 +30,11 @@ import { AuctionEntryPayment, AuctionEntryPaymentSchema } from './schemas/auctio
  * auction visibility gate, and this module must not import it back). The provider port is bound to the fail-closed default unless
  * PAYMENT_PROVIDER=fake in a non-protected deployment (Phase 13); a real adapter is not selectable yet. `Auction` is re-registered here (like BidsModule) to
  * avoid a module cycle with AuctionsModule, which consumes the entitlement port.
+ *
+ * MAZAD-028 lifecycle: `PaymentConfirmationRouter` routes a trigger (provider reference) to the owning purpose's
+ * confirmation service and `PaymentReconciliationWorker` reconciles and expires INITIATED attempts of both purposes. This
+ * module still registers NO controller and there is NO route that confirms a payment (the development-only fake settle
+ * route lives in `FakePaymentsDevModule` and only changes fake provider truth).
  */
 @Module({
   imports: [
@@ -43,6 +51,9 @@ import { AuctionEntryPayment, AuctionEntryPaymentSchema } from './schemas/auctio
   ],
   providers: [
     ClockService,
+    PaymentConfirmationRouter,
+    PaymentReconciliationService,
+    PaymentReconciliationWorker,
     AuctionEntryFeeService,
     AuctionEntryPaymentService,
     AuctionPaymentConfirmationService,
@@ -51,6 +62,6 @@ import { AuctionEntryPayment, AuctionEntryPaymentSchema } from './schemas/auctio
     PersistentBidEntitlementPort,
     { provide: AUCTION_PAYMENT_PROVIDER_PORT, inject: [ConfigService], useFactory: paymentProviderPortFactory },
   ],
-  exports: [AuctionEntryFeeService, AuctionEntryPaymentService, AuctionPaymentConfirmationService, ManagedMarketingPaymentService, ManagedMarketingPaymentConfirmationService, PersistentBidEntitlementPort, AUCTION_PAYMENT_PROVIDER_PORT, MongooseModule],
+  exports: [PaymentConfirmationRouter, PaymentReconciliationService, PaymentReconciliationWorker, AuctionEntryFeeService, AuctionEntryPaymentService, AuctionPaymentConfirmationService, ManagedMarketingPaymentService, ManagedMarketingPaymentConfirmationService, PersistentBidEntitlementPort, AUCTION_PAYMENT_PROVIDER_PORT, MongooseModule],
 })
 export class PaymentsModule {}

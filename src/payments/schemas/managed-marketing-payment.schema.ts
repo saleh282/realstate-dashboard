@@ -43,6 +43,23 @@ export class ManagedMarketingPayment {
   @Prop({ type: String, maxlength: 200 }) providerEventId?: string;
   @Prop({ type: String, enum: PaymentReconciliationFlag }) reconciliationFlag?: PaymentReconciliationFlag;
   @Prop({ type: Date }) lastVerifiedAt?: Date;
+
+  /** Set only by the reconciliation worker's expiry (INITIATED → EXPIRED). The row is kept for history. */
+  @Prop({ type: Date }) expiredAt?: Date;
+
+  /**
+   * The provider adapter's opaque, provider-neutral hand-off (e.g. a checkout URL), stored only so the SAME live attempt
+   * can be handed back to its owner after a lost response or an app restart. Presentation only: it is never proof of
+   * payment and is never read by confirmation. No card data, credentials or raw provider payloads.
+   */
+  @Prop({ type: String, maxlength: 2000 }) clientHandoff?: string;
+
+  /** Reconciliation schedule (MAZAD-028): when the worker should next ask the provider about this INITIATED attempt. Doubles as the worker's claim lease. */
+  @Prop({ type: Date }) nextVerifyAt?: Date;
+  /** How many reconciliation passes claimed this attempt (drives the backoff). */
+  @Prop({ type: Number, default: 0, min: 0 }) verifyAttempts?: number;
+  /** In-flight marker of the ONE request allowed to open this attempt with the provider (a lease, not a lock). */
+  @Prop({ type: Date }) initiationClaimedAt?: Date;
 }
 
 export const ManagedMarketingPaymentSchema = SchemaFactory.createForClass(ManagedMarketingPayment);
@@ -57,3 +74,6 @@ ManagedMarketingPaymentSchema.index(
 );
 ManagedMarketingPaymentSchema.index({ status: 1, initiatedAt: 1 }, { name: 'mm_payment_status_initiated' });
 ManagedMarketingPaymentSchema.index({ advertiserAccountId: 1, createdAt: -1 }, { name: 'mm_payment_advertiser_history' });
+// MAZAD-028 reconciliation worker: due INITIATED attempts, oldest first.
+ManagedMarketingPaymentSchema.index({ status: 1, nextVerifyAt: 1 }, { name: 'mm_payment_status_next_verify' });
+ManagedMarketingPaymentSchema.index({ reconciliationFlag: 1 }, { partialFilterExpression: { reconciliationFlag: { $exists: true } }, name: 'mm_payment_reconciliation_flag' });
