@@ -12,7 +12,7 @@ import { ClockService } from '../common/time/clock.service';
 import { ManagedMarketingPaymentStatus, ManagedMarketingRequestStatus } from '../managed-marketing/managed-marketing.types';
 import { ManagedMarketingRequest, ManagedMarketingRequestDocument } from '../managed-marketing/schemas/managed-marketing-request.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
-import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from './auction-payment-provider.port';
+import { PAYMENT_PROVIDER_PORT, PaymentProviderPort } from './payment-provider.port';
 import { INITIATION_CLAIM_LEASE_MS, openAttemptWithProvider } from './payment-attempt-opening';
 import { EntryPaymentStatus, PaymentPurpose } from './payment.types';
 import { ManagedMarketingPayment, ManagedMarketingPaymentDocument } from './schemas/managed-marketing-payment.schema';
@@ -48,7 +48,7 @@ export class ManagedMarketingPaymentService {
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     private readonly audit: AuditLogService,
     private readonly clock: ClockService,
-    @Inject(AUCTION_PAYMENT_PROVIDER_PORT) private readonly provider: AuctionPaymentProviderPort,
+    @Inject(PAYMENT_PROVIDER_PORT) private readonly provider: PaymentProviderPort,
     @InjectConnection() private readonly connection: Connection,
   ) {}
 

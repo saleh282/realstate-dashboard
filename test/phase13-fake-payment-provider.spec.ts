@@ -1,5 +1,5 @@
 import { ServiceUnavailableException } from '@nestjs/common';
-import { UnconfiguredPaymentProvider } from '../src/payments/auction-payment-provider.port';
+import { UnconfiguredPaymentProvider } from '../src/payments/payment-provider.port';
 import { FakePaymentProvider } from '../src/payments/fake-payment-provider';
 import { buildPaymentProvider, paymentProviderPortFactory } from '../src/payments/payment-provider.factory';
 import { paymentProviderErrors, paymentProviderName } from '../src/payments/payment-provider.config';
@@ -7,7 +7,7 @@ import { decideOutcome } from '../src/payments/payment-verification';
 import { PaymentPurpose } from '../src/payments/payment.types';
 import { validateEnvironment } from '../src/config/environment.validation';
 
-const request = (overrides: Record<string, unknown> = {}) => ({ purpose: PaymentPurpose.AUCTION_ENTRY, paymentId: 'p1', amountMinor: 50_000, currency: 'EGP', ...overrides });
+const request = (overrides: Record<string, unknown> = {}) => ({ purpose: PaymentPurpose.MANAGED_MARKETING, paymentId: 'p1', amountMinor: 50_000, currency: 'EGP', ...overrides });
 
 describe('FakePaymentProvider (deterministic, non-production)', () => {
   it('implements the unchanged port: key, configured flag, initiate and verify', async () => {

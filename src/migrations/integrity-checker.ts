@@ -222,21 +222,6 @@ async function propertyFacetDriftFinding(db: Db): Promise<IntegrityFinding | nul
   };
 }
 
-/** An auction is anchored to one immutable PropertyRevision of its property; without it the public projection cannot be built. */
-async function auctionAnchorFinding(db: Db): Promise<IntegrityFinding | null> {
-  const rows = await db.collection('auctions').aggregate([
-    { $lookup: { from: 'property_revisions', let: { propertyId: '$propertyId', revisionId: '$propertyRevisionId' }, pipeline: [
-      { $match: { $expr: { $and: [{ $eq: ['$_id', '$$revisionId'] }, { $eq: ['$propertyId', '$$propertyId'] }] } } },
-      { $project: { _id: 1 } },
-    ], as: '_anchor' } },
-    { $match: { '_anchor.0': { $exists: false } } },
-    { $facet: { count: [{ $count: 'value' }], samples: [{ $limit: SAMPLE_LIMIT }, { $project: { _id: 1 } }] } },
-  ]).toArray();
-  const count = Number(rows[0]?.count?.[0]?.value ?? 0);
-  if (!count) return null;
-  return { code: 'AUCTION_ANCHOR_BROKEN', severity: 'error', count, sampleIds: (rows[0].samples as Document[]).map((row) => String(row._id)), message: 'auctions.propertyRevisionId does not resolve to a revision of the auction property' };
-}
-
 export async function runIntegrityChecks(db: Db, now: Date = new Date()): Promise<IntegrityReport> {
   const users = db.collection('users');
   const properties = db.collection('properties');
@@ -277,11 +262,6 @@ export async function runIntegrityChecks(db: Db, now: Date = new Date()): Promis
     catalogDriftFinding(db, 'amenities', 'amenityCodes', 'AMENITY_USAGE_DRIFT', true),
     propertyOptionDriftFinding(db),
     propertyFacetDriftFinding(db),
-    auctionAnchorFinding(db),
-    // MAZAD-035: a scheduled/active auction without a configured fee (legacy, pre-review data) can never be paid for or activated.
-    filterFinding(db.collection('auctions'), { status: { $in: ['scheduled', 'active'] }, entryFee: { $exists: false } }, 'AUCTION_LIVE_WITHOUT_FEE', 'warning', 'Scheduled/active auctions have no configured entry fee (pre-review data): they never activate or accept payment; cancel them from Admin'),
-    filterFinding(db.collection('auctions'), { status: 'scheduled', activationHold: { $exists: true } }, 'AUCTION_ACTIVATION_HELD', 'warning', 'Scheduled auctions were refused activation by the activation gate and need an Admin decision'),
-    filterFinding(db.collection('auction_requests'), { status: 'withdrawn', liveKey: { $exists: true } }, 'AUCTION_REQUEST_LIVE_KEY_LEAK', 'error', 'Withdrawn auction requests still hold the per-property live key'),
     filterFinding(properties, { $or: [{ isOwnerVisible: { $exists: true, $nin: [true, false, null] } }, { lifecycleStatus: { $exists: true, $nin: ['active', 'archived', 'admin_hidden', null] } }] }, 'PROPERTY_VISIBILITY_FIELD_INVALID', 'error', 'Property isOwnerVisible/lifecycleStatus hold values the public listing predicates do not recognise (they would be silently hidden)'),
   ]);
   const findings = candidates.filter((finding): finding is IntegrityFinding => finding !== null);

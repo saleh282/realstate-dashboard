@@ -50,7 +50,6 @@ describe('property publishing validation', () => {
       },
       options: { findOne: jest.fn().mockReturnValue(query({ code: 'valid' })), find: jest.fn().mockReturnValue(query([{ code: 'cash' }])) },
       amenities: { countDocuments: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(1) }) },
-      auctionLock: { assertUnlocked: jest.fn().mockResolvedValue(undefined) },
       // Every type has the seeded legacy v1 (migration 026).
       ...new FormDefinitionStore().models(),
       properties: {}, cloudinary: {}, ...overrides,

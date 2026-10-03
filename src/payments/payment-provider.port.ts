@@ -4,8 +4,7 @@ import { PaymentPurpose, VerifiedProviderOutcome } from './payment.types';
 
 /**
  * The minimal, provider-neutral seam a future payment gateway adapter fills
- * (no gateway is selected or integrated in MAZAD-028). Shared by both payment
- * purposes (AUCTION_ENTRY, MANAGED_MARKETING); the purpose is passed so an
+ * (no gateway is selected or integrated in MAZAD-028). Used by managed-marketing payments; the purpose is passed so an
  * adapter can tag the gateway order, but the port carries no business effect.
  *
  * Contract for an adapter:
@@ -19,7 +18,7 @@ import { PaymentPurpose, VerifiedProviderOutcome } from './payment.types';
  *  - it must never return or log card data, credentials or raw payloads.
  * Reconciliation of uncertain payments is `verify` called again later.
  */
-export interface AuctionPaymentProviderPort {
+export interface PaymentProviderPort {
   /** Stable, non-secret identifier stored on each payment (e.g. an adapter name). */
   readonly providerKey: string;
   /** False when no gateway is configured: initiation and verification then fail closed. */
@@ -28,11 +27,11 @@ export interface AuctionPaymentProviderPort {
   verify(providerReference: string): Promise<VerifiedProviderOutcome>;
 }
 
-export const AUCTION_PAYMENT_PROVIDER_PORT = Symbol('AUCTION_PAYMENT_PROVIDER_PORT');
+export const PAYMENT_PROVIDER_PORT = Symbol('PAYMENT_PROVIDER_PORT');
 
 /** Production default until a real gateway adapter is bound: fail closed. Pretends nothing. */
 @Injectable()
-export class UnconfiguredPaymentProvider implements AuctionPaymentProviderPort {
+export class UnconfiguredPaymentProvider implements PaymentProviderPort {
   readonly providerKey = 'unconfigured';
   readonly configured = false;
 

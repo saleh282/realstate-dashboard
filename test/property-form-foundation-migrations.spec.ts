@@ -1,13 +1,6 @@
 import { ObjectId } from 'mongodb';
 import { selectMigrations } from '../src/migrations/cli';
-import {
-  CORE_MIGRATIONS,
-  legacyPropertyDataReportMigration,
-  legacyPropertyFormDefinitionsMigration,
-  propertyAreaBackfillMigration,
-  propertyAttributeRegistryMigration,
-  validateMigrationRegistry,
-} from '../src/migrations/framework/core-migrations';
+import { CORE_MIGRATIONS, legacyPropertyDataReportMigration, legacyPropertyFormDefinitionsMigration, propertyAreaBackfillMigration, propertyAttributeRegistryMigration, validateMigrationRegistry } from '../src/migrations/framework/core-migrations';
 import { MigrationRunner } from '../src/migrations/framework/migration.runner';
 import { registryDocument, storedContentHash } from '../src/migrations/025-property-form-foundation';
 import { LEGACY_PROPERTY_ATTRIBUTE_SEED } from '../src/property-attributes/property-attribute.constants';
@@ -388,7 +381,7 @@ describe('DPF-013/014 migration registry', () => {
   it('registers M-A -> M-B, the manual report, the area backfill, the Phase 8/9/10/11 registry seeds and the Phase 13 listing indexes in order', () => {
     validateMigrationRegistry();
     const ids = CORE_MIGRATIONS.map((migration) => migration.id);
-    expect(ids.slice(-13)).toEqual([
+    expect(ids.filter((id) => Number(id.slice(0, 3)) >= 25 && Number(id.slice(0, 3)) <= 37)).toEqual([
       '025-property-attribute-registry',
       '026-legacy-property-form-definitions',
       '027-legacy-property-data-report',

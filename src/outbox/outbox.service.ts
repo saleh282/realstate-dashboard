@@ -25,12 +25,10 @@ export type RecordedOutboxEvent = { eventId: string; aggregateVersion: number };
  * AGGREGATE VERSION. Each event gets `aggregateVersion = max(existing for
  * (aggregateType, aggregateId)) + 1`, read INSIDE the transaction. That is
  * race-free only because every producer first WRITES the aggregate's own
- * document in the same transaction (the auction CAS, the payment CAS, …):
+ * document in the same transaction (the property CAS, the payment CAS, …):
  * MongoDB lets one transaction at a time modify a document and conflicts a
  * transaction that started from an older snapshot, so by the time this runs no
- * concurrent producer for that aggregate can have a different view. Same
- * "write the serialisation point first, then read" rule as the bid ledger's
- * sequence. The unique `(aggregateType, aggregateId, aggregateVersion)` index
+ * concurrent producer for that aggregate can have a different view. Writes serialize aggregate versions. The unique `(aggregateType, aggregateId, aggregateVersion)` index
  * is the backstop: a violation is a lost race, retried by the transaction
  * runners, never a reordered or lost event.
  * RULE FOR CALLERS: call this only AFTER the aggregate's authoritative write.

@@ -13,8 +13,6 @@ export class NotificationPreference {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true, immutable: true }) recipientAccountId: Types.ObjectId;
   @Prop({ type: String, required: true, enum: Object.values(NotificationPreferenceMode), default: DEFAULT_NOTIFICATION_PREFERENCES.newPropertyAlerts })
   newPropertyAlerts: NotificationPreferenceMode;
-  @Prop({ type: String, required: true, enum: Object.values(NotificationPreferenceMode), default: DEFAULT_NOTIFICATION_PREFERENCES.auctionOpportunityAlerts })
-  auctionOpportunityAlerts: NotificationPreferenceMode;
 }
 
 export const NotificationPreferenceSchema = SchemaFactory.createForClass(NotificationPreference);

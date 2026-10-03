@@ -79,8 +79,8 @@ function createFixture() {
   return { service, users, otp, mail, refresh, store, sentCode };
 }
 
-const attacker = { fullName: 'Attacker', identifier: EMAIL, password: 'attacker-Pass1!', confirmPassword: 'attacker-Pass1!' };
-const victim = { fullName: 'Real Owner', identifier: EMAIL, password: 'victim-Pass1!', confirmPassword: 'victim-Pass1!' };
+const attacker = { fullName: 'Attacker', identifier: EMAIL, phone: '+201012345678', password: 'attacker-Pass1!', confirmPassword: 'attacker-Pass1!' };
+const victim = { fullName: 'Real Owner', identifier: EMAIL, phone: '+201098765432', password: 'victim-Pass1!', confirmPassword: 'victim-Pass1!' };
 
 describe('pre-registration account takeover', () => {
   let now = 1_700_000_000_000;

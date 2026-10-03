@@ -1,10 +1,8 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isProtectedProcess } from '../config/deployment-environment';
-import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from './auction-payment-provider.port';
-import {
-  DEFAULT_RECONCILIATION_BATCH_SIZE, DEFAULT_RECONCILIATION_INTERVAL_SECONDS, MAX_RECONCILIATION_BATCH_SIZE, paymentAttemptTtlMs,
-} from './payment-reconciliation.config';
+import { PAYMENT_PROVIDER_PORT, PaymentProviderPort } from './payment-provider.port';
+import { DEFAULT_RECONCILIATION_BATCH_SIZE, DEFAULT_RECONCILIATION_INTERVAL_SECONDS, MAX_RECONCILIATION_BATCH_SIZE, paymentAttemptTtlMs } from './payment-reconciliation.config';
 import { PaymentReconciliationService, PaymentReconciliationSummary } from './payment-reconciliation.service';
 
 const MIN_INTERVAL_SECONDS = 1;
@@ -13,7 +11,7 @@ const STOP_WAIT_MS = 10_000;
 /**
  * Periodically reconciles INITIATED payment attempts of both purposes with the
  * provider and expires stale ones (MAZAD-028). Same shape and conventions as
- * `AuctionLifecycleWorker`: one timer chain, an in-process re-entrancy guard
+ * a bounded background worker: one timer chain, an in-process re-entrancy guard
  * (never two local passes at once), a staggered start — but correctness NEVER
  * depends on the guard: each attempt is claimed with an atomic database lease
  * (`PaymentReconciliationService`), so overlapping instances are safe.
@@ -36,7 +34,7 @@ export class PaymentReconciliationWorker implements OnApplicationBootstrap, OnMo
   constructor(
     private readonly reconciliation: PaymentReconciliationService,
     private readonly config: ConfigService,
-    @Inject(AUCTION_PAYMENT_PROVIDER_PORT) private readonly provider: AuctionPaymentProviderPort,
+    @Inject(PAYMENT_PROVIDER_PORT) private readonly provider: PaymentProviderPort,
   ) {}
 
   get enabled(): boolean {

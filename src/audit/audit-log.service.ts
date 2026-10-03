@@ -166,8 +166,7 @@ export class AuditLogService {
 
   /**
    * Best-effort audit entry for an unattended, non-human-initiated lifecycle
-   * event (the auction scheduling/closing worker's activations and
-   * expirations, and the anti-sniping extension primitive — MAZAD-024).
+   * event.
    * Mirrors `logResourceAction` (fire-and-forget; a logging failure never
    * breaks the worker) but omits `userId`/`actorUserId` instead of forcing
    * an invalid actor id onto a system-initiated event — reusing the

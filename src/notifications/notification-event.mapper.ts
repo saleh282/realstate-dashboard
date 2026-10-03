@@ -18,18 +18,11 @@ export interface NotificationDraft {
 }
 
 export const NOTIFICATION_SUBSCRIBED_EVENT_TYPES = Object.freeze([
-  OutboxEventType.AUCTION_ACTIVATED,
-  OutboxEventType.AUCTION_CANCELLED,
-  OutboxEventType.BID_ACCEPTED,
-  OutboxEventType.AUCTION_FINALIZED,
-  OutboxEventType.AUCTION_ENTRY_PAYMENT_CONFIRMED,
   OutboxEventType.MANAGED_MARKETING_PAYMENT_CONFIRMED,
   OutboxEventType.KYC_APPROVED,
   OutboxEventType.KYC_REJECTED,
   OutboxEventType.PROPERTY_APPROVED,
   OutboxEventType.PROPERTY_REJECTED,
-  OutboxEventType.AUCTION_REQUEST_APPROVED,
-  OutboxEventType.AUCTION_REQUEST_REJECTED,
 ] as const);
 
 function objectId(value: unknown, field: string): string {
@@ -39,30 +32,8 @@ function objectId(value: unknown, field: string): string {
   return value;
 }
 
-function routing(event: OutboxDeliveryEvent, key: 'bidderAccountId' | 'winnerAccountId' | 'advertiserAccountId' | 'previousHighestBidderAccountId' | 'subjectAccountId'): string {
+function routing(event: OutboxDeliveryEvent, key: 'advertiserAccountId' | 'subjectAccountId'): string {
   return objectId(event.privateRouting?.[key], `privateRouting.${key}`);
-}
-
-function optionalRouting(event: OutboxDeliveryEvent, key: 'advertiserAccountId' | 'previousHighestBidderAccountId'): string | undefined {
-  const value = event.privateRouting?.[key];
-  return value === undefined ? undefined : objectId(value, `privateRouting.${key}`);
-}
-
-function losingRecipients(event: OutboxDeliveryEvent, winnerAccountId: string): string[] {
-  const values = event.privateRouting?.losingBidderAccountIds;
-  if (values === undefined) return [];
-  if (!Array.isArray(values)) throw new OutboxPermanentDeliveryError('invalid notifications event privateRouting.losingBidderAccountIds');
-  return [...new Set(values.map((value, index) => objectId(value, `privateRouting.losingBidderAccountIds[${index}]`)))]
-    .filter((accountId) => accountId !== winnerAccountId);
-}
-
-/** MAZAD-035: bidders with an entitlement/payment or accepted bids on a cancelled auction; never the advertiser twice. */
-function participantRecipients(event: OutboxDeliveryEvent, advertiserAccountId: string | undefined): string[] {
-  const values = event.privateRouting?.participantAccountIds;
-  if (values === undefined) return [];
-  if (!Array.isArray(values)) throw new OutboxPermanentDeliveryError('invalid notifications event privateRouting.participantAccountIds');
-  return [...new Set(values.map((value, index) => objectId(value, `privateRouting.participantAccountIds[${index}]`)))]
-    .filter((accountId) => accountId !== advertiserAccountId);
 }
 
 function target(type: NotificationTargetType, id: unknown): NotificationTarget {
@@ -88,37 +59,6 @@ function base(event: OutboxDeliveryEvent) {
 export function mapNotificationEvent(event: OutboxDeliveryEvent): NotificationDraft[] {
   const common = base(event);
   switch (event.type) {
-    case OutboxEventType.AUCTION_ACTIVATED: {
-      const recipientAccountId = optionalRouting(event, 'advertiserAccountId');
-      return recipientAccountId ? [{ ...common, recipientAccountId, type: NotificationType.AUCTION_STARTED, title: 'بدأ المزاد', message: 'بدأ المزاد الخاص بعقارك.', target: target(NotificationTargetType.AUCTION, event.payload.auctionId) }] : [];
-    }
-    case OutboxEventType.AUCTION_CANCELLED: {
-      const advertiserAccountId = optionalRouting(event, 'advertiserAccountId');
-      const auctionTarget = target(NotificationTargetType.AUCTION, event.payload.auctionId);
-      return [
-        ...(advertiserAccountId ? [{ ...common, recipientAccountId: advertiserAccountId, type: NotificationType.AUCTION_CANCELLED, title: 'تم إلغاء المزاد', message: 'تم إلغاء المزاد.', target: auctionTarget }] : []),
-        // MAZAD-035 (Product decision 14): a notification only — it states no refund or financial outcome.
-        ...participantRecipients(event, advertiserAccountId).map((recipientAccountId) => ({ ...common, recipientAccountId, type: NotificationType.AUCTION_CANCELLED, title: 'تم إلغاء مزاد مشترك فيه', message: 'تم إلغاء مزاد كنت مشتركًا فيه.', target: auctionTarget })),
-      ];
-    }
-    case OutboxEventType.BID_ACCEPTED: {
-      const recipientAccountId = optionalRouting(event, 'previousHighestBidderAccountId');
-      if (!recipientAccountId) return [];
-      const currentBidderAccountId = routing(event, 'bidderAccountId');
-      return recipientAccountId !== currentBidderAccountId
-        ? [{ ...common, recipientAccountId, type: NotificationType.OUTBID, title: 'تم تجاوز مزايدتك', message: 'سُجلت مزايدة أعلى في المزاد.', target: target(NotificationTargetType.AUCTION, event.payload.auctionId) }]
-        : [];
-    }
-    case OutboxEventType.AUCTION_FINALIZED: {
-      const winnerAccountId = routing(event, 'winnerAccountId');
-      const auctionTarget = target(NotificationTargetType.AUCTION, event.payload.auctionId);
-      return [
-        { ...common, recipientAccountId: winnerAccountId, type: NotificationType.AUCTION_WON, title: 'فزت بالمزاد', message: 'تهانينا، تم اعتمادك فائزاً بالمزاد.', target: auctionTarget },
-        ...losingRecipients(event, winnerAccountId).map((recipientAccountId) => ({ ...common, recipientAccountId, type: NotificationType.AUCTION_LOST, title: 'انتهى المزاد', message: 'انتهى المزاد ولم تكن المزايدة الفائزة.', target: auctionTarget })),
-      ];
-    }
-    case OutboxEventType.AUCTION_ENTRY_PAYMENT_CONFIRMED:
-      return [{ ...common, recipientAccountId: routing(event, 'bidderAccountId'), type: NotificationType.AUCTION_ENTRY_PAYMENT_CONFIRMED, title: 'تم تأكيد رسوم دخول المزاد', message: 'تم تأكيد الدفع وأصبحت أهلية المشاركة في المزاد متاحة وفق حالته الحالية.', target: target(NotificationTargetType.AUCTION, event.payload.auctionId) }];
     case OutboxEventType.MANAGED_MARKETING_PAYMENT_CONFIRMED:
       return [{ ...common, recipientAccountId: routing(event, 'advertiserAccountId'), type: NotificationType.MANAGED_MARKETING_PAYMENT_CONFIRMED, title: 'تم تأكيد دفع خدمة التسويق', message: 'تم تأكيد دفع طلب التسويق المُدار.', target: target(NotificationTargetType.MANAGED_MARKETING_REQUEST, event.payload.requestId) }];
     case OutboxEventType.KYC_APPROVED:
@@ -129,10 +69,6 @@ export function mapNotificationEvent(event: OutboxDeliveryEvent): NotificationDr
       return [{ ...common, recipientAccountId: routing(event, 'advertiserAccountId'), type: NotificationType.PROPERTY_APPROVED, title: 'تم قبول العقار', message: 'تم قبول نسخة العقار المرسلة للمراجعة.', target: target(NotificationTargetType.PROPERTY, event.payload.propertyId) }];
     case OutboxEventType.PROPERTY_REJECTED:
       return [{ ...common, recipientAccountId: routing(event, 'advertiserAccountId'), type: NotificationType.PROPERTY_REJECTED, title: 'تم رفض العقار', message: 'تم رفض نسخة العقار المرسلة للمراجعة. راجع حالة العقار لمزيد من التفاصيل.', target: target(NotificationTargetType.PROPERTY, event.payload.propertyId) }];
-    case OutboxEventType.AUCTION_REQUEST_APPROVED:
-      return [{ ...common, recipientAccountId: routing(event, 'advertiserAccountId'), type: NotificationType.AUCTION_REQUEST_APPROVED, title: 'تمت الموافقة على طلب المزاد', message: 'وافقت الإدارة على طلب المزاد وأصبح المزاد مجدولًا.', target: target(NotificationTargetType.AUCTION_REQUEST, event.payload.requestId) }];
-    case OutboxEventType.AUCTION_REQUEST_REJECTED:
-      return [{ ...common, recipientAccountId: routing(event, 'advertiserAccountId'), type: NotificationType.AUCTION_REQUEST_REJECTED, title: 'تم رفض طلب المزاد', message: 'رفضت الإدارة طلب المزاد. راجع الطلب لمعرفة السبب وتعديله.', target: target(NotificationTargetType.AUCTION_REQUEST, event.payload.requestId) }];
     default:
       throw new OutboxPermanentDeliveryError(`unsupported notifications event type ${event.type}`);
   }

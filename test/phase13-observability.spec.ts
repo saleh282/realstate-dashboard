@@ -115,23 +115,9 @@ describe('Phase 13 operational status', () => {
     expect(status.evidenceCleanup).toEqual({ pending: 1, oldestPendingAgeSeconds: 7200 });
   });
 
-  it('MAZAD-035: flags SCHEDULED auctions the activation gate held, with their count', async () => {
-    const status = await new OperationalStatusService(connection({ ledger: [], held: 2 }), config(), provider).status(now);
-    expect(status.auctions).toEqual({ activationHeld: 2 });
-    expect(status.attention).toEqual(['auction_activation_held']);
-  });
-
   it('a running migration WITH a live lock is normal progress, not an alert', async () => {
     const status = await new OperationalStatusService(connection({ ledger: [{ migrationId: '022', status: 'running' }], lock: { _id: 'global' } }), config(), provider).status(now);
     expect(status.attention).toEqual([]);
-  });
-
-  it('surfaces process counters as attention items (dead-lettered outbox, unresolved auction anchors)', async () => {
-    operationalMetrics.increment('outbox_dead_lettered');
-    operationalMetrics.increment('auction_anchor_unresolved', undefined, 2);
-    const status = await new OperationalStatusService(connection({}), config(), provider).status(now);
-    expect(status.attention).toEqual(['outbox_dead_lettered', 'auction_anchor_unresolved']);
-    expect(status.counters).toMatchObject({ outbox_dead_lettered: 1, auction_anchor_unresolved: 2 });
   });
 
   it('reports a database failure instead of throwing', async () => {

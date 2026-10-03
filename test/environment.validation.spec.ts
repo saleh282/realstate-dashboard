@@ -97,20 +97,6 @@ describe('environment validation', () => {
       expect(invalid({ CLEANUP_BATCH_SIZE: '1000' })).toThrow('CLEANUP_BATCH_SIZE');
     });
 
-    it('validates the auction lifecycle worker settings (MAZAD-024)', () => {
-      expect(invalid({ AUCTION_LIFECYCLE_WORKER_ENABLED: 'true', AUCTION_LIFECYCLE_INTERVAL_SECONDS: '30', AUCTION_LIFECYCLE_BATCH_SIZE: '50' })).not.toThrow();
-      expect(invalid({ AUCTION_LIFECYCLE_WORKER_ENABLED: 'yes' })).toThrow('AUCTION_LIFECYCLE_WORKER_ENABLED');
-      expect(invalid({ AUCTION_LIFECYCLE_INTERVAL_SECONDS: '1' })).toThrow('AUCTION_LIFECYCLE_INTERVAL_SECONDS');
-      expect(invalid({ AUCTION_LIFECYCLE_BATCH_SIZE: '1000' })).toThrow('AUCTION_LIFECYCLE_BATCH_SIZE');
-    });
-
-    it('validates the auction finalization worker settings (MAZAD-030)', () => {
-      expect(invalid({ AUCTION_FINALIZATION_WORKER_ENABLED: 'true', AUCTION_FINALIZATION_INTERVAL_SECONDS: '30', AUCTION_FINALIZATION_BATCH_SIZE: '50' })).not.toThrow();
-      expect(invalid({ AUCTION_FINALIZATION_WORKER_ENABLED: 'yes' })).toThrow('AUCTION_FINALIZATION_WORKER_ENABLED');
-      expect(invalid({ AUCTION_FINALIZATION_INTERVAL_SECONDS: '1' })).toThrow('AUCTION_FINALIZATION_INTERVAL_SECONDS');
-      expect(invalid({ AUCTION_FINALIZATION_BATCH_SIZE: '1000' })).toThrow('AUCTION_FINALIZATION_BATCH_SIZE');
-    });
-
     it('validates the outbox dispatcher settings (MAZAD-031)', () => {
       expect(invalid({
         OUTBOX_DISPATCHER_ENABLED: 'true', OUTBOX_DISPATCHER_INTERVAL_SECONDS: '5', OUTBOX_DISPATCHER_BATCH_SIZE: '100', OUTBOX_LEASE_SECONDS: '60',

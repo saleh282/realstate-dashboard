@@ -6,15 +6,7 @@ import { randomUUID } from 'crypto';
 import { Model } from 'mongoose';
 import { ClockService } from '../common/time/clock.service';
 import { OutboxConsumerRegistry, OutboxDeliveryEvent, OutboxEventConsumer, OutboxPermanentDeliveryError } from './outbox-consumer.port';
-import {
-  OUTBOX_TERMINAL_STATUSES,
-  OUTBOX_UNFINISHED_STATUSES,
-  OutboxErrorClass,
-  OutboxStatus,
-  outboxConsumerScanIndexName,
-  outboxConsumerScanIndexSpec,
-  outboxDeliveryPath,
-} from './outbox.constants';
+import { OUTBOX_TERMINAL_STATUSES, OUTBOX_UNFINISHED_STATUSES, OutboxErrorClass, OutboxStatus, outboxConsumerScanIndexName, outboxConsumerScanIndexSpec, outboxDeliveryPath } from './outbox.constants';
 import { OutboxEvent, OutboxEventDocument } from './schemas/outbox-event.schema';
 
 const DEFAULT_BATCH_SIZE = 100;
@@ -70,7 +62,7 @@ type Settled = 'DELIVERED' | 'RETRY_SCHEDULED' | 'DEAD_LETTERED' | 'UNCONFIRMED'
  *
  * MULTI-CONSUMER MODEL. An event is written once, immutably, by the business
  * transaction. Each consumer's progress on it lives under `delivery.<name>` on
- * that same event, so consumers are fully independent: realtime PROCESSED while
+ * that same event, so consumers are fully independent: another consumer PROCESSED while
  * notifications is PENDING (or retrying, or DEAD_LETTER) is an ordinary state,
  * and a consumer only ever writes its own `delivery.<name>.*`. The set of
  * events owed to a consumer is DERIVED, not created: every committed event of a
@@ -104,7 +96,7 @@ type Settled = 'DELIVERED' | 'RETRY_SCHEDULED' | 'DEAD_LETTERED' | 'UNCONFIRMED'
  *     lower-version event of the same aggregate that THIS consumer subscribes to
  *     is still unfinished FOR THIS CONSUMER (absent, PENDING or PROCESSING).
  *     DEAD_LETTER counts as finished (otherwise one poison event would stall an
- *     auction forever) — a consumer that sees a version gap resynchronises from
+ *     aggregate forever) — a consumer that sees a version gap resynchronises from
  *     authoritative state. Other consumers' progress is never consulted.
  *  5. CLAIM atomically: one `findOneAndUpdate` on `{_id, this consumer's delivery
  *     absent or unfinished and due}` sets PROCESSING, a fresh random `leaseToken`,

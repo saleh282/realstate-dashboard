@@ -332,28 +332,3 @@ describe('Phase 9 filter-metadata endpoint (GET /properties/filter-metadata)', (
     expect(PHASE9_FACET_METADATA.map((facet) => facet.key).sort()).toEqual([...PHASE9_PROMOTED_FACET_KEYS].sort());
   });
 });
-
-describe('Phase 9 auction discovery is unaffected (regression)', () => {
-  it('buildPublicAuctionMatches never includes a facet predicate, even if facet-shaped keys are (incorrectly) passed in', async () => {
-    const instance = service([]);
-    const matches = await (instance as any).buildPublicAuctionMatches({
-      governorateCode: 'cairo',
-      // Simulates a hypothetical future refactor accidentally forwarding the full query object.
-      shopFloorLevel: 'ground',
-      commercialUseTypes: ['retail'],
-      minBuiltAreaSqm: 100,
-      powerSource: 'grid',
-      industrialUseType: 'heavy',
-      soilType: 'clay',
-      waterSource: 'well',
-    });
-    expect(JSON.stringify(matches)).not.toContain('facets.');
-  });
-
-  it('ListPublicAuctionsDto declares no Phase 9 facet parameters at all', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { ListPublicAuctionsDto } = require('../src/auctions/dto/list-auctions.dto');
-    const instance = new ListPublicAuctionsDto();
-    for (const key of PHASE9_PROMOTED_FACET_KEYS) expect(Object.prototype.hasOwnProperty.call(instance, key)).toBe(false);
-  });
-});

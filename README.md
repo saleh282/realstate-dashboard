@@ -1,4 +1,4 @@
-# Real Estate Auction Backend — Phase 0 baseline and Phase 1 accounts
+# Real Estate Backend — Phase 0 baseline and Phase 1 accounts
 
 NestJS + MongoDB backend for authentication and KYC. Phase 0 adds production-safe configuration, role authorization, secure OTP handling, real SMTP delivery, and request throttling.
 
@@ -88,7 +88,7 @@ Observability (structured JSON log lines): `evidence_cleanup_run` (info/warn) af
 `GET /properties` is the public marketplace discovery endpoint. It only ever returns properties that are `approved`, owner-visible, not archived/admin-hidden, and have a published revision — draft, pending, rejected and private-evidence data are never reachable through it. All query parameters are optional:
 
 - `page` (default 1), `limit` (default 20, max 50).
-- `operationType`: `sale` or `rent`. There is no `auction` value yet — auctions are a later, separate feature and the schema has no auction operation type to filter on.
+- `operationType`: `sale` or `rent`.
 - `purposeCategoryId`, `purposeSubcategoryId`: catalog `_id`s from `GET /property-purpose-categories` / `GET /property-types` (or the combined `GET /property-form-options`). Passing a subcategory that does not belong to the given category returns `400 PROPERTY_PURPOSE_HIERARCHY_MISMATCH`; an unknown id returns `400 PROPERTY_PURPOSE_CATEGORY_INVALID` / `PROPERTY_PURPOSE_SUBCATEGORY_INVALID`.
 - `governorateCode`, `city`: exact match (city is case-insensitive) against the property's address, sourced from the same catalogs used by the property-creation form (`GET /property-form-options`).
 - `minPriceMinor`, `maxPriceMinor`: inclusive bounds in EGP minor units. `minPriceMinor > maxPriceMinor` returns `400 PROPERTY_PRICE_RANGE_INVALID`.
@@ -188,6 +188,10 @@ SMS remains intentionally unimplemented. The stub never logs an OTP or phone num
 - `PATCH /api/v1/users/me/password` verifies the current password, applies the shared 8-character minimum policy, hashes with the existing bcrypt flow, and revokes all refresh sessions.
 - Refresh tokens are single-use. Concurrent requests cannot consume the same stored token more than once.
 - Authentication failures expose stable machine-readable `code` values, including `ACCOUNT_NOT_VERIFIED`, `ACCOUNT_SUSPENDED`, `INVALID_CREDENTIALS`, and the OTP error codes.
+
+## Auction removal
+
+Auction APIs, bidding, workers and the WebSocket channel have been removed. See [dependency audit](docs/auction-removal-audit.md) and [change report](docs/auction-removal-report.md) for the database retention decision and migration 038.
 
 ## Commands
 

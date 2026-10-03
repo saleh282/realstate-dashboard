@@ -39,7 +39,7 @@ export interface OutboxConsumerDelivery {
  *  - the EVENT (type … privateRouting, createdAt): immutable, written once;
  *  - `delivery`: a map `consumerName → OutboxConsumerDelivery`. Each consumer
  *    owns its own entry (status, attempts, lease, retry time, dead letter), so
- *    "realtime PROCESSED, notifications PENDING" is an ordinary state and one
+ *    "another consumer PROCESSED, notifications PENDING" is an ordinary state and one
  *    consumer can never complete, block or dead-letter another. The dispatcher
  *    only ever writes `delivery.<its own name>.*`, always through a conditional
  *    (status + lease token) write. The map is ABSENT at insert: a consumer

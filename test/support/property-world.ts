@@ -112,7 +112,6 @@ export class PropertyWorld {
       ...this.forms.models(),
       audit: { logRequired: jest.fn(), logResourceAction: jest.fn(), logAdminResourceAction: jest.fn() },
       outbox: { recordRequired: jest.fn() },
-      auctionLock: { assertUnlocked: jest.fn().mockResolvedValue(undefined) },
       connection: { startSession: async () => session },
       evidenceAssets: {
         uploadPublicPropertyMedia: jest.fn(async (file: Express.Multer.File) => {

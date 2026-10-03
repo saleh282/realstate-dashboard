@@ -2,7 +2,7 @@ import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PaymentErrorCode } from '../common/errors/payment-error-codes';
 import { FakePaymentScenario } from './payment-provider.config';
-import { AuctionPaymentProviderPort } from './auction-payment-provider.port';
+import { PaymentProviderPort } from './payment-provider.port';
 import { PaymentPurpose, VerifiedProviderOutcome } from './payment.types';
 
 /**
@@ -19,7 +19,7 @@ import { PaymentPurpose, VerifiedProviderOutcome } from './payment.types';
  * staging/production (see PaymentsModule).
  */
 @Injectable()
-export class FakePaymentProvider implements AuctionPaymentProviderPort {
+export class FakePaymentProvider implements PaymentProviderPort {
   readonly providerKey = 'fake';
   readonly configured = true;
 

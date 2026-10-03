@@ -54,6 +54,7 @@ describe('V1 email-only authentication', () => {
       .register({
         fullName: 'Phone User',
         identifier: phone,
+        phone,
         password: 'Password123!',
         confirmPassword: 'Password123!',
       })

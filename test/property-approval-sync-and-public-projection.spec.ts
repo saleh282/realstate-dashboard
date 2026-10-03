@@ -271,36 +271,6 @@ describe('DPF-002 public read paths load only the revision fields they project',
     expect(selectTokens((ctx.populateCalls[0] as any).select)).toEqual([...REQUIRED_PUBLIC_REVISION_FIELDS].sort());
   });
 
-  it('getAnchoredPublicProjections keeps the exact anchored projection while loading only required fields plus propertyId', async () => {
-    const anchored = fullRevision(oldRevisionId, { revisionNumber: 1, title: 'النسخة المرتبطة بالمزاد', area: 180 });
-    const current = fullRevision(revisionId);
-    const ctx = publicService([], [anchored]);
-    ctx.properties.find.mockImplementation(() => ({ lean: () => ({ exec: async () => [{ ...aggregate(current._id), currentPublicRevisionId: current._id }] }) }) as any);
-    const result = await ctx.service.getAnchoredPublicProjections([{ propertyId, revisionId: oldRevisionId }]);
-    const expected = await unrestrictedProjection(anchored);
-    expect(JSON.stringify([...result.entries()])).toBe(JSON.stringify([[`${propertyId}:${oldRevisionId}`, expected]]));
-    expect(expected).toMatchObject({ area: 180, title: 'النسخة المرتبطة بالمزاد', revisionNumber: 1 });
-    expect(selectTokens(ctx.revisionProjections[0] as string)).toEqual([...REQUIRED_PUBLIC_REVISION_FIELDS, 'propertyId'].sort());
-  });
-
-  it('never falls back to an unrestricted whole-revision population on the narrowed paths', async () => {
-    const revision = fullRevision(revisionId);
-    const ctx = publicService([aggregate(revision)], [revision]);
-    await ctx.service.listPublished({});
-    await ctx.service.getPublicProjectionsByIds([propertyId]);
-    await ctx.service.getAnchoredPublicProjections([{ propertyId, revisionId }]);
-    expect(ctx.populateCalls).toHaveLength(2);
-    for (const call of ctx.populateCalls) {
-      expect(typeof call).toBe('object');
-      expect((call as any).select.trim()).not.toBe('');
-    }
-    expect(ctx.revisionProjections).toHaveLength(1);
-    expect(typeof ctx.revisionProjections[0]).toBe('string');
-    for (const select of [...ctx.populateCalls.map((call: any) => call.select), ctx.revisionProjections[0] as string]) {
-      for (const field of PRIVATE_OR_UNUSED_REVISION_FIELDS) expect(selectTokens(select)).not.toContain(field);
-    }
-  });
-
   it('needs every selected field: dropping any one of them changes the public projection', async () => {
     const { hydrate } = publicService([]);
     // A bare aggregate with no fallback values, so every revision field is observable in the output.

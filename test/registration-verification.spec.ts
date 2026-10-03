@@ -5,6 +5,7 @@ import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter
 const registration = {
   fullName: 'Test User',
   identifier: 'person@example.com',
+  phone: '+201012345678',
   password: 'password',
   confirmPassword: 'password',
 };

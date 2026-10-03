@@ -1,5 +1,4 @@
 import { Types } from 'mongoose';
-import { AuctionsQueryService } from '../src/auctions/auctions-query.service';
 import { PropertiesService } from '../src/properties/properties.service';
 import { buildSpecifications, deprecatedFlatFields, displayValueAr, effectiveSpec } from '../src/properties/property-specifications';
 import { LEGACY_RESIDENTIAL_FIELDS, computeFormContentHash } from '../src/property-form-definitions/property-form-definition.constants';
@@ -16,7 +15,6 @@ const LEGACY_REVISION = oid(2);
 const PINNED_REVISION = oid(3);
 const VERSION = oid(4);
 const DEFINITION = oid(5);
-const AUCTION = oid(6);
 const OWNER = oid(7);
 const TYPE = oid(8);
 
@@ -195,45 +193,11 @@ describe('DPF-016 specifications on the read surfaces', () => {
     expect(admin.pendingRevision.specifications).toEqual(pinnedSpecifications);
     expect(admin.currentPublicRevision.specifications).toEqual(legacySpecifications);
   });
-
   it('keeps list and favorites responses narrow: no specifications or attributes', async () => {
     const { instance } = service(property(legacyRevision), [legacyRevision]);
     const listing = await instance.hydratePublicListings([property(legacyRevision)]);
     expect(listing[0]).not.toHaveProperty('specifications');
     expect(listing[0]).not.toHaveProperty('attributes');
     expect(listing[0]).toMatchObject({ bedrooms: 3, bathrooms: 2, floor: 2 });
-    const anchoredList = await instance.getAnchoredPublicProjections([{ propertyId: String(PROPERTY), revisionId: String(LEGACY_REVISION) }]);
-    expect(anchoredList.get(`${PROPERTY}:${LEGACY_REVISION}`)).not.toHaveProperty('specifications');
-  });
-});
-
-describe('DPF-016 auction anchoring', () => {
-  // The property has since moved on to the pinned revision; the auction promised bidders the legacy one.
-  const auctionDoc = {
-    _id: AUCTION, propertyId: PROPERTY, propertyRevisionId: LEGACY_REVISION, advertiserAccountId: OWNER, status: 'active',
-    startingPriceMinor: 100_000, minimumBidStepMinor: 1_000, currency: 'EGP', createdAt: new Date('2026-02-01'),
-  };
-  const auctions = () => {
-    const { instance } = service(property(pinnedRevision), [legacyRevision, pinnedRevision]);
-    const query = Object.create(AuctionsQueryService.prototype) as any;
-    Object.assign(query, { auctions: { findById: () => chain(auctionDoc), findOne: () => chain(auctionDoc) }, properties: instance, clock: { now: () => new Date('2026-03-01') } });
-    return query;
-  };
-
-  it('public auction detail renders the anchored revision, not the property\'s current one', async () => {
-    const { auction } = await auctions().getPublic(String(AUCTION));
-    expect(auction.property.specifications).toEqual(legacySpecifications);
-    expect(auction.property).toMatchObject({ bedrooms: 3, area: 121, revisionNumber: 1 });
-    expect(auction.property.propertyTypes).toEqual([{ id: String(TYPE), code: 'apartment', nameAr: 'شقة', iconKey: undefined, isPrimary: true }]);
-  });
-
-  it('owner auction detail renders the anchored revision too', async () => {
-    const { auction } = await auctions().getMine(String(OWNER), String(AUCTION));
-    expect(auction.property.specifications).toEqual(legacySpecifications);
-  });
-
-  it('bid-state/history visibility checks stay lean (no specifications load)', async () => {
-    const { property: anchored } = await auctions().getPubliclyVisible(String(AUCTION));
-    expect(anchored).not.toHaveProperty('specifications');
   });
 });

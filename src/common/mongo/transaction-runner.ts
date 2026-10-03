@@ -33,7 +33,6 @@ function isRetryable(error: unknown, uniqueIndexNames: readonly string[]): boole
  * Runs `work` in a fresh snapshot / majority-write transaction, retrying the
  * WHOLE transaction only when the attempt provably did not commit. An
  * UnknownTransactionCommitResult re-issues only the commit, never the work.
- * Same strategy as MAZAD-027's bid acceptance.
  */
 export async function runTransactionWithRetry<T>(
   connection: Connection,

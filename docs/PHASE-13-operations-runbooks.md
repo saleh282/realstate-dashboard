@@ -11,10 +11,10 @@ has **no automatic rollback** it says so. Structured events are single-line JSON
   a stalled queue must alert an operator, never pull healthy instances out of rotation.
 * **Structured events worth alerting on:** `http_5xx`, `unhandled_exception`, `domain_rejection` (stale form
   `PROPERTY_FORM_VERSION_OUTDATED`, amenity/spec rejections, form-lifecycle conflicts, payment trouble), `rate_limited`,
-  `form_definition_published|archived|restored`, `auction_anchor_unresolved`, `outbox_event_dead_lettered`,
-  `auction_finalization_failed|inconsistent`, `evidence_cleanup_run_failed`, `idempotency_completion_failed`,
+  `form_definition_published|archived|restored`, `outbox_event_dead_lettered`,
+  `evidence_cleanup_run_failed`, `idempotency_completion_failed`,
   `uncaught_exception`, `unhandled_rejection`, `environment_verified` (startup).
-* **Suggested alerts (proposed):** any `outbox_event_dead_lettered` or `auction_anchor_unresolved`; `attention` non-empty for
+* **Suggested alerts (proposed):** any `outbox_event_dead_lettered`; `attention` non-empty for
   10 min; 5xx rate above your baseline; `domain_rejection{PAYMENT_RECONCILIATION_REQUIRED}` or `PAYMENT_STATE_INCONSISTENT`;
   a spike in `domain_rejection{PROPERTY_FORM_VERSION_OUTDATED}` right after a form publish (clients are on a stale form).
 
@@ -73,22 +73,16 @@ has **no automatic rollback** it says so. Structured events are single-line JSON
 * **When a real adapter exists:** an INITIATED attempt with a gateway reference is never failed by a timeout — reconcile it by
   calling `verify` again (a callback is only a trigger). `PAYMENT_RECONCILIATION_REQUIRED` means the server flagged a mismatch
   (amount/currency/reference, success after failure): an operator must reconcile before another attempt can be opened.
-* **Repair:** entitlements are created only by a verified success and are unique per (auction, bidder); there is no manual path that
-  grants one.
+
 * **MAZAD-028 lifecycle** (see `docs/MAZAD-028-payment-lifecycle.md`): the reconciliation worker verifies INITIATED attempts of both
   purposes with a database lease and backoff, and expires them (`EXPIRED`, kept forever) only after a final verification still says
   pending. `PAYMENT_ATTEMPT_TTL_SECONDS` has **no production default**; a protected deployment must set it before enabling the worker.
-  The operations status reports `payments.{pending,due,stale,expired,flagged,confirmedAfterExpiry,lateConfirmed}`.
-  `payments_reconciliation_required` / `payments_late_confirmed` need **manual** operator review (no Admin tooling yet, no automatic
+  The operations status reports `payments.{pending,due,stale,expired,flagged,confirmedAfterExpiry}`.
+  `payments_reconciliation_required` need **manual** operator review (no Admin tooling yet, no automatic
   refund, refund policy pending legal review); `payments_stale` means the worker is not keeping up or expiry is not configured.
 
-## 8. Auction anchors, finalization, idempotency, account deletion, notifications
+## 8. Idempotency, account deletion, notifications
 
-* **Auction anchor broken** (`AUCTION_ANCHOR_BROKEN` integrity error, `auction_anchor_unresolved` log): the auction is already excluded from
-  discovery and counts. Investigate each id manually (the anchored revision is missing or belongs to another property); never
-  re-point an auction to a different revision.
-* **Finalization** (`auction_finalization_failed|inconsistent`): the worker retries; an `inconsistent` result needs a manual look at bids and winner
-  fields — winner selection is never overridden by hand.
 * **Idempotency** (`idempotency_completion_failed`): a repeated key replays the recorded result or answers "in progress" (retry after the advertised
   seconds); records expire after 24 h. Safe to retry with the same key.
 * **Account deletion / notification delivery:** follow `docs/MAZAD-017-retention-safe-deletion.md` and `docs/MAZAD-036-persistent-notifications.md`;
@@ -124,9 +118,9 @@ npx ts-node src/scripts/phase13-scale-harness.ts --scale=100000 --catalog-from=<
 # re-measure after an index/query change without reloading (still needs the same env vars: it rebuilds the indexes):  ... --measure-only
 ```
 Loads a deterministic skewed marketplace, builds the indexes declared by the **current** schemas, and reports explain
-(`SORT` stage, keys/docs examined) plus p50/p95 for the real listing/auction/admin-queue queries.
+(`SORT` stage, keys/docs examined) plus p50/p95 for the real listing/admin-queue queries.
 
-## 12. Extended local E2E (property → auction → fake payments → bidding → managed marketing)
+## 12. Extended local E2E (property and managed marketing)
 
 ```bash
 PHASE13_LOCAL_E2E=1 NODE_ENV=development DEPLOYMENT_ENV=local MONGO_URI='mongodb://127.0.0.1:<port>/mazad_phase13_<name>?replicaSet=<rs>' \
@@ -134,10 +128,3 @@ npx jest test/phase13-local-e2e.spec.ts
 ```
 Skipped unless `PHASE13_LOCAL_E2E=1`; refuses non-disposable targets. Uses the `FakePaymentProvider` (deterministic scenarios `success`, `failed`, `pending`, `error`;
 `settle()` resolves a pending payment; `failNextVerifications()` simulates a gateway outage). This suite confirms payments by hand.
-
-The complete lifecycle with the LIVE reconciliation worker, real HTTP and realtime (MAZAD-028):
-
-```bash
-MAZAD028_LOCAL_E2E=1 NODE_ENV=development DEPLOYMENT_ENV=local MONGO_URI='mongodb://127.0.0.1:<port>/mazad_phase13_<name>?replicaSet=<rs>' \
-npx jest test/mazad028-payment-e2e.spec.ts
-```

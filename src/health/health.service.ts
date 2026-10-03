@@ -1,21 +1,12 @@
-import { BeforeApplicationShutdown, Injectable, Logger, Optional } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
+import { BeforeApplicationShutdown, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
-import { RealtimeCutoverService } from '../realtime/realtime-cutover.service';
 
-/**
- * Auction realtime on THIS instance (informational; never affects `ready`):
- *  - `disabled`        — REALTIME_ENABLED is not true (every non-realtime replica, and local/dev by default);
- *  - `cutover_pending` — enabled, but the activation cutover is not known yet (subscriptions are refused, retryable);
- *  - `enabled`         — accepting subscriptions and consuming the outbox `realtime` stream.
- */
-export type RealtimeReadiness = 'enabled' | 'disabled' | 'cutover_pending';
 
 export type ReadinessResult = {
   ready: boolean;
-  checks: Record<string, 'up' | 'down' | 'draining' | RealtimeReadiness>;
+  checks: Record<string, 'up' | 'down' | 'draining'>;
 };
 
 const DEFAULT_PING_TIMEOUT_MS = 2_000;
@@ -43,7 +34,6 @@ export class HealthService implements BeforeApplicationShutdown {
   constructor(
     @InjectConnection() private readonly connection: Connection,
     private readonly config: ConfigService,
-    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
   get isShuttingDown(): boolean {
@@ -57,19 +47,7 @@ export class HealthService implements BeforeApplicationShutdown {
   async readiness(): Promise<ReadinessResult> {
     if (this.shuttingDown) return { ready: false, checks: { shutdown: 'draining' } };
     const mongo = await this.pingDatabase();
-    // A replica with realtime off is a normal, supported state: it is reported, never a reason to take traffic away.
-    return { ready: mongo, checks: { mongo: mongo ? 'up' : 'down', realtime: this.realtimeState() } };
-  }
-
-  /** Resolved from the app container (not imported as a module dependency), so HealthModule stays independent of realtime. */
-  realtimeState(): RealtimeReadiness {
-    if (String(this.config.get('REALTIME_ENABLED') ?? '').trim().toLowerCase() !== 'true') return 'disabled';
-    try {
-      const cutover = this.moduleRef?.get(RealtimeCutoverService, { strict: false });
-      return cutover?.ready === true ? 'enabled' : 'cutover_pending';
-    } catch {
-      return 'cutover_pending';
-    }
+    return { ready: mongo, checks: { mongo: mongo ? 'up' : 'down' } };
   }
 
   async beforeApplicationShutdown(signal?: string): Promise<void> {

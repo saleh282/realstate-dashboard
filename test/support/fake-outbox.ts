@@ -15,7 +15,7 @@ import { OutboxService } from '../../src/outbox/outbox.service';
  * and again at commit.
  *
  * Non-transactional side (find / findOne / findOneAndUpdate / updateOne on the
- * committed rows, with dotted paths such as `delivery.realtime.status`, `field: null`
+ * committed rows, with dotted paths such as `delivery.secondary.status`, `field: null`
  * matching an absent field, `$or`, `$in`, `$nin`, range operators, `$set`/`$unset`/`$inc`)
  * is what the dispatchers use. Every operation yields once
  * before it runs and then executes synchronously, so two dispatchers started
@@ -38,7 +38,7 @@ export const outboxDuplicateVersion = () =>
 
 const comparable = (value: any) => (value instanceof Date ? value.getTime() : value instanceof Types.ObjectId ? value.toString() : value);
 
-/** Dotted-path access, as MongoDB resolves `delivery.realtime.status` (absent intermediate objects read as undefined). */
+/** Dotted-path access, as MongoDB resolves `delivery.secondary.status` (absent intermediate objects read as undefined). */
 const getPath = (doc: any, path: string) => path.split('.').reduce((value, key) => (value === null || value === undefined ? undefined : value[key]), doc);
 function setPath(doc: any, path: string, value: any) {
   const keys = path.split('.');
@@ -133,7 +133,7 @@ export class FakeOutboxStore {
   createdIndexes: Array<{ spec: any; options: any }> = [];
   /** Test hook: how new event ids are minted (default: a fresh ObjectId stamped with the real clock). Lets a test give an event a hostile id. */
   idFactory?: () => Types.ObjectId;
-  /** Every `aggregate()` call (pipeline + options), for assertions about the one read the realtime cutover makes. */
+  /** Every `aggregate()` call (pipeline + options), for assertions about the one read the secondary cutover makes. */
   aggregates: Array<{ pipeline: any[]; options: any }> = [];
   /** Test hook: runs right AFTER an `aggregate()` result was taken — a commit here lands after the read but before whatever the caller does next. */
   afterAggregate?: () => Promise<void>;
@@ -189,7 +189,7 @@ export class FakeOutboxStore {
   /** Inserts a committed event directly. Delivery state is only present if the test passes `delivery`. */
   seed(row: Partial<any> & { aggregateType: string; aggregateId: string; aggregateVersion: number }): any {
     const doc = {
-      _id: new Types.ObjectId(), type: 'BID_ACCEPTED', schemaVersion: 1, occurredAt: new Date('2026-05-02T10:00:00Z'), audience: 'PUBLIC', payload: { n: row.aggregateVersion },
+      _id: new Types.ObjectId(), type: 'PROPERTY_APPROVED', schemaVersion: 1, occurredAt: new Date('2026-05-02T10:00:00Z'), audience: 'PUBLIC', payload: { n: row.aggregateVersion },
       createdAt: new Date('2026-05-02T10:00:00Z'), ...row,
     };
     this.rows.push(doc);
@@ -268,7 +268,7 @@ export class FakeOutboxStore {
           return { matchedCount: 1, modifiedCount: 1 };
         },
       }),
-      /** Committed rows only (an open transaction's inserts are buffered elsewhere), exactly what a majority read sees. Supports the stages the realtime cutover uses. */
+      /** Committed rows only (an open transaction's inserts are buffered elsewhere), exactly what a majority read sees. Supports the stages the secondary cutover uses. */
       aggregate: (pipeline: any[]) => {
         let options: any = {};
         const chain: any = {

@@ -5,16 +5,7 @@ import { EntryPaymentStatus, PaymentPurpose, PaymentReconciliationFlag } from '.
 
 export type ManagedMarketingPaymentDocument = HydratedDocument<ManagedMarketingPayment>;
 
-/**
- * One attempt to pay for a managed-marketing request (MAZAD-028). Deliberately
- * a SEPARATE collection from `auction_entry_payments`: different owner
- * reference (`requestId`, never an auction), different business effect
- * (request → PAID), and it can never create an auction entitlement.
- *
- * `amountMinor`/`currency` are copied from the request's immutable package
- * snapshot at initiation. Same attempt/`isLive` mechanics as the auction
- * payment: at most one live (INITIATED/SUCCEEDED) attempt per request.
- */
+/** Managed-marketing payment attempts retain the server-owned package price snapshot and payment history. */
 @Schema({ timestamps: true, collection: 'managed_marketing_payments', versionKey: false })
 export class ManagedMarketingPayment {
   @Prop({ type: String, enum: [PaymentPurpose.MANAGED_MARKETING], default: PaymentPurpose.MANAGED_MARKETING, required: true, immutable: true }) purpose: PaymentPurpose.MANAGED_MARKETING;

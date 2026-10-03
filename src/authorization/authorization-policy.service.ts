@@ -1,15 +1,6 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { SystemRole } from '../auth/roles.enum';
-import {
-  AccountStatus,
-  AccountType,
-  BrokerStatus,
-  resolveAccountStatus,
-  resolveAccountType,
-  resolveBrokerStatus,
-  resolveSystemRole,
-  resolveVerificationTrustState,
-} from '../users/identity.types';
+import { AccountStatus, AccountType, BrokerStatus, resolveAccountStatus, resolveAccountType, resolveBrokerStatus, resolveSystemRole, resolveVerificationTrustState } from '../users/identity.types';
 import { AuthorizationErrorCode } from './authorization-error-codes';
 import { AuthorizationIdentity, AuthorizationPrincipal } from './authorization.types';
 import { Capability } from './capability';
@@ -26,11 +17,6 @@ const ADMIN_CAPABILITIES = new Set<Capability>([
   Capability.ADMIN_BROKER_REVIEW,
   Capability.ADMIN_CATALOG_MANAGE,
   Capability.ADMIN_MANAGED_MARKETING_MANAGE,
-  Capability.ADMIN_AUCTION_READ,
-  Capability.ADMIN_AUCTION_FEE_MANAGE,
-  // MAZAD-035: ordinary auction moderation is ADMIN work (SUPER_ADMIN inherits it), never SUPER_ADMIN-only.
-  Capability.ADMIN_AUCTION_REVIEW,
-  Capability.ADMIN_AUCTION_CANCEL,
 ]);
 
 const MARKETPLACE_MUTATIONS = new Set<Capability>([
@@ -39,10 +25,6 @@ const MARKETPLACE_MUTATIONS = new Set<Capability>([
   Capability.MANAGED_MARKETING_REQUEST,
   Capability.BROKER_APPLICATION_SUBMIT,
   Capability.BROKER_INTEREST_MANAGE,
-  Capability.AUCTION_CREATE_OWN,
-  Capability.AUCTION_MANAGE_OWN,
-  Capability.BID_PLACE,
-  Capability.PAYMENT_ENTRY_INITIATE,
 ]);
 
 const MARKETPLACE_CAPABILITIES = new Set<Capability>([
@@ -56,11 +38,6 @@ const MARKETPLACE_CAPABILITIES = new Set<Capability>([
   Capability.BROKER_APPLICATION_READ_OWN,
   Capability.BROKER_APPLICATION_SUBMIT,
   Capability.BROKER_INTEREST_MANAGE,
-  Capability.AUCTION_CREATE_OWN,
-  Capability.AUCTION_READ_OWN,
-  Capability.AUCTION_MANAGE_OWN,
-  Capability.BID_PLACE,
-  Capability.PAYMENT_ENTRY_INITIATE,
 ]);
 
 @Injectable()
@@ -118,7 +95,6 @@ export class AuthorizationPolicyService {
       capability === Capability.KYC_SELF_READ ||
       capability === Capability.KYC_SELF_SUBMIT ||
       capability === Capability.PROPERTY_READ_OWN ||
-      capability === Capability.AUCTION_READ_OWN ||
       capability === Capability.BROKER_APPLICATION_READ_OWN ||
       capability === Capability.FAVORITE_MANAGE_OWN
     ) {
@@ -145,11 +121,7 @@ export class AuthorizationPolicyService {
     }
     if (
       capability === Capability.PROPERTY_CREATE ||
-      capability === Capability.PROPERTY_MANAGE_OWN ||
-      capability === Capability.AUCTION_CREATE_OWN ||
-      capability === Capability.AUCTION_MANAGE_OWN ||
-      capability === Capability.BID_PLACE ||
-      capability === Capability.PAYMENT_ENTRY_INITIATE
+      capability === Capability.PROPERTY_MANAGE_OWN
     ) {
       return principal.accountType !== AccountType.BROKER || principal.brokerStatus === BrokerStatus.APPROVED;
     }
@@ -206,13 +178,6 @@ export class AuthorizationPolicyService {
     const principal = this.principal(identity);
     if (principal.systemRole !== SystemRole.USER || principal.userId !== ownerAccountId) {
       throw this.denied('لا يمكنك الوصول إلى هذا المورد', AuthorizationErrorCode.RESOURCE_ACCESS_FORBIDDEN);
-    }
-  }
-
-  static assertBid(identity: AuthorizationIdentity, advertiserAccountId: string): void {
-    this.assert(identity, Capability.BID_PLACE);
-    if (this.principal(identity).userId === advertiserAccountId) {
-      throw this.denied('لا يمكن للحساب المعلن المزايدة على إعلانه', AuthorizationErrorCode.SELF_BID_FORBIDDEN);
     }
   }
 

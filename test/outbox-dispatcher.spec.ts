@@ -19,11 +19,11 @@ const A = '64b0000000000000000aa001';
 const B = '64b0000000000000000aa002';
 const C = '64b0000000000000000aa003';
 const sec = (n: number) => n * 1000;
-const NAME = 'realtime';
+const NAME = 'secondary';
 
 type Overrides = { deliver?: (event: any) => Promise<void>; configured?: boolean; config?: Record<string, string> };
 
-/** A consumer named `realtime` that subscribes to every event type (single-consumer behaviour; multi-consumer is in outbox-multi-consumer.spec.ts). */
+/** A consumer named `secondary` that subscribes to every event type (single-consumer behaviour; multi-consumer is in outbox-multi-consumer.spec.ts). */
 function makeConsumer(deliver: (event: any) => Promise<void>, seen: any[], configured = true, name = NAME): OutboxEventConsumer & { deliver: jest.Mock } {
   return {
     name, subscribedTypes: Object.values(OutboxEventType), configured,
@@ -62,15 +62,15 @@ const setDelivery = (event: any, fields: Record<string, unknown>, name = NAME) =
 /** Seeds versions 1..n of one aggregate, each due a millisecond after the previous one. */
 function seedAggregate(store: FakeOutboxStore, aggregateId: string, n: number, base = 0) {
   return Array.from({ length: n }, (_, i) => store.seed({
-    aggregateType: 'AUCTION', aggregateId, aggregateVersion: i + 1, type: 'BID_ACCEPTED',
+    aggregateType: 'PROPERTY', aggregateId, aggregateVersion: i + 1, type: 'PROPERTY_APPROVED',
     occurredAt: new Date(T0.getTime() + base + i),
-    payload: { auctionId: aggregateId, sequence: i + 1 }, privateRouting: { bidderAccountId: '64b000000000000000000a11' },
+    payload: { propertyId: aggregateId, sequence: i + 1 }, privateRouting: { advertiserAccountId: '64b000000000000000000a11' },
   }));
 }
 const row = (store: FakeOutboxStore, id: Types.ObjectId, name = NAME) => flat(store.rows.find((r) => r._id.equals(id))!, name);
 const IMMUTABLE = ['_id', 'type', 'schemaVersion', 'aggregateType', 'aggregateId', 'aggregateVersion', 'occurredAt', 'audience', 'payload', 'privateRouting', 'createdAt'];
 const pickImmutable = (r: any) => JSON.stringify(IMMUTABLE.map((k) => r[k]));
-/** A separate dispatcher instance (own instanceId) serving one consumer named `realtime` with its own handler over the SAME store. */
+/** A separate dispatcher instance (own instanceId) serving one consumer named `secondary` with its own handler over the SAME store. */
 function dispatcherWith(ctx: { store: FakeOutboxStore; clock: any }, deliver: (event: any) => Promise<void>, name = NAME): OutboxDispatcherService {
   const registry = new OutboxConsumerRegistry();
   registry.register({ name, subscribedTypes: Object.values(OutboxEventType), configured: true, deliver });
@@ -102,7 +102,7 @@ describe('no consumer yet: fail safe, never discard (MAZAD-031)', () => {
     (dispatcher as any).logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
     const rows = seedAggregate(store, A, 3);
     const findSpy = jest.spyOn(store.model, 'find');
-    await expect(dispatcher.dispatchConsumer('realtime')).resolves.toMatchObject({ skipped: 'UNKNOWN_CONSUMER', delivered: 0 });
+    await expect(dispatcher.dispatchConsumer('secondary')).resolves.toMatchObject({ skipped: 'UNKNOWN_CONSUMER', delivered: 0 });
     await expect(dispatcher.dispatchConsumer('notifications')).resolves.toMatchObject({ skipped: 'UNKNOWN_CONSUMER', delivered: 0 });
     expect(findSpy).not.toHaveBeenCalled(); // not even a scan
     expect(store.updates).toHaveLength(0);
@@ -110,7 +110,7 @@ describe('no consumer yet: fail safe, never discard (MAZAD-031)', () => {
     expect(store.rows).toHaveLength(3);
   });
 
-  it('the module ships an EMPTY registry and no consumer binding: no fake realtime or notification consumer exists', () => {
+  it('the module ships an EMPTY registry and no consumer binding: no fake secondary or notification consumer exists', () => {
     const providers: any[] = Reflect.getMetadata('providers', OutboxModule);
     expect(providers).toEqual(expect.arrayContaining([OutboxConsumerRegistry]));
     expect(providers.filter((p) => p?.provide)).toEqual([]); // no token bindings at all
@@ -137,14 +137,14 @@ describe('no consumer yet: fail safe, never discard (MAZAD-031)', () => {
 });
 
 describe('consumer registry (MAZAD-031)', () => {
-  const consumer = (over: Record<string, unknown> = {}) => ({ name: 'realtime', subscribedTypes: [OutboxEventType.BID_ACCEPTED], configured: true, deliver: async () => undefined, ...over }) as any;
+  const consumer = (over: Record<string, unknown> = {}) => ({ name: 'secondary', subscribedTypes: [OutboxEventType.PROPERTY_APPROVED], configured: true, deliver: async () => undefined, ...over }) as any;
 
   it('registers consumers under stable names and lists them in name order', () => {
     const registry = new OutboxConsumerRegistry();
-    registry.register(consumer({ name: 'realtime' }));
+    registry.register(consumer({ name: 'secondary' }));
     registry.register(consumer({ name: 'notifications' }));
-    expect(registry.list().map((c) => c.name)).toEqual(['notifications', 'realtime']);
-    expect(registry.get('realtime')).toBeDefined();
+    expect(registry.list().map((c) => c.name)).toEqual(['notifications', 'secondary']);
+    expect(registry.get('secondary')).toBeDefined();
     expect(registry.get('nope')).toBeUndefined();
   });
 
@@ -158,8 +158,8 @@ describe('consumer registry (MAZAD-031)', () => {
     registry.register(consumer());
     expect(() => registry.register(consumer())).toThrow(/already registered/);
     expect(() => new OutboxConsumerRegistry().register(consumer({ subscribedTypes: [] }))).toThrow(/at least one/);
-    expect(() => new OutboxConsumerRegistry().register(consumer({ subscribedTypes: ['AUCTION_EXPLODED'] }))).toThrow(/unknown event type/);
-    expect(() => new OutboxConsumerRegistry().register(consumer({ subscribedTypes: [OutboxEventType.BID_ACCEPTED, OutboxEventType.BID_ACCEPTED] }))).toThrow(/twice/);
+    expect(() => new OutboxConsumerRegistry().register(consumer({ subscribedTypes: ['PROPERTY_EXPLODED'] }))).toThrow(/unknown event type/);
+    expect(() => new OutboxConsumerRegistry().register(consumer({ subscribedTypes: [OutboxEventType.PROPERTY_APPROVED, OutboxEventType.PROPERTY_APPROVED] }))).toThrow(/twice/);
     expect(() => new OutboxConsumerRegistry().register(consumer({ deliver: undefined }))).toThrow(/no deliver/);
   });
 });
@@ -169,7 +169,7 @@ describe('batching and deterministic order (MAZAD-031)', () => {
     const { store, dispatcher, seen } = build();
     // Ten independent aggregates (ordering is per aggregate), due 1ms apart; the last two share a due time (tie → _id order).
     const ids = Array.from({ length: 10 }, () => new Types.ObjectId().toString());
-    ids.forEach((id, i) => store.seed({ aggregateType: 'AUCTION', aggregateId: id, aggregateVersion: 1, occurredAt: new Date(T0.getTime() + Math.min(i, 8)) }));
+    ids.forEach((id, i) => store.seed({ aggregateType: 'PROPERTY', aggregateId: id, aggregateVersion: 1, occurredAt: new Date(T0.getTime() + Math.min(i, 8)) }));
     const first = await dispatcher.dispatchConsumer(NAME, 3);
     expect(first.delivered).toBe(3);
     expect(seen.map((e) => e.aggregateId)).toEqual(ids.slice(0, 3));
@@ -195,7 +195,7 @@ describe('batching and deterministic order (MAZAD-031)', () => {
 
   it('does not touch a delivery whose retry is not due yet, and clamps the batch size configuration', async () => {
     const { store, dispatcher, seen, values } = build();
-    const waiting = store.seed({ aggregateType: 'AUCTION', aggregateId: A, aggregateVersion: 1 });
+    const waiting = store.seed({ aggregateType: 'PROPERTY', aggregateId: A, aggregateVersion: 1 });
     setDelivery(waiting, { status: OutboxStatus.PENDING, attemptCount: 1, nextAttemptAt: new Date(T0.getTime() + sec(3600)) }); // retry scheduled an hour out
     expect((await dispatcher.dispatchConsumer(NAME)).scanned).toBe(0);
     expect(seen).toHaveLength(0);
@@ -225,8 +225,8 @@ describe('acknowledgement (MAZAD-031)', () => {
     const [event] = seedAggregate(store, A, 1);
     await dispatcher.dispatchConsumer(NAME);
     expect(seen[0]).toEqual({
-      eventId: event._id.toString(), type: 'BID_ACCEPTED', schemaVersion: 1, aggregateType: 'AUCTION', aggregateId: A, aggregateVersion: 1,
-      occurredAt: event.occurredAt, audience: 'PUBLIC', payload: { auctionId: A, sequence: 1 }, privateRouting: { bidderAccountId: '64b000000000000000000a11' }, attempt: 1,
+      eventId: event._id.toString(), type: 'PROPERTY_APPROVED', schemaVersion: 1, aggregateType: 'PROPERTY', aggregateId: A, aggregateVersion: 1,
+      occurredAt: event.occurredAt, audience: 'PUBLIC', payload: { propertyId: A, sequence: 1 }, privateRouting: { advertiserAccountId: '64b000000000000000000a11' }, attempt: 1,
     });
     expect(Object.keys(seen[0])).not.toEqual(expect.arrayContaining(['leaseToken', 'claimedBy', 'status', 'nextAttemptAt']));
   });
@@ -349,7 +349,7 @@ describe('failure, backoff and dead-lettering (MAZAD-031)', () => {
     expect(logged).toContain('outbox_event_dead_lettered');
     expect(logged).toContain('CONSUMER_PERMANENT');
     expect(logged).not.toContain('secret detail');
-    expect(logged).not.toContain('bidderAccountId');
+    expect(logged).not.toContain('advertiserAccountId');
     expect(logged).not.toContain('sequence');
   });
 });
@@ -393,7 +393,7 @@ describe('claims, leases and abandoned work (MAZAD-031)', () => {
     const seenBy: Record<string, string[]> = { one: [], two: [] };
     const ctx = build();
     const ids = Array.from({ length: 12 }, () => new Types.ObjectId().toString());
-    ids.forEach((id, i) => ctx.store.seed({ aggregateType: 'AUCTION', aggregateId: id, aggregateVersion: 1, occurredAt: new Date(T0.getTime() + i) }));
+    ids.forEach((id, i) => ctx.store.seed({ aggregateType: 'PROPERTY', aggregateId: id, aggregateVersion: 1, occurredAt: new Date(T0.getTime() + i) }));
     const make = (name: string) => dispatcherWith(ctx, async (e) => { await ticks(3); seenBy[name].push(e.eventId); });
     const [one, two] = [make('one'), make('two')];
     expect(one.instanceId).not.toBe(two.instanceId);
@@ -654,27 +654,27 @@ describe('Nest wiring (MAZAD-031)', () => {
     const worker = moduleRef.get(OutboxDispatcherWorker);
     expect(worker.enabled).toBe(false); // NODE_ENV=test
     expect((worker as any).timer).toBeUndefined();
-    store.seed({ aggregateType: 'AUCTION', aggregateId: A, aggregateVersion: 1 });
+    store.seed({ aggregateType: 'PROPERTY', aggregateId: A, aggregateVersion: 1 });
     await expect(worker.runOnce()).resolves.toEqual({});
     expect(store.rows[0].delivery).toBeUndefined();
 
     // A future module (e.g. MAZAD-032) registers itself — no change to OutboxModule, producers or any other consumer.
     const received: string[] = [];
-    registry.register({ name: 'realtime', subscribedTypes: [OutboxEventType.BID_ACCEPTED], configured: true, deliver: async (e) => { received.push(e.eventId); } });
-    await expect(worker.runOnce()).resolves.toMatchObject({ realtime: { delivered: 1 } });
+    registry.register({ name: 'secondary', subscribedTypes: [OutboxEventType.PROPERTY_APPROVED], configured: true, deliver: async (e) => { received.push(e.eventId); } });
+    await expect(worker.runOnce()).resolves.toMatchObject({ secondary: { delivered: 1 } });
     expect(received).toEqual([store.rows[0]._id.toString()]);
     await app.close();
   });
 
   it('is imported by every module that produces events, and by the app', () => {
     const fs = require('node:fs'); const path = require('node:path');
-    for (const file of ['auctions/auctions.module.ts', 'payments/payments.module.ts', 'app.module.ts']) {
+    for (const file of ['payments/payments.module.ts', 'app.module.ts']) {
       expect(fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8')).toMatch(/OutboxModule/);
     }
   });
 });
 
-describe('OutboxWakeup — after-commit dispatch hint (realtime hardening)', () => {
+describe('OutboxWakeup — after-commit dispatch hint (secondary hardening)', () => {
   const { OutboxWakeup } = require('../src/outbox/outbox-wakeup');
   const quiet = () => ({ log: jest.fn(), warn: jest.fn(), error: jest.fn() });
   const started = (ctx: ReturnType<typeof build>, wakeup: any, values: Record<string, string> = { OUTBOX_DISPATCHER_ENABLED: 'true', OUTBOX_DISPATCHER_INTERVAL_SECONDS: '3600' }) => {
@@ -731,12 +731,12 @@ describe('OutboxWakeup — after-commit dispatch hint (realtime hardening)', () 
     await worker.onModuleDestroy();
   });
 
-  it('a burst of notifications keeps per-auction order and never duplicates a delivery', async () => {
+  it('a burst of notifications keeps per-property order and never duplicates a delivery', async () => {
     const ctx = build();
     const wakeup = new OutboxWakeup();
     const worker = started(ctx, wakeup);
     for (let v = 1; v <= 5; v++) {
-      ctx.store.seed({ aggregateType: 'AUCTION', aggregateId: A, aggregateVersion: v, type: 'BID_ACCEPTED', occurredAt: new Date(T0.getTime() + v), payload: { auctionId: A, sequence: v } });
+      ctx.store.seed({ aggregateType: 'PROPERTY', aggregateId: A, aggregateVersion: v, type: 'PROPERTY_APPROVED', occurredAt: new Date(T0.getTime() + v), payload: { propertyId: A, sequence: v } });
       wakeup.notify();
       await ticks(3);
     }

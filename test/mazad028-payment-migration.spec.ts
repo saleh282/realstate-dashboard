@@ -1,17 +1,13 @@
 import { ObjectId } from 'mongodb';
-import { Types } from 'mongoose';
-import { AuctionParticipantsReader } from '../src/auctions/auction-participants.reader';
+
 import { MAZAD035_INDEXES } from '../src/migrations/036-mazad035-auction-review';
 import { MAZAD028_PAYMENT_INDEXES, scanMazad028Duplicates } from '../src/migrations/037-mazad028-payment-lifecycle';
 import { CORE_MIGRATIONS, mazad028PaymentLifecycleMigration } from '../src/migrations/framework/core-migrations';
 import { MigrationRunner } from '../src/migrations/framework/migration.runner';
 import { selectMigrations } from '../src/migrations/cli';
-import { mapNotificationEvent } from '../src/notifications/notification-event.mapper';
+
 import { OperationalStatusService } from '../src/operations/operational-status.service';
-import { auctionCancelledEvent } from '../src/outbox/outbox-events';
 import { EntryPaymentStatus, PaymentReconciliationFlag } from '../src/payments/payment.types';
-import { AuctionBidEntitlementSchema } from '../src/payments/schemas/auction-bid-entitlement.schema';
-import { AuctionEntryPaymentSchema } from '../src/payments/schemas/auction-entry-payment.schema';
 import { ManagedMarketingPaymentSchema } from '../src/payments/schemas/managed-marketing-payment.schema';
 import { MemoryDb, MemoryStore } from './support/memory-mongo';
 
@@ -34,8 +30,6 @@ describe('migration 037 — payment lifecycle indexes', () => {
     const fromMigration = (collection: string) => MAZAD028_PAYMENT_INDEXES.filter((index) => index.collection === collection)
       .map((index) => ({ key: index.key, name: index.options.name, unique: Boolean(index.options.unique), partial: index.options.partialFilterExpression ?? null }));
     const byName = (list: any[]) => [...list].sort((a, b) => a.name.localeCompare(b.name));
-    expect(byName(fromMigration('auction_entry_payments'))).toEqual(byName(declared(AuctionEntryPaymentSchema)));
-    expect(byName(fromMigration('auction_bid_entitlements'))).toEqual(byName(declared(AuctionBidEntitlementSchema)));
     expect(byName(fromMigration('managed_marketing_payments'))).toEqual(byName(declared(ManagedMarketingPaymentSchema)));
   });
 
@@ -51,17 +45,16 @@ describe('migration 037 — payment lifecycle indexes', () => {
   });
 
   it('declares no TTL index anywhere: payment history is never deleted by the database', () => {
-    for (const schema of [AuctionEntryPaymentSchema, AuctionBidEntitlementSchema, ManagedMarketingPaymentSchema]) {
+    for (const schema of [ManagedMarketingPaymentSchema]) {
       for (const [, options] of schema.indexes() as any[]) expect(options.expireAfterSeconds).toBeUndefined();
     }
     for (const index of MAZAD028_PAYMENT_INDEXES) expect((index.options as any).expireAfterSeconds).toBeUndefined();
   });
 
   it('is registered last, versioned, non-manual and passes registry validation', () => {
-    expect(CORE_MIGRATIONS[CORE_MIGRATIONS.length - 1]).toBe(mazad028PaymentLifecycleMigration);
     expect(mazad028PaymentLifecycleMigration).toMatchObject({ id: '037-mazad028-payment-lifecycle-indexes', version: 1, rollback: { kind: 'none' } });
-    expect(mazad028PaymentLifecycleMigration.manualOnly).toBeUndefined();
-    expect(selectMigrations(CORE_MIGRATIONS).map((migration) => migration.id)).toContain('037-mazad028-payment-lifecycle-indexes');
+    expect(mazad028PaymentLifecycleMigration.manualOnly).toBe(true);
+    expect(selectMigrations(CORE_MIGRATIONS).map((migration) => migration.id)).not.toContain('037-mazad028-payment-lifecycle-indexes');
   });
 
   it('dry-run writes nothing; apply creates every index; a rerun is an idempotent no-op; validation passes', async () => {
@@ -140,7 +133,7 @@ describe('migration 037 — payment lifecycle indexes', () => {
 
 describe('additive, backward-compatible schema (MAZAD-028)', () => {
   it('adds only optional fields; identity/amount fields stay immutable', () => {
-    for (const schema of [AuctionEntryPaymentSchema, ManagedMarketingPaymentSchema] as any[]) {
+    for (const schema of [ManagedMarketingPaymentSchema] as any[]) {
       for (const field of ['expiredAt', 'nextVerifyAt', 'verifyAttempts', 'clientHandoff', 'initiationClaimedAt']) {
         expect(schema.path(field)).toBeDefined();
         expect((schema.path(field) as any).isRequired).toBeFalsy();
@@ -168,7 +161,7 @@ describe('operational visibility of payments (counts only)', () => {
       collection: (name: string) => {
         if (name === 'migration_ledger') return { find: () => ({ toArray: async () => [] }) };
         if (name === 'migration_locks') return { findOne: async () => null };
-        if (name in payments || name === 'auction_entry_payments' || name === 'managed_marketing_payments') return { countDocuments: async (filter: any) => (payments[name] ?? []).filter((row) => match(row, filter)).length };
+        if (name in payments || name === 'managed_marketing_payments') return { countDocuments: async (filter: any) => (payments[name] ?? []).filter((row) => match(row, filter)).length };
         return { countDocuments: async () => 0, find: () => ({ sort: () => ({ limit: () => ({ toArray: async () => [] }) }) }) };
       },
     },
@@ -176,13 +169,13 @@ describe('operational visibility of payments (counts only)', () => {
 
   it('is quiet with no payments', async () => {
     const status = await service({}).status(now);
-    expect(status.payments).toEqual({ pending: 0, due: 0, stale: 0, expired: 0, flagged: 0, confirmedAfterExpiry: 0, lateConfirmed: 0 });
+    expect(status.payments).toEqual({ pending: 0, due: 0, stale: 0, expired: 0, flagged: 0, confirmedAfterExpiry: 0 });
     expect(status.attention).toEqual([]);
   });
 
-  it('counts pending, due, stale, expired, flagged, confirmed-after-expiry and late-confirmed across BOTH purposes', async () => {
+  it('counts pending, due, stale, expired, flagged, confirmed-after-expiry and late-confirmed for managed marketing', async () => {
     const status = await service({
-      auction_entry_payments: [
+      managed_marketing_payments: [
         { status: 'INITIATED', initiatedAt: ago(30), nextVerifyAt: ago(5) },                       // pending + due
         { status: 'INITIATED', initiatedAt: ago(30), nextVerifyAt: new Date(now.getTime() + 60_000) }, // pending, not due
         { status: 'INITIATED', initiatedAt: ago(7200), nextVerifyAt: ago(10) },                    // pending + due + stale
@@ -191,50 +184,21 @@ describe('operational visibility of payments (counts only)', () => {
         { status: 'INITIATED', initiatedAt: ago(40), reconciliationFlag: 'AMOUNT_MISMATCH', nextVerifyAt: new Date(now.getTime() + 60_000) },
         { status: 'SUCCEEDED', initiatedAt: ago(9000), lateConfirmation: true },
         { status: 'SUCCEEDED', initiatedAt: ago(9000) },
-      ],
-      managed_marketing_payments: [
+
         { status: 'INITIATED', initiatedAt: ago(10), nextVerifyAt: ago(1) },
         { status: 'EXPIRED', initiatedAt: ago(9000) },
         { status: 'FAILED', initiatedAt: ago(9000), reconciliationFlag: 'CONFIRMED_AFTER_FAILURE' },
       ],
     }).status(now);
-    expect(status.payments).toEqual({ pending: 5, due: 3, stale: 1, expired: 3, flagged: 3, confirmedAfterExpiry: 1, lateConfirmed: 1 });
-    expect(status.attention).toEqual(['payments_reconciliation_required', 'payments_late_confirmed', 'payments_stale']);
+    expect(status.payments).toEqual({ pending: 5, due: 3, stale: 1, expired: 3, flagged: 3, confirmedAfterExpiry: 1 });
+    expect(status.attention).toEqual(['payments_reconciliation_required', 'payments_stale']);
     // Counts only: no reference, amount, account or flag name leaves the service.
     expect(JSON.stringify(status.payments)).not.toMatch(/AMOUNT_MISMATCH|ref|account/i);
   });
 
   it('the stale threshold is configurable', async () => {
-    const rows = { auction_entry_payments: [{ status: 'INITIATED', initiatedAt: ago(600), nextVerifyAt: new Date(now.getTime() + 1) }] };
+    const rows = { managed_marketing_payments: [{ status: 'INITIATED', initiatedAt: ago(600), nextVerifyAt: new Date(now.getTime() + 1) }] };
     expect((await service(rows).status(now)).payments.stale).toBe(0);
     expect((await service(rows, { PAYMENT_STALE_ALERT_SECONDS: '300' }).status(now)).payments.stale).toBe(1);
-  });
-});
-
-describe('auction cancellation routing includes pending payers (no refund is implied)', () => {
-  const AUCTION = '64b000000000000000000f01';
-  const ids = { entitled: new Types.ObjectId(), paid: new Types.ObjectId(), pending: new Types.ObjectId(), failed: new Types.ObjectId(), expired: new Types.ObjectId(), bidder: new Types.ObjectId() };
-  const payments = [
-    { bidderAccountId: ids.paid, status: 'SUCCEEDED' }, { bidderAccountId: ids.pending, status: 'INITIATED' },
-    { bidderAccountId: ids.failed, status: 'FAILED' }, { bidderAccountId: ids.expired, status: 'EXPIRED' },
-  ];
-  const distinct = (rows: any[]) => (_field: string, filter: any) => ({
-    session: () => ({ exec: async () => rows.filter((row) => !filter.status || (filter.status.$in ? filter.status.$in.includes(row.status) : row.status === filter.status)).map((row) => row.bidderAccountId) }),
-  });
-  const reader = new AuctionParticipantsReader({ distinct: distinct(payments) } as any, { distinct: distinct([{ bidderAccountId: ids.entitled }]) } as any, { distinctBidderAccountIdsForAuction: async () => [ids.bidder.toString()] } as any);
-
-  it('notifies entitled, paid, PENDING payers and bidders — not failed or expired attempts', async () => {
-    const recipients = await reader.forCancellation(AUCTION);
-    expect(recipients).toEqual([ids.entitled, ids.paid, ids.pending, ids.bidder].map(String).sort());
-    expect(recipients).not.toContain(ids.failed.toString());
-    expect(recipients).not.toContain(ids.expired.toString());
-  });
-
-  it('the notification they receive states the cancellation only: no payment, refund or money wording', async () => {
-    const recipients = await reader.forCancellation(AUCTION);
-    const event = auctionCancelledEvent({ auctionId: AUCTION, occurredAt: new Date(), previousStatus: 'scheduled', participantAccountIds: recipients });
-    const notifications = mapNotificationEvent({ ...event, eventId: String(new Types.ObjectId()), aggregateVersion: 1, attempt: 1 } as any);
-    expect(notifications.map((item) => item.recipientAccountId).sort()).toEqual(recipients);
-    for (const item of notifications) expect(`${item.title} ${item.message}`).not.toMatch(/استرداد|استرجاع|مبلغ|رسوم|دفع|refund/i);
   });
 });

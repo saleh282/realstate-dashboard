@@ -99,6 +99,7 @@ describe('MAZAD-017 authentication state integration', () => {
     await expect(fixture.service.register({
       fullName: 'Replacement Account',
       identifier: ' PERSON@EXAMPLE.COM ',
+      phone: '+201012345678',
       password: 'Password123!',
       confirmPassword: 'Password123!',
     })).rejects.toMatchObject({ status: 409 });

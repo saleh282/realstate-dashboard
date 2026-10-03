@@ -1,5 +1,4 @@
 import { Types } from 'mongoose';
-import { AuctionStatus } from '../../src/auctions/auction.types';
 import { SystemRole } from '../../src/auth/roles.enum';
 import { AccountStatus, AccountType, BrokerStatus } from '../../src/users/identity.types';
 import { FakeOutboxStore } from './fake-outbox';
@@ -11,8 +10,6 @@ import { FakeOutboxStore } from './fake-outbox';
  * MongoDB — real-Mongo qualification is still required.
  */
 const oid = (hex: string) => new Types.ObjectId(hex);
-const AUCTION = '64b000000000000000000f01';
-const ADVERTISER = '64b000000000000000000a10';
 const ADMIN_UNUSED = '';
 void ADMIN_UNUSED;
 
@@ -22,39 +19,26 @@ export const dupKey = (index: string) => Object.assign(new Error(`E11000 duplica
 
 export type Rec = { doc: any; version: number };
 type Txn = { id: number; active: boolean; snap: Record<string, Map<string, Rec>>; writes: Record<string, Map<string, any>>; inserts: Record<string, any[]>; audits: any[] };
-const COLLS = ['auctions', 'users', 'payments', 'entitlements', 'requests', 'mmPayments'] as const;
+const COLLS = ['users', 'requests', 'mmPayments'] as const;
 
 export class FakeMongo {
-  data: Record<string, Map<string, Rec>> = { auctions: new Map(), users: new Map(), payments: new Map(), entitlements: new Map(), requests: new Map(), mmPayments: new Map() };
+  data: Record<string, Map<string, Rec>> = { users: new Map(), requests: new Map(), mmPayments: new Map() };
   audits: any[] = [];
   locks = new Map<string, number>();
   nextTxn = 1;
-  sessionsSeenByPort: any[] = [];
-  auctionWrites = 0;
   clockNow = new Date('2026-05-02T10:00:00Z');
   /** MAZAD-031: the outbox collection model. Its rows follow every session's commit/abort (see `FakeOutboxStore`). */
   outbox = new FakeOutboxStore();
-
-  seedAuction(overrides: Record<string, unknown> = {}) {
-    const doc = { _id: oid(AUCTION), advertiserAccountId: oid(ADVERTISER), status: AuctionStatus.SCHEDULED, ...overrides };
-    this.data.auctions.set(doc._id.toString(), { doc, version: 1 });
-    return doc;
-  }
   seedUser(id: string, o: Record<string, unknown> = {}) {
     this.data.users.set(id, { doc: { _id: oid(id), systemRole: SystemRole.USER, accountType: AccountType.USER, accountStatus: AccountStatus.ACTIVE, brokerStatus: BrokerStatus.NOT_APPLIED, ...o }, version: 1 });
   }
   rows(name: string) { return [...this.data[name].values()].map((r) => r.doc); }
-  auction(id = AUCTION) { return this.data.auctions.get(id)!.doc; }
 
   private release(t: Txn) { for (const [k, v] of this.locks) if (v === t.id) this.locks.delete(k); }
   private uniqueViolation(name: string, row: any, others: any[]) {
     const same = (a: any, b: any, keys: string[]) => keys.every((k) => String(a[k]) === String(b[k]));
-    if (name === 'entitlements') {
-      if (others.some((o) => same(o, row, ['auctionId', 'bidderAccountId']))) return 'entitlement_auction_bidder';
-      if (others.some((o) => same(o, row, ['paymentId']))) return 'entitlement_payment';
-    }
+
     if (name === 'mmPayments' && row.isLive && others.some((o) => o.isLive && same(o, row, ['requestId']))) return 'mm_payment_one_live_per_request';
-    if (name === 'payments' && row.isLive && others.some((o) => o.isLive && same(o, row, ['auctionId', 'bidderAccountId']))) return 'entry_payment_one_live_per_bidder_auction';
     return undefined;
   }
 
@@ -126,7 +110,6 @@ export class FakeMongo {
   }
   private write(c: string, filter: any, update: any, txn: Txn | undefined, sort?: Record<string, 1 | -1>) {
     const ordered = (rows: any[]) => (sort ? [...rows].sort((a, b) => { for (const [k, d] of Object.entries(sort)) { const x = a[k] instanceof Date ? a[k].getTime() : a[k]; const y = b[k] instanceof Date ? b[k].getTime() : b[k]; if (x < y) return -d; if (x > y) return d; } return 0; }) : rows);
-    if (c === 'auctions') this.auctionWrites++;
     if (txn) {
       const current = ordered(this.view(c, txn)).find((d) => this.match(d, filter));
       if (!current) return null;
@@ -149,7 +132,7 @@ export class FakeMongo {
       let txn: Txn | undefined;
       let sortSpec: Record<string, 1 | -1> | undefined;
       const chain: any = {
-        session: (s: any) => { txn = s?.txn; if (c === 'entitlements') this.sessionsSeenByPort.push(s); return chain; }, lean: () => chain, select: () => chain,
+        session: (s: any) => { txn = s?.txn; return chain; }, lean: () => chain, select: () => chain,
         sort: (spec: Record<string, 1 | -1>) => { sortSpec = spec; return chain; },
         exec: async () => {
           await tick();

@@ -26,21 +26,9 @@ describe('HealthService', () => {
     jest.restoreAllMocks();
   });
 
-  it('reports auction realtime for information only: disabled / cutover_pending / enabled, never flipping readiness', async () => {
-    await expect(new HealthService(connection(), config()).readiness()).resolves.toEqual({ ready: true, checks: { mongo: 'up', realtime: 'disabled' } });
-    await expect(new HealthService(connection(), config({ REALTIME_ENABLED: 'false' })).readiness()).resolves.toMatchObject({ ready: true, checks: { realtime: 'disabled' } });
-    const { RealtimeCutoverService } = require('../src/realtime/realtime-cutover.service');
-    const refWith = (ready: boolean) => ({ get: (token: unknown) => { expect(token).toBe(RealtimeCutoverService); return { ready }; } }) as any;
-    await expect(new HealthService(connection(), config({ REALTIME_ENABLED: 'true' }), refWith(false)).readiness()).resolves.toEqual({ ready: true, checks: { mongo: 'up', realtime: 'cutover_pending' } });
-    await expect(new HealthService(connection(), config({ REALTIME_ENABLED: 'true' }), refWith(true)).readiness()).resolves.toEqual({ ready: true, checks: { mongo: 'up', realtime: 'enabled' } });
-    const missing = { get: () => { throw new Error('not found'); } } as any;
-    await expect(new HealthService(connection(), config({ REALTIME_ENABLED: 'true' }), missing).readiness()).resolves.toMatchObject({ ready: true, checks: { realtime: 'cutover_pending' } });
-    await expect(new HealthService(connection({ readyState: 0 }), config({ REALTIME_ENABLED: 'true' }), refWith(true)).readiness()).resolves.toMatchObject({ ready: false, checks: { mongo: 'down', realtime: 'enabled' } });
-  });
-
   it('is ready only while the database answers a ping', async () => {
-    await expect(new HealthService(connection(), config()).readiness()).resolves.toEqual({ ready: true, checks: { mongo: 'up', realtime: 'disabled' } });
-    await expect(new HealthService(connection({ readyState: 0 }), config()).readiness()).resolves.toEqual({ ready: false, checks: { mongo: 'down', realtime: 'disabled' } });
+    await expect(new HealthService(connection(), config()).readiness()).resolves.toEqual({ ready: true, checks: { mongo: 'up' } });
+    await expect(new HealthService(connection({ readyState: 0 }), config()).readiness()).resolves.toEqual({ ready: false, checks: { mongo: 'down' } });
     const failing = connection({ db: { admin: () => ({ ping: jest.fn().mockRejectedValue(new Error('down')) }) } });
     await expect(new HealthService(failing, config()).readiness()).resolves.toMatchObject({ ready: false });
   });
@@ -50,7 +38,7 @@ describe('HealthService', () => {
     const hung = connection({ db: { admin: () => ({ ping: () => new Promise(() => undefined) }) } });
     const pending = new HealthService(hung, config()).readiness();
     await jest.advanceTimersByTimeAsync(2_500);
-    await expect(pending).resolves.toEqual({ ready: false, checks: { mongo: 'down', realtime: 'disabled' } });
+    await expect(pending).resolves.toEqual({ ready: false, checks: { mongo: 'down' } });
   });
 
   it('reports liveness without touching any dependency', () => {
@@ -125,7 +113,10 @@ describe('health endpoints over HTTP', () => {
     app = nest;
     health = moduleRef.get(HealthService);
   });
-  afterAll(async () => app.close());
+  afterAll(async () => {
+    jest.spyOn(health, 'beforeApplicationShutdown').mockResolvedValue(undefined);
+    await app.close();
+  });
 
   it('serves liveness and readiness outside the API prefix and never rate-limits probes', async () => {
     for (let index = 0; index < 6; index++) {
@@ -133,7 +124,7 @@ describe('health endpoints over HTTP', () => {
       await request(app.getHttpServer()).get('/health/ready').expect(200);
     }
     const res = await request(app.getHttpServer()).get('/health/ready').expect(200);
-    expect(res.body.data).toEqual({ status: 'ready', checks: { mongo: 'up', realtime: 'disabled' } });
+    expect(res.body.data).toEqual({ status: 'ready', checks: { mongo: 'up' } });
     await request(app.getHttpServer()).get('/api/v1/health/live').expect(404);
   });
 
@@ -148,7 +139,10 @@ describe('health endpoints over HTTP', () => {
     await request(app.getHttpServer()).get('/health/live').expect(200);
     db.readyState = 1;
 
+    jest.useFakeTimers();
     await health.beforeApplicationShutdown('SIGTERM');
+    jest.clearAllTimers();
+    jest.useRealTimers();
     const draining = await request(app.getHttpServer()).get('/health/ready').expect(503);
     expect(draining.body.details).toEqual({ shutdown: 'draining' });
     await request(app.getHttpServer()).get('/health/live').expect(200);

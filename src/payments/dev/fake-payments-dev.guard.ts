@@ -1,7 +1,7 @@
 import { CanActivate, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { assertActionAllowed, isProtectedProcess, requireDeploymentEnv } from '../../config/deployment-environment';
-import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from '../auction-payment-provider.port';
+import { PAYMENT_PROVIDER_PORT, PaymentProviderPort } from '../payment-provider.port';
 import { FakePaymentProvider } from '../fake-payment-provider';
 
 /**
@@ -22,7 +22,7 @@ import { FakePaymentProvider } from '../fake-payment-provider';
 export class FakePaymentsDevGuard implements CanActivate {
   constructor(
     private readonly config: ConfigService,
-    @Inject(AUCTION_PAYMENT_PROVIDER_PORT) private readonly provider: AuctionPaymentProviderPort,
+    @Inject(PAYMENT_PROVIDER_PORT) private readonly provider: PaymentProviderPort,
   ) {}
 
   canActivate(): boolean {
@@ -33,7 +33,7 @@ export class FakePaymentsDevGuard implements CanActivate {
   }
 }
 
-export function fakePaymentsDevRoutesAllowed(provider: AuctionPaymentProviderPort, env: Record<string, unknown>): boolean {
+export function fakePaymentsDevRoutesAllowed(provider: PaymentProviderPort, env: Record<string, unknown>): boolean {
   if (!(provider instanceof FakePaymentProvider)) return false;
   if (isProtectedProcess(env)) return false;
   try {

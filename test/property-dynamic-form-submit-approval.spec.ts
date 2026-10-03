@@ -419,9 +419,6 @@ describe('DPF-023 read compatibility after approval', () => {
     await submit(ctx, secondIds);
     await review(ctx, secondIds, 'approved');
 
-    const anchored = await ctx.service.getAnchoredPublicProjections([{ propertyId: first.propertyId, revisionId: first.revisionId }], { specifications: true });
-    const specs = anchored.get(`${first.propertyId}:${first.revisionId}`).specifications;
-    expect(specs.items.find((item: any) => item.key === 'bedrooms').value).toBe(3);
     const published = await ctx.service.getPublished(first.propertyId);
     expect(published.property.specifications.items.find((item: any) => item.key === 'bedrooms').value).toBe(4);
     expect(ctx.world.property(first.propertyId).facets).toEqual({ bedrooms: 4 });

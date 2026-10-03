@@ -4,11 +4,11 @@ import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import { operationalMetrics } from '../common/observability/operational-metrics';
 import { resolveDeploymentEnv } from '../config/deployment-environment';
-import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from '../payments/auction-payment-provider.port';
+import { PAYMENT_PROVIDER_PORT, PaymentProviderPort } from '../payments/payment-provider.port';
 
 const DEFAULT_CLEANUP_ALERT_AGE_SECONDS = 3600;
 const DEFAULT_PAYMENT_STALE_ALERT_SECONDS = 3600;
-const PAYMENT_COLLECTIONS = ['auction_entry_payments', 'managed_marketing_payments'] as const;
+const PAYMENT_COLLECTIONS = ['managed_marketing_payments'] as const;
 
 export type PaymentOperationalCounts = {
   /** INITIATED attempts (awaiting the provider). */
@@ -22,11 +22,9 @@ export type PaymentOperationalCounts = {
   flagged: number;
   /** Of those: the provider reported success after the attempt had expired locally. */
   confirmedAfterExpiry: number;
-  /** Auction-entry payments confirmed after their auction could no longer be bid on. */
-  lateConfirmed: number;
 };
 
-const NO_PAYMENTS: PaymentOperationalCounts = { pending: 0, due: 0, stale: 0, expired: 0, flagged: 0, confirmedAfterExpiry: 0, lateConfirmed: 0 };
+const NO_PAYMENTS: PaymentOperationalCounts = { pending: 0, due: 0, stale: 0, expired: 0, flagged: 0, confirmedAfterExpiry: 0 };
 
 export type OperationalStatus = {
   deploymentEnv: string | null;
@@ -35,11 +33,9 @@ export type OperationalStatus = {
   database: 'up' | 'down';
   migrations: { failed: string[]; running: string[]; lockHeld: boolean; complete: number };
   evidenceCleanup: { pending: number; oldestPendingAgeSeconds: number | null };
-  /** MAZAD-035: SCHEDULED auctions the activation gate refused to start (an Admin must decide, e.g. cancel). */
-  auctions: { activationHeld: number };
   /**
-   * MAZAD-028: payment attempts of BOTH purposes (counts only; no references, amounts or accounts).
-   * `flagged` / `confirmedAfterExpiry` / `lateConfirmed` need an operator's manual review — no automatic refund exists.
+   * MAZAD-028: managed-marketing payment attempts (counts only; no references, amounts or accounts).
+   * `flagged` / `confirmedAfterExpiry` need an operator's manual review — no automatic refund exists.
    */
   payments: PaymentOperationalCounts;
   counters: Record<string, number>;
@@ -59,7 +55,7 @@ export class OperationalStatusService {
   constructor(
     @InjectConnection() private readonly connection: Connection,
     private readonly config: ConfigService,
-    @Inject(AUCTION_PAYMENT_PROVIDER_PORT) private readonly provider: AuctionPaymentProviderPort,
+    @Inject(PAYMENT_PROVIDER_PORT) private readonly provider: PaymentProviderPort,
   ) {}
 
   async status(now = new Date()): Promise<OperationalStatus> {
@@ -72,12 +68,11 @@ export class OperationalStatusService {
       payment: { provider: this.provider.providerKey, configured: this.provider.configured },
       counters: operationalMetrics.snapshot(),
     };
-    if (!db) return { ...base, database: 'down', migrations: { failed: [], running: [], lockHeld: false, complete: 0 }, evidenceCleanup: { pending: 0, oldestPendingAgeSeconds: null }, auctions: { activationHeld: 0 }, payments: { ...NO_PAYMENTS }, attention: ['database'] };
+    if (!db) return { ...base, database: 'down', migrations: { failed: [], running: [], lockHeld: false, complete: 0 }, evidenceCleanup: { pending: 0, oldestPendingAgeSeconds: null }, payments: { ...NO_PAYMENTS }, attention: ['database'] };
 
     let database: 'up' | 'down' = 'up';
     let migrations: OperationalStatus['migrations'] = { failed: [], running: [], lockHeld: false, complete: 0 };
     let evidenceCleanup: OperationalStatus['evidenceCleanup'] = { pending: 0, oldestPendingAgeSeconds: null };
-    let auctions: OperationalStatus['auctions'] = { activationHeld: 0 };
     let payments: PaymentOperationalCounts = { ...NO_PAYMENTS };
     try {
       const ledger = await db.collection('migration_ledger').find({}, { projection: { migrationId: 1, status: 1 } }).toArray();
@@ -94,8 +89,6 @@ export class OperationalStatusService {
         cleanup.find({ status: 'pending' }, { projection: { createdAt: 1 } }).sort({ createdAt: 1 }).limit(1).toArray(),
       ]);
       evidenceCleanup = { pending, oldestPendingAgeSeconds: oldest[0]?.createdAt ? Math.max(0, Math.floor((now.getTime() - new Date(oldest[0].createdAt).getTime()) / 1000)) : null };
-      // Served by the (status, scheduledStartAt) index; held auctions are few by construction.
-      auctions = { activationHeld: await db.collection('auctions').countDocuments({ status: 'scheduled', activationHold: { $exists: true } }) };
       payments = await this.paymentCounts(db, now);
     } catch {
       database = 'down';
@@ -107,32 +100,28 @@ export class OperationalStatusService {
     if (migrations.running.length && !migrations.lockHeld) attention.push('migrations_interrupted');
     if (evidenceCleanup.oldestPendingAgeSeconds !== null && evidenceCleanup.oldestPendingAgeSeconds > alertAge) attention.push('evidence_cleanup_stalled');
     if ((base.counters.outbox_dead_lettered ?? 0) > 0) attention.push('outbox_dead_lettered');
-    if ((base.counters.auction_anchor_unresolved ?? 0) > 0) attention.push('auction_anchor_unresolved');
-    if (auctions.activationHeld > 0) attention.push('auction_activation_held');
     if (payments.flagged > 0) attention.push('payments_reconciliation_required');
-    if (payments.lateConfirmed > 0) attention.push('payments_late_confirmed');
     if (payments.stale > 0) attention.push('payments_stale');
-    return { ...base, database, migrations, evidenceCleanup, auctions, payments, attention };
+    return { ...base, database, migrations, evidenceCleanup, payments, attention };
   }
 
-  /** Indexed counts only: (status, nextVerifyAt), (status, initiatedAt) and the partial flag / late-confirmation indexes. */
+  /** Indexed counts only: (status, nextVerifyAt), (status, initiatedAt) and the partial flag indexes. */
   private async paymentCounts(db: NonNullable<Connection['db']>, now: Date): Promise<PaymentOperationalCounts> {
     const staleSeconds = Number(this.config.get('PAYMENT_STALE_ALERT_SECONDS')) || DEFAULT_PAYMENT_STALE_ALERT_SECONDS;
     const staleBefore = new Date(now.getTime() - staleSeconds * 1000);
     const totals = { ...NO_PAYMENTS };
     for (const name of PAYMENT_COLLECTIONS) {
       const collection = db.collection(name);
-      const [pending, due, stale, expired, flagged, confirmedAfterExpiry, lateConfirmed] = await Promise.all([
+      const [pending, due, stale, expired, flagged, confirmedAfterExpiry] = await Promise.all([
         collection.countDocuments({ status: 'INITIATED' }),
         collection.countDocuments({ status: 'INITIATED', nextVerifyAt: { $lte: now } }),
         collection.countDocuments({ status: 'INITIATED', initiatedAt: { $lte: staleBefore } }),
         collection.countDocuments({ status: 'EXPIRED' }),
         collection.countDocuments({ reconciliationFlag: { $exists: true } }),
         collection.countDocuments({ reconciliationFlag: 'CONFIRMED_AFTER_EXPIRY' }),
-        collection.countDocuments({ lateConfirmation: true }),
       ]);
       totals.pending += pending; totals.due += due; totals.stale += stale; totals.expired += expired;
-      totals.flagged += flagged; totals.confirmedAfterExpiry += confirmedAfterExpiry; totals.lateConfirmed += lateConfirmed;
+      totals.flagged += flagged; totals.confirmedAfterExpiry += confirmedAfterExpiry;
     }
     return totals;
   }

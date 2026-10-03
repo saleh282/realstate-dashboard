@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 /**
- * In-process "an outbox event was just COMMITTED" hint (realtime hardening).
+ * In-process "an outbox event was just COMMITTED" hint .
  *
  * A pure latency optimisation on top of the MAZAD-031 outbox, never a delivery
  * mechanism: the event carries nothing and correctness never depends on it.
@@ -13,9 +13,9 @@ import { Injectable, Logger } from '@nestjs/common';
  *    pass is not left for the next periodic tick.
  *  - A lost, duplicated or unheard notification changes nothing about WHAT is delivered:
  *    the periodic tick still finds every owed event, and the lease-protected claim still
- *    decides who delivers it (no duplicate socket frame, same per-auction order).
+ *    decides who delivers it (no duplicate delivery, same per-aggregate order).
  *  - In-process only. A commit on another replica is picked up by the periodic tick of
- *    the realtime instance (see docs/MAZAD-032, "Latency").
+ *    the consumer instance.
  */
 @Injectable()
 export class OutboxWakeup {

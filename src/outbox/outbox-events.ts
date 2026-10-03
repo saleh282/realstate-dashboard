@@ -1,4 +1,3 @@
-import { AuctionStatus } from '../auctions/auction.types';
 import { ManagedMarketingRequestStatus } from '../managed-marketing/managed-marketing.types';
 import { OUTBOX_MAX_PAYLOAD_BYTES } from './outbox.constants';
 
@@ -8,9 +7,7 @@ import { OUTBOX_MAX_PAYLOAD_BYTES } from './outbox.constants';
  *
  * NAMING. `SCREAMING_SNAKE_CASE`, `<SUBJECT>_<PAST_TENSE_FACT>`, stable
  * forever: consumers switch on the name. A name is never re-used for a
- * different fact. Purposes stay isolated: an auction-entry payment and a
- * managed-marketing payment are DIFFERENT events with different aggregates —
- * there is deliberately no generic "PAYMENT_CONFIRMED".
+ * different fact. Managed-marketing payment confirmations belong to the request aggregate.
  *
  * VERSIONING. Every event type has an integer `schemaVersion` (all 1 today),
  * stored on the row. Adding an optional payload field does not bump it;
@@ -21,7 +18,7 @@ import { OUTBOX_MAX_PAYLOAD_BYTES } from './outbox.constants';
  *
  * PAYLOAD. Only the minimum authoritative facts a consumer needs to decide
  * or refresh: identifiers, states (the SAME status vocabulary the HTTP API exposes,
- * e.g. `active`, `ended_pending_close`), integer minor-unit amounts, ISO-8601 UTC
+ * e.g. `approved`, `rejected`), integer minor-unit amounts, ISO-8601 UTC
  * timestamps. Never email/phone/name, tokens, provider payloads, evidence,
  * or free text (a cancellation reason is user-typed — it is NOT in the
  * event). `payload` never contains account ids: the few private consumers
@@ -31,103 +28,52 @@ import { OUTBOX_MAX_PAYLOAD_BYTES } from './outbox.constants';
  * AUDIENCE. `PUBLIC` = the payload is safe to relay to subscribers of the
  * aggregate's stream; `PRIVATE` = it must only ever reach the parties it is
  * about. It is NOT an access decision by itself: consumers must still apply
- * the same visibility gate as the HTTP read APIs (for example COMPLETED
- * auctions are not in the public visibility set today).
+ * the same visibility gate as the HTTP read APIs .
  */
+
 export enum OutboxEventType {
-  AUCTION_ACTIVATED = 'AUCTION_ACTIVATED',
-  AUCTION_END_EXTENDED = 'AUCTION_END_EXTENDED',
-  AUCTION_ENDED_NO_BIDS = 'AUCTION_ENDED_NO_BIDS',
-  AUCTION_ENDED_PENDING_CLOSE = 'AUCTION_ENDED_PENDING_CLOSE',
-  AUCTION_CANCELLED = 'AUCTION_CANCELLED',
-  AUCTION_FINALIZED = 'AUCTION_FINALIZED',
-  BID_ACCEPTED = 'BID_ACCEPTED',
-  AUCTION_ENTRY_PAYMENT_CONFIRMED = 'AUCTION_ENTRY_PAYMENT_CONFIRMED',
   MANAGED_MARKETING_PAYMENT_CONFIRMED = 'MANAGED_MARKETING_PAYMENT_CONFIRMED',
   KYC_APPROVED = 'KYC_APPROVED',
   KYC_REJECTED = 'KYC_REJECTED',
   PROPERTY_APPROVED = 'PROPERTY_APPROVED',
-  PROPERTY_REJECTED = 'PROPERTY_REJECTED',
-  AUCTION_REQUEST_APPROVED = 'AUCTION_REQUEST_APPROVED',
-  AUCTION_REQUEST_REJECTED = 'AUCTION_REQUEST_REJECTED',
+  PROPERTY_REJECTED = 'PROPERTY_REJECTED'
 }
 
 /** What the event is "about"; `(aggregateType, aggregateId)` is the ordering domain (see `aggregateVersion`). */
 export enum OutboxAggregateType {
-  AUCTION = 'AUCTION',
-  AUCTION_ENTRY_PAYMENT = 'AUCTION_ENTRY_PAYMENT',
   MANAGED_MARKETING_REQUEST = 'MANAGED_MARKETING_REQUEST',
   KYC = 'KYC',
-  PROPERTY = 'PROPERTY',
-  /**
-   * MAZAD-035 review decisions. A SEPARATE stream on purpose: the realtime
-   * `streamVersion` of an auction is its AUCTION `aggregateVersion`, so review
-   * events must never be counted there (clients would see false gaps).
-   */
-  AUCTION_REQUEST = 'AUCTION_REQUEST',
+  PROPERTY = 'PROPERTY'
 }
 
 export enum OutboxAudience {
   PUBLIC = 'PUBLIC',
-  PRIVATE = 'PRIVATE',
+  PRIVATE = 'PRIVATE'
 }
 
 export const OUTBOX_SCHEMA_VERSIONS: Readonly<Record<OutboxEventType, number>> = {
-  [OutboxEventType.AUCTION_ACTIVATED]: 1,
-  [OutboxEventType.AUCTION_END_EXTENDED]: 1,
-  [OutboxEventType.AUCTION_ENDED_NO_BIDS]: 1,
-  [OutboxEventType.AUCTION_ENDED_PENDING_CLOSE]: 1,
-  [OutboxEventType.AUCTION_CANCELLED]: 1,
-  [OutboxEventType.AUCTION_FINALIZED]: 1,
-  [OutboxEventType.BID_ACCEPTED]: 1,
-  [OutboxEventType.AUCTION_ENTRY_PAYMENT_CONFIRMED]: 1,
   [OutboxEventType.MANAGED_MARKETING_PAYMENT_CONFIRMED]: 1,
   [OutboxEventType.KYC_APPROVED]: 1,
   [OutboxEventType.KYC_REJECTED]: 1,
   [OutboxEventType.PROPERTY_APPROVED]: 1,
   [OutboxEventType.PROPERTY_REJECTED]: 1,
-  [OutboxEventType.AUCTION_REQUEST_APPROVED]: 1,
-  [OutboxEventType.AUCTION_REQUEST_REJECTED]: 1,
 };
 
 /** Which aggregate each event type belongs to (a producer cannot file an event under the wrong stream). */
 export const OUTBOX_EVENT_AGGREGATES: Readonly<Record<OutboxEventType, OutboxAggregateType>> = {
-  [OutboxEventType.AUCTION_ACTIVATED]: OutboxAggregateType.AUCTION,
-  [OutboxEventType.AUCTION_END_EXTENDED]: OutboxAggregateType.AUCTION,
-  [OutboxEventType.AUCTION_ENDED_NO_BIDS]: OutboxAggregateType.AUCTION,
-  [OutboxEventType.AUCTION_ENDED_PENDING_CLOSE]: OutboxAggregateType.AUCTION,
-  [OutboxEventType.AUCTION_CANCELLED]: OutboxAggregateType.AUCTION,
-  [OutboxEventType.AUCTION_FINALIZED]: OutboxAggregateType.AUCTION,
-  [OutboxEventType.BID_ACCEPTED]: OutboxAggregateType.AUCTION,
-  [OutboxEventType.AUCTION_ENTRY_PAYMENT_CONFIRMED]: OutboxAggregateType.AUCTION_ENTRY_PAYMENT,
   [OutboxEventType.MANAGED_MARKETING_PAYMENT_CONFIRMED]: OutboxAggregateType.MANAGED_MARKETING_REQUEST,
   [OutboxEventType.KYC_APPROVED]: OutboxAggregateType.KYC,
   [OutboxEventType.KYC_REJECTED]: OutboxAggregateType.KYC,
   [OutboxEventType.PROPERTY_APPROVED]: OutboxAggregateType.PROPERTY,
   [OutboxEventType.PROPERTY_REJECTED]: OutboxAggregateType.PROPERTY,
-  [OutboxEventType.AUCTION_REQUEST_APPROVED]: OutboxAggregateType.AUCTION_REQUEST,
-  [OutboxEventType.AUCTION_REQUEST_REJECTED]: OutboxAggregateType.AUCTION_REQUEST,
 };
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 export type OutboxPayload = Record<string, JsonValue>;
 
 /** The only account ids an event may carry, and only in `privateRouting`. */
-export const OUTBOX_PRIVATE_ROUTING_KEYS = [
-  'bidderAccountId', 'winnerAccountId', 'advertiserAccountId',
-  'previousHighestBidderAccountId', 'subjectAccountId', 'losingBidderAccountIds', 'participantAccountIds',
-] as const;
-const ACCOUNT_ID_LIST_ROUTING_KEYS = ['losingBidderAccountIds', 'participantAccountIds'];
-export type OutboxPrivateRouting = {
-  bidderAccountId?: string;
-  winnerAccountId?: string;
-  advertiserAccountId?: string;
-  previousHighestBidderAccountId?: string;
-  subjectAccountId?: string;
-  losingBidderAccountIds?: string[];
-  /** MAZAD-035: entitled/paid bidders and bidders of a cancelled auction (private notification routing only). */
-  participantAccountIds?: string[];
-};
+export const OUTBOX_PRIVATE_ROUTING_KEYS = ['advertiserAccountId', 'subjectAccountId'] as const;
+export type OutboxPrivateRouting = { advertiserAccountId?: string; subjectAccountId?: string };
 
 /** What a producer hands to `OutboxService.recordRequired`. The service adds the per-aggregate version and delivery metadata. */
 export interface OutboxEventDraft {
@@ -215,12 +161,7 @@ export function assertValidOutboxDraft(draft: OutboxEventDraft): void {
   if (draft.privateRouting !== undefined) {
     for (const [key, value] of Object.entries(draft.privateRouting)) {
       if (!(OUTBOX_PRIVATE_ROUTING_KEYS as readonly string[]).includes(key)) throw new InvalidOutboxEventError(`unknown privateRouting key "${key}"`);
-      if (ACCOUNT_ID_LIST_ROUTING_KEYS.includes(key)) {
-        if (!Array.isArray(value) || value.some((id) => typeof id !== 'string' || !OBJECT_ID.test(id))) {
-          throw new InvalidOutboxEventError(`privateRouting.${key} must contain only 24-hex ObjectIds`);
-        }
-        if (new Set(value).size !== value.length) throw new InvalidOutboxEventError(`privateRouting.${key} must be unique`);
-      } else if (typeof value !== 'string' || !OBJECT_ID.test(value)) {
+      if (typeof value !== 'string' || !OBJECT_ID.test(value)) {
         throw new InvalidOutboxEventError(`privateRouting.${key} must be a 24-hex ObjectId`);
       }
     }
@@ -245,110 +186,6 @@ function draft(type: OutboxEventType, aggregateId: string, occurredAt: Date, aud
     ...(privateRouting ? { privateRouting } : {}),
   };
 }
-
-/** SCHEDULED → ACTIVE. */
-export const auctionActivatedEvent = (input: { auctionId: string; occurredAt: Date; currentEndAt: Date; advertiserAccountId?: string }): OutboxEventDraft =>
-  draft(OutboxEventType.AUCTION_ACTIVATED, input.auctionId, input.occurredAt, OutboxAudience.PUBLIC, {
-    auctionId: input.auctionId,
-    status: AuctionStatus.ACTIVE,
-    currentEndAt: iso(input.currentEndAt),
-  }, input.advertiserAccountId ? { advertiserAccountId: input.advertiserAccountId } : undefined);
-
-/** Anti-sniping moved `currentEndAt` forward (never backward). */
-export const auctionEndExtendedEvent = (input: { auctionId: string; occurredAt: Date; previousEndAt: Date; currentEndAt: Date }): OutboxEventDraft =>
-  draft(OutboxEventType.AUCTION_END_EXTENDED, input.auctionId, input.occurredAt, OutboxAudience.PUBLIC, {
-    auctionId: input.auctionId,
-    status: AuctionStatus.ACTIVE,
-    previousEndAt: iso(input.previousEndAt),
-    currentEndAt: iso(input.currentEndAt),
-  });
-
-/** ACTIVE → ENDED_NO_BIDS. */
-export const auctionEndedNoBidsEvent = (input: { auctionId: string; occurredAt: Date; currentEndAt: Date }): OutboxEventDraft =>
-  draft(OutboxEventType.AUCTION_ENDED_NO_BIDS, input.auctionId, input.occurredAt, OutboxAudience.PUBLIC, {
-    auctionId: input.auctionId,
-    status: AuctionStatus.ENDED_NO_BIDS,
-    currentEndAt: iso(input.currentEndAt),
-  });
-
-/** ACTIVE → ENDED_PENDING_CLOSE: bidding is closed; the winner is determined by finalization. */
-export const auctionEndedPendingCloseEvent = (input: { auctionId: string; occurredAt: Date; currentEndAt: Date; acceptedBidCount: number }): OutboxEventDraft =>
-  draft(OutboxEventType.AUCTION_ENDED_PENDING_CLOSE, input.auctionId, input.occurredAt, OutboxAudience.PUBLIC, {
-    auctionId: input.auctionId,
-    status: AuctionStatus.ENDED_PENDING_CLOSE,
-    currentEndAt: iso(input.currentEndAt),
-    acceptedBidCount: input.acceptedBidCount,
-  });
-
-/**
- * SCHEDULED/ACTIVE → CANCELLED. The (free-text, user-supplied) cancellation reason is intentionally NOT carried.
- * MAZAD-035: `participantAccountIds` (private routing) lets the notifications consumer tell bidders who paid /
- * hold an entitlement / placed bids; the payload (what realtime relays) is unchanged.
- */
-export const auctionCancelledEvent = (input: {
-  auctionId: string; occurredAt: Date; previousStatus: string; advertiserAccountId?: string; participantAccountIds?: string[];
-}): OutboxEventDraft => {
-  const routing: OutboxPrivateRouting = {
-    ...(input.advertiserAccountId ? { advertiserAccountId: input.advertiserAccountId } : {}),
-    ...(input.participantAccountIds?.length ? { participantAccountIds: input.participantAccountIds } : {}),
-  };
-  return draft(OutboxEventType.AUCTION_CANCELLED, input.auctionId, input.occurredAt, OutboxAudience.PUBLIC, {
-    auctionId: input.auctionId,
-    status: AuctionStatus.CANCELLED,
-    previousStatus: input.previousStatus,
-    cancelledAt: iso(input.occurredAt),
-  }, Object.keys(routing).length ? routing : undefined);
-};
-
-/** ENDED_PENDING_CLOSE → COMPLETED. The winner's account id is private routing only. */
-export const auctionFinalizedEvent = (input: {
-  auctionId: string; occurredAt: Date; winningBidSequence: number; winningBidAmountMinor: number; currency: string; acceptedBidCount: number; winnerAccountId: string;
-  losingBidderAccountIds?: string[];
-}): OutboxEventDraft =>
-  draft(
-    OutboxEventType.AUCTION_FINALIZED, input.auctionId, input.occurredAt, OutboxAudience.PUBLIC,
-    {
-      auctionId: input.auctionId,
-      status: AuctionStatus.COMPLETED,
-      winningBidSequence: input.winningBidSequence,
-      winningBidAmountMinor: input.winningBidAmountMinor,
-      currency: input.currency,
-      acceptedBidCount: input.acceptedBidCount,
-      finalizedAt: iso(input.occurredAt),
-    },
-    { winnerAccountId: input.winnerAccountId, ...(input.losingBidderAccountIds ? { losingBidderAccountIds: input.losingBidderAccountIds } : {}) },
-  );
-
-/**
- * One accepted bid, exactly as committed. Bidder identity is NOT in the
- * payload (the public history is anonymised); `privateRouting.bidderAccountId`
- * exists so a server-side consumer can compute per-recipient facts such as
- * `isMine` without the id ever being broadcast.
- */
-export const bidAcceptedEvent = (input: {
-  auctionId: string; occurredAt: Date; sequence: number; amountMinor: number; currency: string; acceptedBidCount: number;
-  currentEndAt: Date; previousEndAt: Date; extended: boolean; nextMinimumBidMinor: number | null; bidderAccountId: string;
-  previousHighestBidderAccountId?: string;
-}): OutboxEventDraft =>
-  draft(
-    OutboxEventType.BID_ACCEPTED, input.auctionId, input.occurredAt, OutboxAudience.PUBLIC,
-    {
-      auctionId: input.auctionId,
-      sequence: input.sequence,
-      amountMinor: input.amountMinor,
-      currency: input.currency,
-      acceptedAt: iso(input.occurredAt),
-      acceptedBidCount: input.acceptedBidCount,
-      currentEndAt: iso(input.currentEndAt),
-      previousEndAt: iso(input.previousEndAt),
-      extended: input.extended,
-      nextMinimumBidMinor: input.nextMinimumBidMinor,
-    },
-    {
-      bidderAccountId: input.bidderAccountId,
-      ...(input.previousHighestBidderAccountId ? { previousHighestBidderAccountId: input.previousHighestBidderAccountId } : {}),
-    },
-  );
 
 /** Atomic Admin KYC decision. Rejection reason remains in the protected audit row, never the event. */
 export const kycDecisionEvent = (input: {
@@ -382,25 +219,7 @@ export const propertyDecisionEvent = (input: {
     { advertiserAccountId: input.advertiserAccountId },
   );
 
-/** A server-verified AUCTION_ENTRY payment succeeded and the bid entitlement was granted (PRIVATE: money facts about one bidder). */
-export const auctionEntryPaymentConfirmedEvent = (input: {
-  paymentId: string; auctionId: string; occurredAt: Date; amountMinor: number; currency: string; lateConfirmation: boolean; bidderAccountId: string;
-}): OutboxEventDraft =>
-  draft(
-    OutboxEventType.AUCTION_ENTRY_PAYMENT_CONFIRMED, input.paymentId, input.occurredAt, OutboxAudience.PRIVATE,
-    {
-      paymentId: input.paymentId,
-      auctionId: input.auctionId,
-      amountMinor: input.amountMinor,
-      currency: input.currency,
-      confirmedAt: iso(input.occurredAt),
-      entitlementGranted: true,
-      lateConfirmation: input.lateConfirmation,
-    },
-    { bidderAccountId: input.bidderAccountId },
-  );
-
-/** A server-verified MANAGED_MARKETING payment succeeded and the request is now PAID (PRIVATE). No auction entitlement is implied. */
+/** A server-verified MANAGED_MARKETING payment succeeded and the request is now PAID (PRIVATE). */
 export const managedMarketingPaymentConfirmedEvent = (input: {
   requestId: string; paymentId: string; occurredAt: Date; amountMinor: number; currency: string; advertiserAccountId: string;
 }): OutboxEventDraft =>
@@ -414,35 +233,5 @@ export const managedMarketingPaymentConfirmedEvent = (input: {
       paidAt: iso(input.occurredAt),
       requestStatus: ManagedMarketingRequestStatus.PAID,
     },
-    { advertiserAccountId: input.advertiserAccountId },
-  );
-
-/**
- * MAZAD-035: an Admin approved an auction request; the Auction now exists as
- * SCHEDULED. PRIVATE (only the seller is told). Carries the explicit fee
- * (0 = FREE) and the approved schedule; never the Admin's identity or notes.
- */
-export const auctionRequestApprovedEvent = (input: {
-  requestId: string; auctionId: string; occurredAt: Date; entryFeeMinor: number; scheduledStartAt: Date; scheduledEndAt: Date; advertiserAccountId: string;
-}): OutboxEventDraft =>
-  draft(
-    OutboxEventType.AUCTION_REQUEST_APPROVED, input.requestId, input.occurredAt, OutboxAudience.PRIVATE,
-    {
-      requestId: input.requestId,
-      auctionId: input.auctionId,
-      requestStatus: 'approved',
-      entryFeeMinor: input.entryFeeMinor,
-      scheduledStartAt: iso(input.scheduledStartAt),
-      scheduledEndAt: iso(input.scheduledEndAt),
-      reviewedAt: iso(input.occurredAt),
-    },
-    { advertiserAccountId: input.advertiserAccountId },
-  );
-
-/** MAZAD-035: an Admin rejected an auction request. Only the closed rejection code travels; notes stay in the request. */
-export const auctionRequestRejectedEvent = (input: { requestId: string; occurredAt: Date; rejectionCode: string; advertiserAccountId: string }): OutboxEventDraft =>
-  draft(
-    OutboxEventType.AUCTION_REQUEST_REJECTED, input.requestId, input.occurredAt, OutboxAudience.PRIVATE,
-    { requestId: input.requestId, requestStatus: 'rejected', rejectionCode: input.rejectionCode, reviewedAt: iso(input.occurredAt) },
     { advertiserAccountId: input.advertiserAccountId },
   );

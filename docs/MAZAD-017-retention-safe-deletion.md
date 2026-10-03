@@ -9,7 +9,7 @@
 - Recovery is explicit, requires the account password followed by an emailed one-time code, uses the workflow version/state predicate, and requires a new login. Password reset never restores the account.
 - Email and phone remain reserved while pending. Anonymization unsets eligible identifiers, so any later registration creates a new User ID and cannot inherit old history.
 - Published/pending property relationships remain attached to the original internal User ID. They block anonymization until their lifecycle is resolved; no ownership transfer occurs.
-- Future auction, settlement, payment, dispute, and regulatory modules plug into `ACCOUNT_DELETION_BLOCKER_PROVIDERS`. Missing future modules do not fabricate blockers.
+- Future settlement, payment, dispute, and regulatory modules plug into `ACCOUNT_DELETION_BLOCKER_PROVIDERS`. Missing future modules do not fabricate blockers.
 - Legal hold is an audited optimistic transition on the workflow. Customer projections never expose its reason or investigation details.
 
 ## Evidence and history

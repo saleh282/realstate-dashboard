@@ -161,7 +161,7 @@ async function main() {
       env: { ...process.env, PHASE13_LOCAL_E2E: '1', NODE_ENV: 'development', DEPLOYMENT_ENV: 'local', MONGO_URI: uri, PHASE12_DISPOSABLE_DB: '' },
     });
     const summary = /Tests:\s+(.*)/.exec(`${smoke.stdout}${smoke.stderr}`)?.[1] ?? 'no summary';
-    record('6 smoke flows pass on the restored database (property, auction, fake payments, bidding, managed marketing)', smoke.status === 0 && /9 passed/.test(summary), { summary });
+    record('Smoke flows pass on the restored database (property and managed marketing)', smoke.status === 0, { summary });
 
     const report = { generatedAt: new Date().toISOString(), note: 'engineering rehearsal; not a production backup policy', source: sourceName, database, snapshot: snapshotName, ok: steps.every((step) => step.ok), steps };
     const out = flag('out');

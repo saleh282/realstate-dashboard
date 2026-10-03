@@ -13,9 +13,7 @@ import { ClockService } from '../src/common/time/clock.service';
 import { ManagedMarketingController } from '../src/managed-marketing/managed-marketing.controller';
 import { ManagedMarketingService } from '../src/managed-marketing/managed-marketing.service';
 import { ManagedMarketingPaymentStatus, ManagedMarketingRequestStatus } from '../src/managed-marketing/managed-marketing.types';
-import { AuctionEntryPaymentService } from '../src/payments/auction-entry-payment.service';
-import { AuctionPaymentConfirmationService } from '../src/payments/auction-payment-confirmation.service';
-import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort, UnconfiguredPaymentProvider } from '../src/payments/auction-payment-provider.port';
+import { PAYMENT_PROVIDER_PORT, PaymentProviderPort, UnconfiguredPaymentProvider } from '../src/payments/payment-provider.port';
 import { FakePaymentsDevController } from '../src/payments/dev/fake-payments-dev.controller';
 import { FakePaymentsDevGuard, fakePaymentsDevRoutesAllowed } from '../src/payments/dev/fake-payments-dev.guard';
 import { FakePaymentsDevService } from '../src/payments/dev/fake-payments-dev.service';
@@ -31,14 +29,12 @@ import { FakeMongo } from './support/fake-payments-mongo';
  * payment initiation route, over real HTTP (guards, validation, envelopes).
  */
 const oid = (hex: string) => new Types.ObjectId(hex);
-const AUCTION = '64b000000000000000000f01';
 const ADVERTISER = '64b000000000000000000a10';
 const ALICE = '64b000000000000000000a11';
 const BOB = '64b000000000000000000a12';
 const OWNER = '64b000000000000000000a13';
 const ADMIN = '64b000000000000000000a20';
 const REQUEST = '64b000000000000000000c01';
-const FEE = 25_000;
 const PRICE = 1_500_000; // test data only — a made-up fixture, not a product price
 
 class TestJwtAuthGuard implements CanActivate {
@@ -51,9 +47,8 @@ class TestJwtAuthGuard implements CanActivate {
   }
 }
 
-async function harness(options: { provider?: AuctionPaymentProviderPort; env?: Record<string, unknown> } = {}) {
+async function harness(options: { provider?: PaymentProviderPort; env?: Record<string, unknown> } = {}) {
   const mongo = new FakeMongo();
-  mongo.seedAuction({ entryFee: { amountMinor: FEE, currency: 'EGP', configuredByActorId: oid(ADMIN), configuredAt: new Date() } });
   for (const id of [ADVERTISER, ALICE, BOB, OWNER]) mongo.seedUser(id);
   mongo.data.requests.set(REQUEST, {
     version: 1,
@@ -66,16 +61,14 @@ async function harness(options: { provider?: AuctionPaymentProviderPort; env?: R
   const provider = options.provider ?? new FakePaymentProvider('pending');
   const clock = { now: () => mongo.clockNow };
   const deps = {
-    auctions: mongo.model('auctions'), users: mongo.model('users'), payments: mongo.model('payments'), entitlements: mongo.model('entitlements'),
+    users: mongo.model('users'),
     requests: mongo.model('requests'), audit: mongo.auditSvc, clock, provider, connection: mongo.connection, outbox: mongo.outbox.service,
   };
   const mmDeps = { ...deps, payments: mongo.model('mmPayments') };
-  const initiation = Object.assign(Object.create(AuctionEntryPaymentService.prototype), deps) as AuctionEntryPaymentService;
-  const confirmation = Object.assign(Object.create(AuctionPaymentConfirmationService.prototype), deps) as AuctionPaymentConfirmationService;
   const mmInitiation = Object.assign(Object.create(ManagedMarketingPaymentService.prototype), mmDeps) as ManagedMarketingPaymentService;
   const mmConfirmation = Object.assign(Object.create(ManagedMarketingPaymentConfirmationService.prototype), mmDeps) as ManagedMarketingPaymentConfirmationService;
   const router = Object.assign(Object.create(PaymentConfirmationRouter.prototype), {
-    entryPayments: mongo.model('payments'), marketingPayments: mongo.model('mmPayments'), auctionEntry: confirmation, managedMarketing: mmConfirmation,
+    marketingPayments: mongo.model('mmPayments'), managedMarketing: mmConfirmation,
   }) as PaymentConfirmationRouter;
   const env = { NODE_ENV: 'development', DEPLOYMENT_ENV: 'local', ...options.env };
   const moduleRef = await Test.createTestingModule({
@@ -83,7 +76,7 @@ async function harness(options: { provider?: AuctionPaymentProviderPort; env?: R
     providers: [
       FakePaymentsDevGuard, FakePaymentsDevService,
       { provide: PaymentConfirmationRouter, useValue: router },
-      { provide: AUCTION_PAYMENT_PROVIDER_PORT, useValue: provider },
+      { provide: PAYMENT_PROVIDER_PORT, useValue: provider },
       { provide: ConfigService, useValue: { get: (key: string) => (env as Record<string, unknown>)[key] } },
       { provide: ManagedMarketingService, useValue: {} },
       { provide: ManagedMarketingPaymentService, useValue: mmInitiation },
@@ -94,7 +87,7 @@ async function harness(options: { provider?: AuctionPaymentProviderPort; env?: R
   configureApp(app as NestExpressApplication, { NODE_ENV: 'test' });
   await app.init();
   const server = () => request(app.getHttpServer());
-  const settle = (paymentId: string, body: unknown, token: string | null = ALICE) => {
+  const settle = (paymentId: string, body: unknown, token: string | null = OWNER) => {
     const call = server().post(`/api/v1/dev/fake-payments/${paymentId}/settle`).send(body as any);
     return token ? call.set('Authorization', `Bearer ${token}`) : call;
   };
@@ -102,7 +95,7 @@ async function harness(options: { provider?: AuctionPaymentProviderPort; env?: R
     const call = server().post(`/api/v1/managed-marketing/requests/${requestId}/payment`).send(body as any);
     return token ? call.set('Authorization', `Bearer ${token}`) : call;
   };
-  return { app, mongo, provider, initiation, confirmation, mmInitiation, router, settle, pay };
+  return { app, mongo, provider, initiation: mmInitiation, confirmation: mmConfirmation, mmInitiation, router, settle, pay };
 }
 const codeOf = (res: request.Response) => res.body?.code ?? res.body?.data?.code;
 const dataOf = (res: request.Response) => res.body?.data ?? res.body;
@@ -113,51 +106,46 @@ describe('POST /dev/fake-payments/:paymentId/settle (development only)', () => {
   afterEach(() => ctx.app.close());
 
   it('changes the FAKE PROVIDER truth only: the payment stays INITIATED and nothing is granted', async () => {
-    const attempt = await ctx.initiation.initiate(ALICE, AUCTION);
+    const attempt = await ctx.initiation.initiate(OWNER, REQUEST);
     const res = await ctx.settle(attempt.paymentId, { outcome: 'success' });
     expect(res.status).toBe(200);
-    expect(dataOf(res)).toMatchObject({ settled: true, paymentId: attempt.paymentId, purpose: 'AUCTION_ENTRY', outcome: 'success', triggered: false });
+    expect(dataOf(res)).toMatchObject({ settled: true, paymentId: attempt.paymentId, purpose: 'MANAGED_MARKETING', outcome: 'success', triggered: false });
     expect(dataOf(res).confirmation).toBeUndefined();
-    expect(ctx.mongo.rows('payments')[0]).toMatchObject({ status: 'INITIATED', isLive: true });
-    expect(ctx.mongo.rows('entitlements')).toHaveLength(0);
-    expect(ctx.mongo.audits.filter((row) => row.action !== 'auction_entry_payment_initiated')).toHaveLength(0);
+    expect(ctx.mongo.rows('mmPayments')[0]).toMatchObject({ status: 'INITIATED', isLive: true });
+    expect(ctx.mongo.audits.filter((row) => row.action !== 'managed_marketing_payment_initiated')).toHaveLength(0);
     // The provider now answers SUCCEEDED; only the normal confirmation path turns that into an entitlement.
     await expect((ctx.provider as FakePaymentProvider).verify(attempt.providerReference!)).resolves.toMatchObject({ status: 'SUCCEEDED' });
     await ctx.confirmation.confirm(attempt.paymentId);
-    expect(ctx.mongo.rows('entitlements')).toHaveLength(1);
   });
 
   it('trigger=true pokes the normal confirmation-by-reference path (as a provider callback would)', async () => {
-    const attempt = await ctx.initiation.initiate(ALICE, AUCTION);
+    const attempt = await ctx.initiation.initiate(OWNER, REQUEST);
     const spy = jest.spyOn(ctx.router, 'confirmByProviderReference');
     const res = await ctx.settle(attempt.paymentId, { outcome: 'success', trigger: true });
     expect(res.status).toBe(200);
     expect(dataOf(res)).toMatchObject({ triggered: true, confirmation: { status: 'SUCCEEDED', pending: false } });
     expect(spy).toHaveBeenCalledWith('fake', attempt.providerReference);
     expect(spy.mock.calls[0]).toHaveLength(2); // a reference, never an outcome
-    expect(ctx.mongo.rows('payments')[0].status).toBe('SUCCEEDED');
-    expect(ctx.mongo.rows('entitlements')).toHaveLength(1);
+    expect(ctx.mongo.rows('mmPayments')[0].status).toBe('SUCCEEDED');
   });
 
   it('settling a failure makes the normal path record FAILED', async () => {
-    const attempt = await ctx.initiation.initiate(ALICE, AUCTION);
+    const attempt = await ctx.initiation.initiate(OWNER, REQUEST);
     const res = await ctx.settle(attempt.paymentId, { outcome: 'failed', trigger: true });
     expect(dataOf(res)).toMatchObject({ confirmation: { status: 'FAILED', pending: false } });
-    expect(ctx.mongo.rows('entitlements')).toHaveLength(0);
   });
 
   it('a late success after expiry is reported as the domain rejection — still no entitlement', async () => {
-    const attempt = await ctx.initiation.initiate(ALICE, AUCTION);
+    const attempt = await ctx.initiation.initiate(OWNER, REQUEST);
     await ctx.confirmation.expire(attempt.paymentId);
     const res = await ctx.settle(attempt.paymentId, { outcome: 'success', trigger: true });
     expect(res.status).toBe(200);
     expect(dataOf(res)).toMatchObject({ confirmation: { rejectedCode: 'PAYMENT_CONFIRMED_AFTER_EXPIRY' } });
-    expect(ctx.mongo.rows('payments')[0]).toMatchObject({ status: 'EXPIRED', reconciliationFlag: 'CONFIRMED_AFTER_EXPIRY' });
-    expect(ctx.mongo.rows('entitlements')).toHaveLength(0);
+    expect(ctx.mongo.rows('mmPayments')[0]).toMatchObject({ status: 'EXPIRED', reconciliationFlag: 'CONFIRMED_AFTER_EXPIRY' });
   });
 
   it('is authenticated and owner-scoped: another account, or no token, cannot settle a payment', async () => {
-    const attempt = await ctx.initiation.initiate(ALICE, AUCTION);
+    const attempt = await ctx.initiation.initiate(OWNER, REQUEST);
     expect((await ctx.settle(attempt.paymentId, { outcome: 'success' }, null)).status).toBe(401);
     const other = await ctx.settle(attempt.paymentId, { outcome: 'success' }, BOB);
     expect(other.status).toBe(404);
@@ -172,11 +160,10 @@ describe('POST /dev/fake-payments/:paymentId/settle (development only)', () => {
     const res = await ctx.settle(attempt.paymentId, { outcome: 'success', trigger: true }, OWNER);
     expect(dataOf(res)).toMatchObject({ purpose: 'MANAGED_MARKETING', confirmation: { status: 'SUCCEEDED' } });
     expect(ctx.mongo.data.requests.get(REQUEST)!.doc.status).toBe(ManagedMarketingRequestStatus.PAID);
-    expect(ctx.mongo.rows('entitlements')).toHaveLength(0);
   });
 
   it('validates its input: only success|failed, no extra fields, a real id', async () => {
-    const attempt = await ctx.initiation.initiate(ALICE, AUCTION);
+    const attempt = await ctx.initiation.initiate(OWNER, REQUEST);
     for (const body of [{}, { outcome: 'paid' }, { outcome: 'success', amountMinor: 1 }, { outcome: 'success', status: 'SUCCEEDED' }, { outcome: 'success', trigger: 'yes' }]) {
       expect((await ctx.settle(attempt.paymentId, body)).status).toBe(400);
     }
@@ -186,7 +173,7 @@ describe('POST /dev/fake-payments/:paymentId/settle (development only)', () => {
 
   it('refuses a payment the fake provider already decided (only a pending checkout can be settled)', async () => {
     (ctx.provider as FakePaymentProvider).enqueue('success');
-    const attempt = await ctx.initiation.initiate(ALICE, AUCTION);
+    const attempt = await ctx.initiation.initiate(OWNER, REQUEST);
     const res = await ctx.settle(attempt.paymentId, { outcome: 'failed' });
     expect(res.status).toBe(409);
     expect(codeOf(res)).toBe('FAKE_PAYMENT_NOT_PENDING');
@@ -207,7 +194,7 @@ describe('the fake settle route does not exist outside local/development with th
     ['production', { env: { NODE_ENV: 'production', DEPLOYMENT_ENV: 'production' } }],
     ['staging', { env: { NODE_ENV: 'production', DEPLOYMENT_ENV: 'staging' } }],
     ['an unresolvable environment', { env: { NODE_ENV: 'production', DEPLOYMENT_ENV: undefined } }],
-    ['a real provider adapter in development', { provider: { providerKey: 'real', configured: true, initiate: async () => ({ providerReference: 'r' }), verify: async () => { throw new Error('unused'); } } as AuctionPaymentProviderPort }],
+    ['a real provider adapter in development', { provider: { providerKey: 'real', configured: true, initiate: async () => ({ providerReference: 'r' }), verify: async () => { throw new Error('unused'); } } as PaymentProviderPort }],
   ])('404 with %s — before authentication, for everyone', async (_label, options) => {
     const ctx = await harness(options as any);
     try {

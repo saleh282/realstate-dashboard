@@ -26,9 +26,7 @@ import { AuthorizationModule } from './authorization/authorization.module';
 import { AccountDeletionModule } from './account-deletion/account-deletion.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
 import { FavoritesModule } from './favorites/favorites.module';
-import { AuctionsModule } from './auctions/auctions.module';
 import { OutboxModule } from './outbox/outbox.module';
-import { RealtimeModule } from './realtime/realtime.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { FakePaymentsDevModule } from './payments/dev/fake-payments-dev.module';
 
@@ -64,9 +62,7 @@ import { FakePaymentsDevModule } from './payments/dev/fake-payments-dev.module';
     AccountDeletionModule,
     GeocodingModule,
     FavoritesModule,
-    AuctionsModule,
     OutboxModule,
-    RealtimeModule,
     NotificationsModule,
     HealthModule,
     // MAZAD-028: development-only fake-payment settle route; its guard answers 404 outside local/development with the fake provider.

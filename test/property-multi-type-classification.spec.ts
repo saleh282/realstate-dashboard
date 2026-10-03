@@ -113,7 +113,6 @@ function writeHarness(options: {
     cities: { findOne: jest.fn(() => chain({ _id: new Types.ObjectId(), nameAr: 'القاهرة' })), updateOne: jest.fn(() => matched(1)) },
     options: { findOne: jest.fn(() => chain({ code: 'valid' })), find: jest.fn(() => chain([{ code: 'cash' }])), updateMany: jest.fn(() => matched(3)) },
     amenities: { countDocuments: jest.fn(() => ({ exec: jest.fn().mockResolvedValue(1) })), updateMany: jest.fn(() => matched(1)) },
-    auctionLock: { assertUnlocked: jest.fn().mockResolvedValue(undefined) },
     properties, revisions,
     connection: { startSession: jest.fn().mockResolvedValue(session) },
     audit: { logRequired: jest.fn(), logResourceAction: jest.fn(), logAdminResourceAction: jest.fn() },
@@ -462,21 +461,6 @@ describe('DPF-005 reads: legacy fallback, projections and anchoring', () => {
     expect(ids(find.mock.calls[0][0]._id.$in)).toEqual([DUPLEX, APARTMENT]);
     expect(property).toMatchObject({ propertyTypeNameAr: 'شقة', purposeSubcategoryId: APARTMENT, purposeSubcategoryIds: [DUPLEX, APARTMENT] });
     expect(property.propertyTypes.map((type: any) => type.id)).toEqual([APARTMENT, DUPLEX]);
-  });
-
-  it('shows the anchored revision\'s classification on auction projections, not the newer current one', async () => {
-    const anchored = revision({ purposeSubcategoryIds: [DUPLEX, APARTMENT].map((id) => new Types.ObjectId(id)) });
-    const current = revision({ _id: new Types.ObjectId(), purposeSubcategoryId: new Types.ObjectId(VILLA), purposeSubcategoryIds: [new Types.ObjectId(VILLA)], legacyPropertyTypeCode: 'villa' });
-    const revisionsFind = jest.fn((_filter: unknown, _projection: unknown) => ({ lean: () => ({ exec: async () => [anchored] }) }));
-    const service = readService({
-      properties: { find: jest.fn(() => ({ lean: () => ({ exec: async () => [{ ...aggregate(current._id), purposeSubcategoryId: current.purposeSubcategoryId, purposeSubcategoryIds: current.purposeSubcategoryIds }] }) })) },
-      revisions: { find: revisionsFind },
-    });
-    const result = await service.getAnchoredPublicProjections([{ propertyId, revisionId: anchored._id.toString() }]);
-    const item = result.get(`${propertyId}:${anchored._id.toString()}`);
-    expect(item).toMatchObject({ purposeSubcategoryId: APARTMENT, purposeSubcategoryIds: [DUPLEX, APARTMENT], propertyTypeNameAr: 'شقة' });
-    expect(item.propertyTypes.map((type: any) => type.id)).toEqual([APARTMENT, DUPLEX]);
-    expect(String(revisionsFind.mock.calls[0][1]).split(' ')).toContain('purposeSubcategoryIds');
   });
 });
 

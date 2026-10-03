@@ -28,6 +28,7 @@ describe('shared application password policy', () => {
     const dto = Object.assign(new RegisterDto(), {
       fullName: 'Test User',
       identifier: 'user@example.com',
+      phone: '+201012345678',
       password,
       confirmPassword: password,
     });
@@ -52,6 +53,7 @@ describe('shared application password policy', () => {
       fullName: 'Test User',
       identifier: 'user@example.com',
       password: '1234567',
+      phone: '+201012345678',
       confirmPassword: '1234567',
     });
     const reset = Object.assign(new ResetPasswordDto(), {

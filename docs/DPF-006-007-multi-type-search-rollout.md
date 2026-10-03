@@ -2,7 +2,7 @@
 
 ## Behavior
 
-`purposeSubcategoryId` stays the primary Property Type; `purposeSubcategoryIds` holds every selected type (DPF-005). Public search keeps the query parameter `purposeSubcategoryId=X`, which now matches listings that selected X as primary **or** additional type. Public auction discovery uses the same property filter.
+`purposeSubcategoryId` stays the primary Property Type; `purposeSubcategoryIds` holds every selected type (DPF-005). Public search keeps the query parameter `purposeSubcategoryId=X`, which now matches listings that selected X as primary **or** additional type.
 
 The search filter reads `purposeSubcategoryIds` only, so every Property must carry the array before the search switch is live. PropertyRevisions are never rewritten; revisions without the array read as `[purposeSubcategoryId]`.
 
@@ -21,14 +21,14 @@ The schema no longer declares `property_public_listing_purpose`, so autoIndex ne
 1. DPF-005 write code is live (every write sets the array; the backfill guard relies on it).
 2. Dry-run, then apply 022 and 023 with reviewed output and a verified backup.
 3. Deploy the DPF-007 search switch. Listings still lacking the array would be missing from type-filtered search.
-4. Verify public and auction type search and the integrity report.
+4. Verify public type search and the integrity report.
 5. Only then run 024 explicitly.
 
 If a run of 022 fails validation with `PROPERTY_TYPE_SELECTION_BACKFILL_INCOMPLETE` because a row was re-pointed without the array while it ran, a plain rerun resumes after the checkpoint and does not revisit that row; inspect the row and the ledger before any reviewed repair.
 
 ## Qualification
 
-Qualified on a disposable MongoDB 8.0.32 single-node replica set (never against Atlas): backfill, idempotency, untouched revisions (identical `dbHash`), guarded concurrent writes, integrity findings, any-type search and auction discovery, exact index shapes, conflict blocking, and 024 manual-only retirement all behaved as specified.
+Qualified on a disposable MongoDB 8.0.32 single-node replica set (never against Atlas): backfill, idempotency, untouched revisions (identical `dbHash`), guarded concurrent writes, integrity findings, any-type search, exact index shapes, conflict blocking, and 024 manual-only retirement all behaved as specified.
 
 ## Follow-up: index-provided listing order
 

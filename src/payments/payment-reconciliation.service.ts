@@ -20,7 +20,7 @@ export const emptyReconciliationSummary = (): PaymentReconciliationSummary =>
 type ClaimedAttempt = { _id: Types.ObjectId; initiatedAt: Date; providerReference?: string; verifyAttempts?: number };
 
 /**
- * Reconciles INITIATED payment attempts of BOTH purposes with the provider
+ * Reconciles INITIATED payment attempts of the supported purposes with the provider
  * (MAZAD-028). It decides nothing about money itself: every state change goes
  * through the purpose's own confirmation service, which asks the provider
  * server-to-server (`confirm`), or through that service's `expire` /

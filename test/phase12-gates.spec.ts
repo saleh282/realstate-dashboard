@@ -1,10 +1,9 @@
 import { ValidationPipe } from '@nestjs/common';
 import { SystemRole } from '../src/auth/roles.enum';
-import { AuthorizationPolicyService } from '../src/authorization/authorization-policy.service';
+
 import { Capability } from '../src/authorization/capability';
 import { AccountStatus, AccountType, BrokerStatus } from '../src/users/identity.types';
 import { ListPublishedPropertiesDto } from '../src/properties/dto/list-published-properties.dto';
-import { ListPublicAuctionsDto } from '../src/auctions/dto/list-auctions.dto';
 import { assertAmenitySelection, assertUsableVersion } from '../src/properties/property-form-write';
 import { computeFormContentHash } from '../src/property-form-definitions/property-form-definition.constants';
 import { PHASE9_PROMOTED_FACET_KEYS } from '../src/migrations/030-phase9-facet-promotion';
@@ -13,34 +12,6 @@ import { PHASE9_PROMOTED_FACET_KEYS } from '../src/migrations/030-phase9-facet-p
 
 const principal = (systemRole: SystemRole, accountType = AccountType.USER, brokerStatus = BrokerStatus.NOT_APPLIED) =>
   ({ userId: '64b000000000000000000001', systemRole, accountType, accountStatus: AccountStatus.ACTIVE, brokerStatus }) as any;
-
-const roles: Record<string, any> = {
-  public: {},
-  USER: principal(SystemRole.USER),
-  BROKER: principal(SystemRole.USER, AccountType.BROKER, BrokerStatus.APPROVED),
-  COMPANY: principal(SystemRole.USER, AccountType.COMPANY),
-  ADMIN: principal(SystemRole.ADMIN, AccountType.USER),
-  SUPER_ADMIN: principal(SystemRole.SUPER_ADMIN, AccountType.USER),
-};
-
-const matrix: Array<[Capability, string[]]> = [
-  [Capability.PROPERTY_CREATE, ['USER', 'BROKER', 'COMPANY']],
-  [Capability.AUCTION_CREATE_OWN, ['USER', 'BROKER', 'COMPANY']],
-  [Capability.BID_PLACE, ['USER', 'BROKER', 'COMPANY']],
-  [Capability.ADMIN_PROPERTY_REVIEW, ['ADMIN', 'SUPER_ADMIN']],
-  [Capability.ADMIN_CATALOG_MANAGE, ['ADMIN', 'SUPER_ADMIN']],
-  [Capability.ADMIN_AUCTION_FEE_MANAGE, ['ADMIN', 'SUPER_ADMIN']],
-  [Capability.ADMIN_FORM_DEFINITION_PUBLISH, ['SUPER_ADMIN']],
-  [Capability.SUPER_ADMIN_ROLE_MANAGE, ['SUPER_ADMIN']],
-];
-
-describe('Phase 12 role matrix for critical property/catalog/form/review/auction actions', () => {
-  it.each(matrix)('%s is granted to exactly the expected roles', (capability, allowed) => {
-    for (const [name, identity] of Object.entries(roles)) {
-      expect([name, AuthorizationPolicyService.can(identity, capability)]).toEqual([name, allowed.includes(name)]);
-    }
-  });
-});
 
 describe('Phase 12 public query safety', () => {
   const pipe = new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true });
@@ -62,17 +33,6 @@ describe('Phase 12 public query safety', () => {
     ['raw facet path', { 'facets.shopFloorLevel': 'ground' }],
     ['raw mongo operator', { $where: '1' }],
   ])('property search rejects %s', async (_name, query) => { await rejects(ListPublishedPropertiesDto, query); });
-
-  it.each([
-    ['a Phase 9 facet', { shopFloorLevel: 'ground' }],
-    ['a facet range', { minBuiltAreaSqm: '10' }],
-    ['amenity filtering', { amenityCodes: 'elevator' }],
-    ['arbitrary attribute filtering', { 'attr.bedrooms': '3' }],
-  ])('auction discovery rejects %s', async (_name, query) => { await rejects(ListPublicAuctionsDto, query); });
-
-  it('auction discovery still accepts its own property-derived filters', async () => {
-    await expect(run(ListPublicAuctionsDto, { governorateCode: 'cairo', city: 'x' })).resolves.toBeDefined();
-  });
 });
 
 describe('Phase 12 form-version write gates', () => {

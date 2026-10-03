@@ -31,53 +31,14 @@ import { PropertyFormDefinitionVersion, type PropertyFormDefinitionVersionDocume
 import { PropertyFormDefinition, type PropertyFormDefinitionDocument } from '../property-form-definitions/schemas/property-form-definition.schema';
 import { LEGACY_RESIDENTIAL_CONTENT_HASH, type FormOperationType, type MediaProfile } from '../property-form-definitions/property-form-definition.constants';
 import { LEGACY_ATTRIBUTE_KEYS, LEGACY_SPEC_FIELDS } from '../property-attributes/property-attribute.constants';
-import {
-  parseAttributes,
-  propertyAttributesInvalid,
-  propertyAttributesMalformed,
-  validateAgainstVersion,
-  type NormalizedAttributes,
-  type ParsedAttributes,
-} from '../common/validators/property-attributes';
-import {
-  FormDefinitionInvalidReason,
-  assertAmenitySelection,
-  approvedFacets,
-  assertDraftMedia,
-  assertDynamicPin,
-  assertListingEnabled,
-  assertMediaComplete,
-  assertUsableVersion,
-  carriedAttributes,
-  catalogCandidates,
-  classifyFormWrite,
-  clientUpgradeRequired,
-  currentPublishedForm,
-  evaluateMedia,
-  formDefinitionInvalid,
-  formVersionOutdated,
-  isListingEnabled,
-  legacyAttributeInput,
-  toParsedAttributes,
-  type FormState,
-  type FormVersionRecord,
-  type FormWriteMode,
-  type PropertyFacetValues,
-} from './property-form-write';
+import { parseAttributes, propertyAttributesInvalid, propertyAttributesMalformed, validateAgainstVersion, type NormalizedAttributes, type ParsedAttributes } from '../common/validators/property-attributes';
+import { FormDefinitionInvalidReason, assertAmenitySelection, approvedFacets, assertDraftMedia, assertDynamicPin, assertListingEnabled, assertMediaComplete, assertUsableVersion, carriedAttributes, catalogCandidates, classifyFormWrite, clientUpgradeRequired, currentPublishedForm, evaluateMedia, formDefinitionInvalid, formVersionOutdated, isListingEnabled, legacyAttributeInput, toParsedAttributes, type FormState, type FormVersionRecord, type FormWriteMode, type PropertyFacetValues } from './property-form-write';
 import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
-import { PropertyAuctionLockService } from './property-auction-lock.service';
 import { IdempotencyService, canonicalize, sha256 } from '../common/idempotency/idempotency.service';
 import { hasClearGovernorateConflict, isPointInsideEgypt } from '../common/validators/egypt-location.validator';
 import { propertyDecisionEvent } from '../outbox/outbox-events';
 import { OutboxService } from '../outbox/outbox.service';
-import {
-  PropertySubcategoriesInvalidReason,
-  canonicalPropertyTypeOrder,
-  normalizeSelectedPropertyTypeIds,
-  selectedPropertyTypeIds,
-  subcategoriesInvalid,
-  toObjectIds,
-} from './property-classification';
+import { PropertySubcategoriesInvalidReason, canonicalPropertyTypeOrder, normalizeSelectedPropertyTypeIds, selectedPropertyTypeIds, subcategoriesInvalid, toObjectIds } from './property-classification';
 
 const PROPERTY_IMAGE_POLICY = { kind: 'image' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000 };
 const PROPERTY_EVIDENCE_POLICY = { kind: 'document' as const, maxBytes: 10 * 1024 * 1024, maxImagePixels: 50_000_000, allowPdf: true };
@@ -101,11 +62,6 @@ export const PUBLIC_REVISION_PROJECTION_FIELDS = [
   'amenityCodes',
 ] as const;
 const PUBLIC_REVISION_SELECT = PUBLIC_REVISION_PROJECTION_FIELDS.join(' ');
-// Anchored reads load revisions directly and must also verify revision ownership.
-const ANCHORED_PUBLIC_REVISION_SELECT = `${PUBLIC_REVISION_SELECT} propertyId`;
-/** Single-auction reads also render `specifications` from the anchored revision (DPF-016). */
-const ANCHORED_SPECIFICATION_REVISION_SELECT = `${ANCHORED_PUBLIC_REVISION_SELECT} livingRooms kitchens totalFloors buildingYear finishingStatusCode deliveryStatusCode formDefinitionId formDefinitionVersion formContentHash`;
-
 type PropertyCreateFiles = {
   images?: Express.Multer.File[];
   titleDeed?: Express.Multer.File[];
@@ -151,7 +107,6 @@ export class PropertiesService {
     private readonly evidenceAssets: CloudinaryAssetService,
     private readonly audit: AuditLogService,
     @InjectConnection() private readonly connection: Connection,
-    private readonly auctionLock: PropertyAuctionLockService,
     private readonly outbox: OutboxService,
     @Optional() private readonly idempotency?: IdempotencyService,
     @Optional() @InjectModel(PropertyFormDefinitionVersion.name) private readonly formVersions?: Model<PropertyFormDefinitionVersionDocument>,
@@ -204,7 +159,6 @@ export class PropertiesService {
   }
 
   private async createDraftRevisionOnce(actorId: string, propertyId: string, dto: CreatePropertyDto, files: PropertyCreateFiles, ip?: string) {
-    await this.auctionLock.assertUnlocked(propertyId);
     const accountId = new Types.ObjectId(actorId);
     const property = await this.properties.findOne({ _id: propertyId, lifecycleStatus: { $nin: [PropertyLifecycleStatus.ARCHIVED, PropertyLifecycleStatus.ADMIN_HIDDEN] }, $or: [{ advertiserAccountId: accountId }, { advertiserAccountId: { $exists: false }, ownerId: accountId }] }).lean().exec();
     if (!property) throw new NotFoundException('العقار غير موجود أو غير قابل للتعديل');
@@ -216,7 +170,6 @@ export class PropertiesService {
 
   async createDraftRevisionForAdmin(actorId: string, propertyId: string, dto: CreatePropertyDto, files: PropertyCreateFiles, ip?: string) {
     this.assertId(propertyId);
-    await this.auctionLock.assertUnlocked(propertyId);
     const property = await this.properties.findOne({ _id: propertyId, lifecycleStatus: { $nin: [PropertyLifecycleStatus.ARCHIVED, PropertyLifecycleStatus.ADMIN_HIDDEN] } }).lean().exec();
     if (!property) throw new NotFoundException('العقار غير موجود أو غير قابل للتعديل');
     if (property.pendingRevisionId) throw new ConflictException({ message: 'توجد نسخة قيد المراجعة بالفعل', code: PropertyErrorCode.PENDING_REVISION_EXISTS });
@@ -1001,172 +954,8 @@ export class PropertiesService {
     return new Map(hydrated.map((item) => [item.id, item]));
   }
 
-  /**
-   * Property attribution + current public revision needed to anchor a new
-   * auction (MAZAD-023). Reuses the exact same public-visibility gate as
-   * search/favorites, so an auction can never be created on — or silently
-   * remain anchored to a stale understanding of — a property that isn't
-   * actually live in the marketplace. Returns null when the property
-   * doesn't exist, isn't currently public, or has no approved revision yet.
-   */
-  async getEligibleForAuctionAnchor(id: string): Promise<{
-    propertyId: Types.ObjectId;
-    advertiserAccountId: Types.ObjectId;
-    advertiserAccountTypeSnapshot: AccountType;
-    currentPublicRevisionId: Types.ObjectId;
-  } | null> {
-    if (!Types.ObjectId.isValid(id)) return null;
-    const item = await this.properties.findOne({ _id: id, ...this.publicVisibilityFilter() }).lean().exec();
-    if (!item?.currentPublicRevisionId) return null;
-    const advertiserAccountId = (item.advertiserAccountId ?? item.ownerId) as Types.ObjectId | undefined;
-    if (!advertiserAccountId) return null;
-    return {
-      propertyId: item._id as Types.ObjectId,
-      advertiserAccountId,
-      advertiserAccountTypeSnapshot: item.advertiserAccountTypeSnapshot ?? AccountType.USER,
-      currentPublicRevisionId: item.currentPublicRevisionId as Types.ObjectId,
-    };
-  }
-
-  /**
-   * MAZAD-035: the authoritative facts every auction origination decision
-   * (seller submission/edit, Admin approval, the activation gate) re-reads,
-   * optionally inside the caller's transaction. Never throws for an
-   * ineligible property: callers map the facts to their own stable codes.
-   * `operationType` is read from the CURRENT PUBLIC revision (the listing
-   * bidders see), not from a draft or pending revision.
-   */
-  async getAuctionOriginationFacts(id: string, session?: ClientSession): Promise<{
-    propertyId: Types.ObjectId;
-    advertiserAccountId: Types.ObjectId;
-    advertiserAccountTypeSnapshot: AccountType;
-    publiclyVisible: boolean;
-    currentPublicRevisionId: Types.ObjectId | null;
-    pendingRevisionId: Types.ObjectId | null;
-    operationType: string | null;
-    title: string | null;
-  } | null> {
-    if (!Types.ObjectId.isValid(id)) return null;
-    const item: any = await this.properties.findById(id).session(session ?? null).lean().exec();
-    if (!item) return null;
-    const advertiserAccountId = (item.advertiserAccountId ?? item.ownerId) as Types.ObjectId | undefined;
-    if (!advertiserAccountId) return null;
-    const visible = await this.properties.exists({ _id: item._id, ...this.publicVisibilityFilter() }).session(session ?? null).exec();
-    const revision: any = item.currentPublicRevisionId
-      ? await this.revisions.findOne({ _id: item.currentPublicRevisionId, propertyId: item._id }).select('operationType title').session(session ?? null).lean().exec()
-      : null;
-    return {
-      propertyId: item._id as Types.ObjectId,
-      advertiserAccountId,
-      advertiserAccountTypeSnapshot: item.advertiserAccountTypeSnapshot ?? AccountType.USER,
-      publiclyVisible: Boolean(visible) && Boolean(revision),
-      currentPublicRevisionId: revision ? (item.currentPublicRevisionId as Types.ObjectId) : null,
-      pendingRevisionId: (item.pendingRevisionId as Types.ObjectId | undefined) ?? null,
-      operationType: revision?.operationType ?? null,
-      title: revision?.title ?? item.title ?? null,
-    };
-  }
-
-  /** MAZAD-035 activation gate: the auction's anchored revision still exists and belongs to its property. */
-  async resolveAuctionAnchor(propertyId: string, revisionId: string, session?: ClientSession): Promise<{ operationType: string } | null> {
-    if (!Types.ObjectId.isValid(propertyId) || !Types.ObjectId.isValid(revisionId)) return null;
-    const revision: any = await this.revisions
-      .findOne({ _id: new Types.ObjectId(revisionId), propertyId: new Types.ObjectId(propertyId) })
-      .select('operationType')
-      .session(session ?? null)
-      .lean()
-      .exec();
-    return revision ? { operationType: revision.operationType } : null;
-  }
-
-  /** MAZAD-035: the seller's own non-archived properties that currently have an approved public revision (auction candidates). */
-  async listOwnAuctionCandidates(actorId: string, limit = 100) {
-    if (!Types.ObjectId.isValid(actorId)) return [];
-    const accountId = new Types.ObjectId(actorId);
-    return this.properties
-      .find({ $or: [{ advertiserAccountId: accountId }, { advertiserAccountId: { $exists: false }, ownerId: accountId }], currentPublicRevisionId: { $exists: true } })
-      .select('_id')
-      .sort({ createdAt: -1, _id: -1 })
-      .limit(limit)
-      .lean()
-      .exec();
-  }
-
-  /**
-   * Mongo match for "properties an auction may be publicly listed under"
-   * (MAZAD-025): the shared public-visibility gate plus the same catalog
-   * dimension filters public search already validates (governorate, city,
-   * purpose category/subcategory). Reused verbatim so auction discovery can
-   * never disagree with property search about what is public or how a
-   * dimension filter is validated (unknown/mismatched catalog ids throw the
-   * same stable property error codes).
-   */
-  async buildPublicAuctionMatches(
-    filters: Pick<ListPublishedPropertiesDto, 'governorateCode' | 'city' | 'purposeCategoryId' | 'purposeSubcategoryId'> = {},
-  ): Promise<{ propertyMatch: Record<string, unknown>; revisionMatch: Record<string, unknown> }> {
-    // Phase 9 (Search & Facets): explicitly whitelist only these 4 catalog
-    // fields at runtime, never the caller's object as-is — a TypeScript `Pick<>`
-    // on the parameter type is erased at runtime and would not stop extra
-    // properties (e.g. facet params) from reaching `buildPublicListingQuery`
-    // if ever spread onto the input. Auction discovery must never filter on
-    // `Property.facets` (a mutable, always-current projection) or it could
-    // disagree with a terminal auction's anchored display later.
-    const { governorateCode, city, purposeCategoryId, purposeSubcategoryId } = filters;
-    const { filter } = await this.buildPublicListingQuery({ governorateCode, city, purposeCategoryId, purposeSubcategoryId } as ListPublishedPropertiesDto);
-    // Visibility belongs to the current Property, but classification and
-    // location belong to the revision the auction actually promises bidders.
-    // A terminal auction can outlive a later property approval, so applying
-    // these predicates to Property would return a row under the wrong filters.
-    const { purposeSubcategoryIds, ...revisionMatch } = filter;
-    if (purposeSubcategoryIds) {
-      revisionMatch.$or = [
-        { purposeSubcategoryIds },
-        { purposeSubcategoryIds: { $exists: false }, purposeSubcategoryId: purposeSubcategoryIds },
-      ];
-    }
-    return { propertyMatch: this.publicVisibilityFilter(), revisionMatch };
-  }
-
-  /**
-   * Safe public projections of the *frozen* revisions auctions are anchored
-   * to (MAZAD-025), keyed by `${propertyId}:${revisionId}` (a property can be re-auctioned
-   * under a newer revision). Unlike `getPublicProjectionsByIds`
-   * (which shows a property's current public revision), this renders exactly
-   * the revision each auction promised bidders, so a later property edit
-   * never changes what an auction page shows. Properties that no longer pass
-   * the public-visibility gate, and pairs whose revision does not belong to
-   * the property, are simply absent from the result.
-   */
-  async getAnchoredPublicProjections(pairs: Array<{ propertyId: string; revisionId: string }>, options: { specifications?: boolean } = {}): Promise<Map<string, any>> {
-    const valid = pairs.filter((pair) => Types.ObjectId.isValid(pair.propertyId) && Types.ObjectId.isValid(pair.revisionId));
-    if (!valid.length) return new Map();
-    const [properties, revisions] = await Promise.all([
-      this.properties.find({ _id: { $in: [...new Set(valid.map((pair) => pair.propertyId))] }, ...this.publicVisibilityFilter() }).lean().exec(),
-      this.revisions.find({ _id: { $in: [...new Set(valid.map((pair) => pair.revisionId))] } }, options.specifications ? ANCHORED_SPECIFICATION_REVISION_SELECT : ANCHORED_PUBLIC_REVISION_SELECT).lean().exec(),
-    ]);
-    const propertyById = new Map(properties.map((item) => [item._id.toString(), item]));
-    const revisionById = new Map(revisions.map((revision) => [revision._id.toString(), revision]));
-    const anchored: any[] = [];
-    const keys: string[] = [];
-    for (const pair of valid) {
-      const property = propertyById.get(pair.propertyId);
-      const revision = revisionById.get(pair.revisionId);
-      if (!property || !revision || revision.propertyId?.toString() !== pair.propertyId) continue;
-      const key = `${pair.propertyId}:${pair.revisionId}`;
-      if (keys.includes(key)) continue;
-      keys.push(key);
-      anchored.push({ ...property, currentPublicRevisionId: revision });
-    }
-    // hydratePublicListings preserves input order, so results pair up with `keys`.
-    const hydrated = await this.hydratePublicListings(anchored);
-    // Single-auction reads show the anchored revision's specifications, never the current property's.
-    const specifications = options.specifications ? await this.specificationsFor(anchored.map((item) => item.currentPublicRevisionId)) : undefined;
-    return new Map(hydrated.map((item, index) => [keys[index], specifications ? { ...item, specifications: specifications[index] } : item]));
-  }
-
   async updateOwnerVisibility(ownerId: string, id: string, isVisible: boolean) {
     this.assertId(id);
-    await this.auctionLock.assertUnlocked(id);
     const item = await this.properties.findOneAndUpdate(
       { _id: id, $or: [{ advertiserAccountId: new Types.ObjectId(ownerId) }, { advertiserAccountId: { $exists: false }, ownerId: new Types.ObjectId(ownerId) }] },
       { isOwnerVisible: isVisible },
@@ -1178,7 +967,6 @@ export class PropertiesService {
 
   async updateLifecycle(ownerId: string, id: string, status: PropertyLifecycleStatus.ACTIVE | PropertyLifecycleStatus.ARCHIVED, version: number, ip?: string) {
     this.assertId(id);
-    await this.auctionLock.assertUnlocked(id);
     const accountId = new Types.ObjectId(ownerId);
     const now = new Date();
     const session = await this.connection.startSession();
@@ -1200,7 +988,6 @@ export class PropertiesService {
   async forceLifecycleForAdmin(id: string, status: PropertyLifecycleStatus.ACTIVE | PropertyLifecycleStatus.ADMIN_HIDDEN, version: number, reason: string | undefined, actor: string, ip?: string) {
     this.assertId(id);
     if (status === PropertyLifecycleStatus.ADMIN_HIDDEN && !reason?.trim()) throw new BadRequestException({ message: 'سبب الإخفاء الإداري مطلوب', code: PropertyErrorCode.REVIEW_REASON_REQUIRED });
-    await this.auctionLock.assertUnlocked(id);
     const session = await this.connection.startSession();
     try {
       let item: any;

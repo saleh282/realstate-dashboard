@@ -217,6 +217,7 @@ describe('MAZAD-013 Admin-created COMPANY accounts', () => {
     await auth.register({
       fullName: 'Public User',
       identifier: 'public@example.com',
+      phone: '+201012345678',
       password: initialPassword,
       confirmPassword: initialPassword,
     });

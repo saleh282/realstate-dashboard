@@ -16,7 +16,7 @@
 
 Only one `PENDING_REVIEW` revision is allowed per property. The aggregate pointer and the partial unique index enforce this rule. Rejected revisions are immutable review history; corrections create a new sequential draft.
 
-Aggregate lifecycle is `active`, `archived`, or `admin_hidden`. Archive/hide changes visibility without deleting revision pointers, media, evidence, or history. The `PropertyAuctionLockService` boundary rejects archive or revision creation with `PROPERTY_AUCTION_LOCKED` once the future auction module supplies a scheduled/active lock implementation.
+Aggregate lifecycle is `active`, `archived`, or `admin_hidden`. Archive/hide changes visibility without deleting revision pointers, media, evidence, or history.
 
 ## Compatibility
 

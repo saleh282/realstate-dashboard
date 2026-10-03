@@ -50,7 +50,6 @@ function realPropertiesService() {
     cities: { findOne: jest.fn().mockReturnValue(query({ _id: '64b000000000000000000020', nameAr: 'القاهرة' })), updateOne: jest.fn(() => matched(1)) },
     options: { findOne: jest.fn().mockReturnValue(query({ code: 'valid' })), find: jest.fn().mockReturnValue(query([{ code: 'cash' }])), updateMany: jest.fn(() => matched(3)) },
     amenities: { countDocuments: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(1) }), updateMany: jest.fn(() => matched(1)) },
-    auctionLock: { assertUnlocked: jest.fn().mockResolvedValue(undefined) },
     ...new FormDefinitionStore().models(),
     properties: { create: jest.fn(async ([value]: any[]) => [{ ...value, toObject: () => ({ ...value, createdAt: new Date() }) }]), deleteOne: jest.fn(() => ({ exec: jest.fn().mockResolvedValue(undefined) })) },
     revisions: { create: jest.fn(async ([value]: any[]) => { createdRevisions.push(value); return [value]; }), deleteOne: jest.fn(() => ({ exec: jest.fn().mockResolvedValue(undefined) })) },

@@ -10,7 +10,7 @@ import { managedMarketingPaymentConfirmedEvent } from '../outbox/outbox-events';
 import { OutboxService } from '../outbox/outbox.service';
 import { ManagedMarketingPaymentStatus, ManagedMarketingRequestStatus } from '../managed-marketing/managed-marketing.types';
 import { ManagedMarketingRequest, ManagedMarketingRequestDocument } from '../managed-marketing/schemas/managed-marketing-request.schema';
-import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from './auction-payment-provider.port';
+import { PAYMENT_PROVIDER_PORT, PaymentProviderPort } from './payment-provider.port';
 import { MM_PAYMENT_UNIQUE_INDEXES } from './managed-marketing-payment.service';
 import { decideOutcome } from './payment-verification';
 import { EntryPaymentStatus, PaymentPurpose, PaymentReconciliationFlag, VerifiedProviderOutcome } from './payment.types';
@@ -31,16 +31,14 @@ type Outcome = { result: ManagedMarketingPaymentConfirmationResult; rejection?: 
 
 /**
  * The ONLY path that turns a managed-marketing request PAID (MAZAD-028).
- * Same trust model as the auction-entry confirmation: no outcome is accepted
+ * Server-side verification: no outcome is accepted
  * from the caller; the provider port is asked server-to-server, and the
  * verified answer is compared (shared `decideOutcome`) with the amount and
  * currency copied from the request's immutable package snapshot.
  *
  * Business effect, all in ONE transaction and only on verified success:
  *   payment INITIATED→SUCCEEDED  +  request {APPROVED, PENDING} → {PAID, SUCCEEDED, paidAt, paidPaymentId}
- * Nothing else: no schedule/SLA dates, no inspection/photography states, no
- * auction entitlement, auction, or bid — this service does not even inject
- * those models. Any disagreement or ambiguity parks the request in
+ * Nothing else: no schedule/SLA dates, no inspection/photography states, no other workflow changes. Any disagreement or ambiguity parks the request in
  * `RECONCILIATION_REQUIRED` (operator action), granting nothing.
  *
  * Expiry (`expire`) moves the attempt INITIATED → EXPIRED and the request
@@ -56,7 +54,7 @@ export class ManagedMarketingPaymentConfirmationService implements PaymentLifecy
     @InjectModel(ManagedMarketingPayment.name) private readonly payments: Model<ManagedMarketingPaymentDocument>,
     private readonly audit: AuditLogService,
     private readonly clock: ClockService,
-    @Inject(AUCTION_PAYMENT_PROVIDER_PORT) private readonly provider: AuctionPaymentProviderPort,
+    @Inject(PAYMENT_PROVIDER_PORT) private readonly provider: PaymentProviderPort,
     @InjectConnection() private readonly connection: Connection,
     private readonly outbox: OutboxService,
   ) {}
@@ -174,7 +172,7 @@ export class ManagedMarketingPaymentConfirmationService implements PaymentLifecy
     );
     // MAZAD-031: emitted ONLY on this verified-success transition (payment SUCCEEDED + request PAID, one
     // transaction). Replay, PENDING, FAILED and RECONCILIATION_REQUIRED paths return before this line. It is a
-    // MANAGED_MARKETING event on the request aggregate: it carries no auction, entitlement or bid meaning.
+    // MANAGED_MARKETING event on the request aggregate: it records the verified payment and PAID transition.
     await this.outbox.recordRequired(
       managedMarketingPaymentConfirmedEvent({
         requestId,

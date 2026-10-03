@@ -18,11 +18,12 @@
  * application moves a delivery out of DEAD_LETTER; redriving is a deliberate
  * operator action.
  */
+
 export enum OutboxStatus {
   PENDING = 'PENDING',
   PROCESSING = 'PROCESSING',
   PROCESSED = 'PROCESSED',
-  DEAD_LETTER = 'DEAD_LETTER',
+  DEAD_LETTER = 'DEAD_LETTER'
 }
 
 /** A delivery in one of these states is still owed to its consumer. */
@@ -35,6 +36,7 @@ export const OUTBOX_TERMINAL_STATUSES = [OutboxStatus.PROCESSED, OutboxStatus.DE
  * the exception message or stack (those can carry payloads, hostnames or PII);
  * `lastErrorName` additionally keeps the error's constructor name.
  */
+
 export enum OutboxErrorClass {
   /** The consumer threw / rejected: presumed transient, retried with backoff. */
   CONSUMER_ERROR = 'CONSUMER_ERROR',
@@ -43,7 +45,7 @@ export enum OutboxErrorClass {
   /** The consumer declared the event undeliverable (`OutboxPermanentDeliveryError`): dead-lettered immediately. */
   CONSUMER_PERMANENT = 'CONSUMER_PERMANENT',
   /** The delivery was claimed more times than allowed without ever being acknowledged (e.g. it crashes its worker). */
-  LEASE_EXPIRED_MAX_ATTEMPTS = 'LEASE_EXPIRED_MAX_ATTEMPTS',
+  LEASE_EXPIRED_MAX_ATTEMPTS = 'LEASE_EXPIRED_MAX_ATTEMPTS'
 }
 
 /**
@@ -62,7 +64,7 @@ export const OUTBOX_MAX_PAYLOAD_BYTES = 4_096;
 // ---------------------------------------------------------------------------
 
 /**
- * A consumer's stable identity (e.g. `realtime`, `notifications`). It is used as
+ * A consumer's stable identity (e.g. `notifications`). It is used as
  * a MongoDB field name inside `delivery` and inside an index name, so it must be
  * a plain lower-case token — no dots, no `$`, no hyphen. Renaming a consumer
  * creates a NEW consumer that re-receives all history: treat names as permanent.
@@ -74,7 +76,7 @@ export type OutboxDeliveryField =
   | 'status' | 'attemptCount' | 'nextAttemptAt' | 'claimedBy' | 'leaseToken' | 'claimedAt' | 'lastAttemptAt'
   | 'processedAt' | 'deadLetteredAt' | 'lastErrorClass' | 'lastErrorName';
 
-/** Dotted path of one of a consumer's delivery fields, e.g. `delivery.realtime.status`. */
+/** Dotted path of one of a consumer's delivery fields, e.g. `delivery.notifications.status`. */
 export const outboxDeliveryPath = (consumer: string, field: OutboxDeliveryField): string => `delivery.${consumer}.${field}`;
 
 /** Index that serves one consumer's scans (fresh events, retries, expired leases). Created when the consumer first dispatches. */

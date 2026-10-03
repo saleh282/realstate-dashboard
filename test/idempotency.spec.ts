@@ -1,10 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
-import {
-  IdempotencyErrorCode,
-  IdempotencyService,
-  canonicalize,
-} from '../src/common/idempotency/idempotency.service';
+import { IdempotencyErrorCode, IdempotencyService, canonicalize } from '../src/common/idempotency/idempotency.service';
 import { PropertiesController } from '../src/properties/properties.controller';
 import { PropertiesService } from '../src/properties/properties.service';
 
@@ -195,7 +191,7 @@ describe('property create/revision idempotency', () => {
     const records = fakeRecords();
     const idempotency = new IdempotencyService(records as any);
     const service: any = new (PropertiesService as any)(
-      {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { assertUnlocked: jest.fn() }, { recordRequired: jest.fn() }, idempotency,
+      {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { recordRequired: jest.fn() }, idempotency,
     );
     jest.spyOn(service, 'resolveAdvertiser').mockResolvedValue({ actorId: new Types.ObjectId(account), advertiserId: new Types.ObjectId(account), accountType: 'USER' });
     const createWithAttribution = jest.spyOn(service, 'createWithAttribution').mockResolvedValue(created);
@@ -274,7 +270,7 @@ describe('property create/revision idempotency', () => {
   });
 
   it('is optional infrastructure: the service still works when it is not provided', async () => {
-    const service: any = new (PropertiesService as any)({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { assertUnlocked: jest.fn() }, { recordRequired: jest.fn() });
+    const service: any = new (PropertiesService as any)({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { recordRequired: jest.fn() });
     jest.spyOn(service, 'resolveAdvertiser').mockResolvedValue({});
     jest.spyOn(service, 'createWithAttribution').mockResolvedValue(created);
     await expect(service.createSelf(account, dto, {}, '1.1.1.1', key)).resolves.toEqual(created);

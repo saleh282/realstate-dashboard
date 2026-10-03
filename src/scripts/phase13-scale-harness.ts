@@ -1,7 +1,7 @@
 /**
  * Synthetic scale harness (Phase 13). Loads a deterministic, realistically
  * skewed marketplace into a DISPOSABLE local database and measures the real
- * public-listing / auction-discovery / admin-queue queries with explain and
+ * public-listing / admin-queue queries with explain and
  * wall-clock timings.
  *
  *   DEPLOYMENT_ENV=local NODE_ENV=development \
@@ -24,8 +24,6 @@ import { assertDisposableTarget } from './disposable-target';
 import { PropertiesService } from '../properties/properties.service';
 import { PropertySchema } from '../properties/schemas/property.schema';
 import { PropertyRevisionSchema } from '../properties/schemas/property-revision.schema';
-import { AuctionSchema } from '../auctions/schemas/auction.schema';
-import { AuctionsQueryService } from '../auctions/auctions-query.service';
 
 const flag = (name: string) => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
 const has = (name: string) => process.argv.includes(`--${name}`);
@@ -58,7 +56,7 @@ const guardTarget = () => assertDisposableTarget(process.env.MONGO_URI);
 
 async function load(db: Db, source: Db | undefined, scale: number) {
   const rand = mulberry32(13);
-  for (const name of ['properties', 'property_revisions', 'auctions']) await db.collection(name).drop().catch(() => undefined);
+  for (const name of ['properties', 'property_revisions']) await db.collection(name).drop().catch(() => undefined);
   for (const name of ['property_types', 'property_purpose_categories']) {
     await db.collection(name).drop().catch(() => undefined);
     if (source) { const rows = await source.collection(name).find({}).toArray(); if (rows.length) await db.collection(name).insertMany(rows); }
@@ -71,11 +69,9 @@ async function load(db: Db, source: Db | undefined, scale: number) {
   const advertisers = Array.from({ length: Math.max(50, Math.floor(scale / 20)) }, () => new ObjectId());
   const properties: Array<Record<string, unknown>> = [];
   const revisions: Array<Record<string, unknown>> = [];
-  const auctions: Array<Record<string, unknown>> = [];
   const flush = async () => {
     if (properties.length) await db.collection('properties').insertMany(properties.splice(0), { ordered: false });
     if (revisions.length) await db.collection('property_revisions').insertMany(revisions.splice(0), { ordered: false });
-    if (auctions.length) await db.collection('auctions').insertMany(auctions.splice(0), { ordered: false });
   };
   for (let index = 0; index < scale; index++) {
     const type = pickWeighted(rand, types.map((row) => [row, typeWeight(String(row.code))] as [typeof row, number]));
@@ -99,15 +95,11 @@ async function load(db: Db, source: Db | undefined, scale: number) {
     });
     const property = properties[properties.length - 1];
     revisions.push({ _id: revisionId, propertyId: property._id, revisionNumber: 1, moderationStatus: status === 'approved' ? 'approved' : 'pending_review', governorateCode, city, purposeCategoryId: type.purposeCategoryId, purposeSubcategoryId: type._id, purposeSubcategoryIds: selected, operationType: property.operationType, totalPriceMinor, createdAt, updatedAt: createdAt });
-    if (status === 'approved' && rand() < 0.05) {
-      const auctionStatus = pickWeighted(rand, [['scheduled', 20], ['active', 25], ['ended_pending_close', 10], ['completed', 35], ['cancelled', 10]] as Array<[string, number]>);
-      const start = new Date(createdAt.getTime() + Math.floor(rand() * 30) * 86_400_000);
-      auctions.push({ _id: new ObjectId(), propertyId: property._id, propertyRevisionId: revisionId, advertiserAccountId: property.advertiserAccountId, status: auctionStatus, startingPriceMinor: Math.round(totalPriceMinor / 4), currency: 'EGP', scheduledStartAt: start, currentEndAt: new Date(start.getTime() + 7 * 86_400_000), createdAt, updatedAt: createdAt });
-    }
+
     if (properties.length >= 5000) await flush();
   }
   await flush();
-  return { properties: await db.collection('properties').countDocuments(), auctions: await db.collection('auctions').countDocuments() };
+  return { properties: await db.collection('properties').countDocuments() };
 }
 
 async function buildIndexes(db: Db) {
@@ -115,7 +107,6 @@ async function buildIndexes(db: Db) {
   const specs: Array<[string, Array<[Record<string, 1 | -1 | string>, Record<string, unknown>]>]> = [
     ['properties', PropertySchema.indexes() as never],
     ['property_revisions', PropertyRevisionSchema.indexes() as never],
-    ['auctions', AuctionSchema.indexes() as never],
   ];
   for (const [collection, indexes] of specs) {
     const existing = await db.collection(collection).indexes().catch(() => []);
@@ -183,30 +174,6 @@ async function measure(db: Db) {
   await listing('P11 facet shopFloorLevel (shop)', { purposeSubcategoryId: shop, shopFloorLevel: 'ground' });
   await listing('P12 deep page 50, no filter', {}, 50);
   await listing('P13 text search q', { q: 'property 77' });
-
-  const auctionResult = async (name: string, query: Record<string, unknown>) => {
-    const auctionsQuery = Object.create(AuctionsQueryService.prototype) as any;
-    let captured: any[] = [];
-    auctionsQuery.properties = { buildPublicAuctionMatches: (q: unknown) => service.buildPublicAuctionMatches(q), getAnchoredPublicProjections: async () => new Map() };
-    auctionsQuery.clock = { now: () => new Date() };
-    auctionsQuery.auctions = { aggregate: (pipeline: any[]) => { captured = pipeline; return { exec: async () => undefined }; } };
-    await auctionsQuery.listPublic(query).catch(() => undefined);
-    const run = () => db.collection('auctions').aggregate(captured, { allowDiskUse: true }).toArray();
-    const explain: any = await db.collection('auctions').aggregate(captured, { allowDiskUse: true }).explain('executionStats');
-    const stagesText = JSON.stringify(explain).match(/"stage":"[A-Z_]+"/g) ?? [];
-    const timing = await timed(async () => { await run(); }, 5);
-    const totals = explain.stages?.[0]?.$cursor?.executionStats ?? explain.executionStats ?? {};
-    results.push({
-      name, collection: 'auctions', stages: [...new Set(stagesText.map((s) => s.slice(9, -1)))], blockingSort: /"stage":"SORT"|\$sort/.test(JSON.stringify(explain)),
-      index: [...new Set((JSON.stringify(explain).match(/"indexName":"[^"]+"/g) ?? []).map((s) => s.slice(13, -1)))],
-      keysExamined: totals.totalKeysExamined ?? -1, docsExamined: totals.totalDocsExamined ?? -1, returned: totals.nReturned ?? -1, serverMs: totals.executionTimeMillis ?? -1, ...timing,
-    });
-  };
-  await auctionResult('A01 auctions newest (default statuses)', {});
-  await auctionResult('A02 auctions ending_soon', { sort: 'ending_soon' });
-  await auctionResult('A03 auctions price_asc', { sort: 'price_asc' });
-  await auctionResult('A04 auctions governorate=cairo', { governorateCode: 'cairo' });
-  await auctionResult('A05 auctions type=apartment', { purposeSubcategoryId: apartment });
 
   const raw = async (name: string, collection: string, filter: any, sort: any) => {
     const cursor = () => db.collection(collection).find(filter).sort(sort).limit(20);

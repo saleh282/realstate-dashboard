@@ -35,8 +35,7 @@ export type PropertySearchSort = (typeof PROPERTY_SEARCH_SORTS)[number];
 /**
  * Query contract for `GET /properties` (MAZAD-021 public marketplace search).
  * Every field is optional; an absent field means "no filter on this
- * dimension". Auction mode is intentionally not offered here yet: the schema
- * only knows `sale`/`rent` until bidding/auctions are implemented.
+ * dimension". Operation type supports `sale` and `rent`.
  */
 export class ListPublishedPropertiesDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;

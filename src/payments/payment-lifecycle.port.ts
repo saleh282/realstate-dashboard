@@ -3,7 +3,7 @@ import { EntryPaymentStatus, PaymentPurpose } from './payment.types';
 /**
  * What the shared payment lifecycle (confirmation routing, reconciliation
  * worker, expiry) needs from ONE payment purpose. The purpose-specific
- * fulfilment (auction entitlement, managed-marketing PAID) stays inside the
+ * fulfilment (managed-marketing PAID) stays inside the
  * purpose's own confirmation service; nothing here carries a business effect.
  *
  * None of these methods accepts an outcome: `confirm` asks the provider itself.

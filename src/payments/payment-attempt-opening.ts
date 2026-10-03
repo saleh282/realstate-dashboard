@@ -1,7 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { PaymentErrorCode } from '../common/errors/payment-error-codes';
-import { AuctionPaymentProviderPort } from './auction-payment-provider.port';
+import { PaymentProviderPort } from './payment-provider.port';
 import { EntryPaymentStatus, PaymentPurpose } from './payment.types';
 
 /**
@@ -44,7 +44,7 @@ export type OpenedAttempt<T> = { payment: T; reused: boolean };
  */
 export async function openAttemptWithProvider<T extends AttemptRow>(input: {
   payments: Model<any>;
-  provider: AuctionPaymentProviderPort;
+  provider: PaymentProviderPort;
   purpose: PaymentPurpose;
   attempt: T;
   reused: boolean;

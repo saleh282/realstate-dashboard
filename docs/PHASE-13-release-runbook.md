@@ -61,7 +61,7 @@ Therefore: **Backend → Admin → Flutter**, and never rely on all clients upda
 1. Backend compatible release (all new fields additive).
 2. Migrations (034 is additive; 035 is manual and only after the sortable indexes are seen in use).
 3. `release:manifest verify`, then `apply` if forms are missing.
-4. `migration:integrity`, smoke tests (create → submit → approve → public read → auction read).
+4. `migration:integrity`, smoke tests (create → submit → approve → public read).
 5. Admin release.
 6. Flutter staged rollout. Publish a **new or narrowed** FormDefinition (new `allowedAmenityCodes`, new fields) only after
    the client version that renders it is broadly adopted; until then old clients simply do not see such types.
@@ -71,7 +71,7 @@ Therefore: **Backend → Admin → Flutter**, and never rely on all clients upda
 * **Code:** clean repos; backend `typecheck`, `test`, `build`; Flutter `analyze`, `test`; Admin `typecheck`, `lint`, `test`, `build`, Playwright; no secrets; manifest self-consistent.
 * **Environment:** `DEPLOYMENT_ENV`, `DB_ENV_ALLOWLIST` and the identity marker in place; `PAYMENT_PROVIDER` unset (fail closed) — payment-dependent features stay disabled until a real adapter exists; SUPER_ADMIN bootstrap only with the break-glass token, then the variables removed.
 * **Database:** a pre-migration snapshot exists and its id is recorded (`MIGRATION_BACKUP_CONFIRM`); migration dry-run clean; no held lock; `migration:integrity` accepted; `release:manifest verify` ok.
-* **Performance:** `phase13-scale-harness` shows no `SORT` stage on the public listing at 100k listings; auction discovery within the agreed envelope (see §6).
+* **Performance:** `phase13-scale-harness` shows no `SORT` stage on the public listing at 100k listings.
 * **Operations:** `/health/ready` green; `GET /api/v1/admin/operations/status` has an empty `attention` list; alerts wired to the structured events in operations runbooks §1; runbooks reviewed.
 * **Clients:** signed builds, HTTPS `API_BASE_URL`, compatibility window agreed (§3).
 
@@ -92,24 +92,16 @@ Therefore: **Backend → Admin → Flutter**, and never rely on all clients upda
 | Deep page (page 50) | full scan | 1,000 keys (skip cost, linear in page depth) |
 | `total` (`countDocuments`) | ~40 ms unfiltered | unchanged (~40 ms) — linear; watch at ≥ 1M listings |
 | Free-text `q` (regex) | full visible scan | index-ordered scan with residual regex (~1.9k keys) |
-| Auction discovery (≈2k listable auctions) | ~125 ms | unchanged — sort follows two `$lookup`s, linear in listable auctions (~60 µs each) |
 
-The auction figure is the recommended trigger for a post-V1 denormalization of frozen classification/location onto
-the auction: schedule it when listable auctions approach ~10k. 1M-listing runs were **not** performed locally; run the
+1M-listing runs were **not** performed locally; run the
 harness on a staging-sized cluster. All targets are proposed engineering targets, not contractual SLAs.
 
 ## 7. Known post-V1 scaling items (single-instance V1)
 
 The V1 backend is a **single instance**. Deliberately not addressed: shared rate limiting (the throttler is per
-process), multi-instance realtime (exactly one instance may serve realtime), cursor pagination, a media-profile
-registry entity, auction denormalization. `TRUST_PROXY` stays generic (state your topology explicitly).
+process), cursor pagination, a media-profile
+registry entity. `TRUST_PROXY` stays generic (state your topology explicitly).
 
-Auction realtime (realtime hardening): staging/production refuse to start unless `REALTIME_ENABLED` is set explicitly.
-Set it `true` (with `REALTIME_TOPOLOGY=single_instance`, `OUTBOX_DISPATCHER_INTERVAL_SECONDS=1`,
-`AUCTION_LIFECYCLE_INTERVAL_SECONDS=5`) on exactly one instance, route every `/api/v1/realtime` upgrade to it, and
-redeploy that instance stop-then-start. Check `realtime_configuration` in its startup log and
-`checks.realtime: enabled` on `/health/ready`. Full requirements: `docs/MAZAD-032-realtime-auction-updates.md`,
-"Supported V1 deployment".
 
 ## 8. Client readiness
 

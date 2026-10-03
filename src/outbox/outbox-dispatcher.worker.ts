@@ -26,7 +26,7 @@ const STOP_WAIT_MS = 10_000;
  * marked delivered just because nobody was listening. Consumers may register at
  * any point before or after start-up; each tick reads the current registry.
  *
- * WAKE-UP (realtime hardening). Besides the periodic tick, an `OutboxWakeup`
+ * WAKE-UP. Besides the periodic tick, an `OutboxWakeup`
  * notification (sent by a producer after its transaction COMMITTED) starts a pass
  * immediately for every configured consumer. A notification that arrives while a
  * consumer's pass is running marks it "run again": when the pass ends, one more

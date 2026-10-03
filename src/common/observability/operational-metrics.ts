@@ -29,7 +29,7 @@ export const operationalMetrics = new OperationalMetrics();
  * Stable, expected-failure codes worth counting and logging as `domain_rejection`
  * because they signal a client/operator problem (stale forms, rejected
  * specifications or amenities, form lifecycle conflicts, payment trouble).
- * Deliberately explicit: ordinary validation noise and bid rejections are not here.
+ * Deliberately explicit: ordinary validation noise are not here.
  */
 export const OBSERVED_REJECTION_CODES: ReadonlySet<string> = new Set([
   'PROPERTY_FORM_VERSION_OUTDATED',

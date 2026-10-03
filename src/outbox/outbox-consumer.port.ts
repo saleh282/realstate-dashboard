@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import {
-  OutboxAggregateType, OutboxAudience, OutboxEventType, OutboxPayload, OutboxPrivateRouting,
-} from './outbox-events';
+import { OutboxAggregateType, OutboxAudience, OutboxEventType, OutboxPayload, OutboxPrivateRouting } from './outbox-events';
 import { OUTBOX_CONSUMER_NAME_PATTERN } from './outbox.constants';
 
 /**
@@ -29,8 +27,7 @@ export interface OutboxDeliveryEvent {
 }
 
 /**
- * One independent consumer of the outbox (realtime fan-out in MAZAD-032,
- * notifications in MAZAD-036, …). Each consumer has its OWN delivery progress
+ * One independent consumer of the outbox, such as notifications. Each consumer has its OWN delivery progress
  * per event: status, attempts, lease, retry schedule and dead letter. Another
  * consumer being ahead, behind, failing or dead-lettered never changes it.
  *
@@ -78,7 +75,7 @@ export class InvalidOutboxConsumerError extends Error {
  * durable and nothing is ever marked delivered.
  *
  * A future module registers its consumer from its own `onModuleInit` —
- * `registry.register(consumer)` — so adding realtime or notifications needs no
+ * `registry.register(consumer)` — so adding another consumer or notifications needs no
  * change to this module, to any business transaction, or to another consumer.
  * Registration is what creates the consumer's obligation: every committed event
  * of a subscribed type, including history from before the consumer existed, is

@@ -1,8 +1,10 @@
 import { IsNotEmpty, IsString } from 'class-validator';
+
 import {
   IsApplicationPassword,
   Match,
 } from '../../common/validators/password.validator';
+
 import { IsApplicationIdentifier } from '../../common/validators/identifier.validator';
 
 export class RegisterDto {
@@ -12,7 +14,11 @@ export class RegisterDto {
 
   @IsNotEmpty({ message: 'البريد الإلكتروني مطلوب' })
   @IsApplicationIdentifier()
-  identifier: string; // V1 auth accepts email only; phone remains contact data.
+  identifier: string;
+
+  @IsNotEmpty({ message: 'رقم الهاتف مطلوب' })
+  @IsString()
+  phone: string;
 
   @IsNotEmpty({ message: 'كلمة المرور مطلوبة' })
   @IsApplicationPassword()

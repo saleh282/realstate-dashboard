@@ -1,34 +1,13 @@
 import { ObjectId, type Collection, type Document } from 'mongodb';
+import { managedMarketingPaymentIndexesMigration } from '../038-managed-marketing-payment-indexes';
 import { EGP_CURRENCY, propertyMoneyFromStoredRecord } from '../../common/money/money';
 import { planUserIdentityMigration, scanUserIdentityMigration } from '../007-user-identity-contract';
-import {
-  planPropertyMoneyMigration,
-  scanPropertyMoneyMigration,
-} from '../006-property-money-minor-units';
+import { planPropertyMoneyMigration, scanPropertyMoneyMigration } from '../006-property-money-minor-units';
 import type { MigrationDefinition, MigrationContext } from './migration.types';
 import { legacyRevisionPointer, planLegacyPropertyRevision, scanLegacyPropertyRevisionMigration } from '../015-property-attribution-revisions';
-import {
-  PROPERTY_TYPE_SELECTION_BACKFILL_FILTER,
-  SELECTION_MISSING_PRIMARY_FILTER,
-  indexKeyMatches,
-  listingIndexProblems,
-  reconcileIndex,
-  scanPropertyTypeSelection,
-  type ExistingIndex,
-} from '../022-property-type-selection';
+import { PROPERTY_TYPE_SELECTION_BACKFILL_FILTER, SELECTION_MISSING_PRIMARY_FILTER, indexKeyMatches, listingIndexProblems, reconcileIndex, scanPropertyTypeSelection, type ExistingIndex } from '../022-property-type-selection';
 import { PROPERTY_SORTABLE_LISTING_INDEXES, PROPERTY_TYPE_LISTING_INDEXES, RETIRED_PURPOSE_LISTING_INDEX, SUPERSEDED_LISTING_INDEXES } from '../../properties/property-listing-indexes';
-import {
-  areaOutcome,
-  buildLegacyPropertyDataReport,
-  ensureFormDefinitionIndexes,
-  pairWithPublicRevisions,
-  resolveResidentialPurposeCategoryIds,
-  scanAreaBackfill,
-  scanLegacyDefinitions,
-  scanRegistrySeed,
-  seedLegacyDefinition,
-  seedRegistry,
-} from '../025-property-form-foundation';
+import { areaOutcome, buildLegacyPropertyDataReport, ensureFormDefinitionIndexes, pairWithPublicRevisions, resolveResidentialPurposeCategoryIds, scanAreaBackfill, scanLegacyDefinitions, scanRegistrySeed, seedLegacyDefinition, seedRegistry } from '../025-property-form-foundation';
 import { LEGACY_RESIDENTIAL_CONTENT_HASH } from '../../property-form-definitions/property-form-definition.constants';
 import { scanPhase8RegistrySeed, seedPhase8Registry } from '../029-non-residential-attribute-registry';
 import { PHASE9_PROMOTED_FACET_KEYS, promotePhase9Facets, scanPhase9FacetPromotion } from '../030-phase9-facet-promotion';
@@ -1258,6 +1237,7 @@ const mazad035IndexProblems = (db: MigrationContext['db']) => safetyIndexProblem
  */
 export const mazad035AuctionReviewMigration: MigrationDefinition = {
   id: '036-mazad035-auction-review-indexes',
+  manualOnly: true, // Retired feature: retained solely for historical migration compatibility.
   version: 1,
   description: 'MAZAD-035: create the auction_requests indexes (incl. the unique per-property live key), the unique (originRequestId, originRequestRevision) auction index and the per-auction payment index; report pre-review auctions',
   dependencies: [],
@@ -1299,6 +1279,7 @@ export const mazad035AuctionReviewMigration: MigrationDefinition = {
  */
 export const mazad028PaymentLifecycleMigration: MigrationDefinition = {
   id: '037-mazad028-payment-lifecycle-indexes',
+  manualOnly: true, // Frozen mixed-purpose migration; use 038 for managed marketing.
   version: 1,
   description: 'MAZAD-028: migration-manage the payment/entitlement unique indexes and create the reconciliation (status, nextVerifyAt) and operational indexes on auction_entry_payments, auction_bid_entitlements and managed_marketing_payments',
   dependencies: [],
@@ -1361,6 +1342,7 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   phase13RetireSupersededListingIndexesMigration,
   mazad035AuctionReviewMigration,
   mazad028PaymentLifecycleMigration,
+  managedMarketingPaymentIndexesMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {

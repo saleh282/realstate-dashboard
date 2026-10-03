@@ -11,7 +11,6 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from '../users/users.service';
 import { MailService } from './mail.service';
-import { SmsService } from './sms.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import {
@@ -65,7 +64,6 @@ export class AuthService {
     private config: ConfigService,
     private otpVerificationService: OtpVerificationService,
     private mailService: MailService,
-    private smsService: SmsService,
     private refreshTokenService: RefreshTokenService,
     private auditLogService: AuditLogService,
     private accountDeletionService?: AccountDeletionService,

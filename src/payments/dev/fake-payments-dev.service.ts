@@ -1,7 +1,7 @@
 import { ConflictException, HttpException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { PaymentErrorCode } from '../../common/errors/payment-error-codes';
-import { AUCTION_PAYMENT_PROVIDER_PORT, AuctionPaymentProviderPort } from '../auction-payment-provider.port';
+import { PAYMENT_PROVIDER_PORT, PaymentProviderPort } from '../payment-provider.port';
 import { FakePaymentProvider } from '../fake-payment-provider';
 import { PaymentConfirmationRouter } from '../payment-confirmation-router.service';
 import { EntryPaymentStatus, PaymentPurpose } from '../payment.types';
@@ -17,7 +17,6 @@ export type FakeSettlementResult = {
 };
 
 const OWNER_FIELD: Record<PaymentPurpose, string> = {
-  [PaymentPurpose.AUCTION_ENTRY]: 'bidderAccountId',
   [PaymentPurpose.MANAGED_MARKETING]: 'advertiserAccountId',
 };
 
@@ -33,7 +32,7 @@ const OWNER_FIELD: Record<PaymentPurpose, string> = {
 export class FakePaymentsDevService {
   constructor(
     private readonly router: PaymentConfirmationRouter,
-    @Inject(AUCTION_PAYMENT_PROVIDER_PORT) private readonly provider: AuctionPaymentProviderPort,
+    @Inject(PAYMENT_PROVIDER_PORT) private readonly provider: PaymentProviderPort,
   ) {}
 
   async settle(actorId: string, paymentId: string, outcome: 'success' | 'failed', trigger: boolean): Promise<FakeSettlementResult> {

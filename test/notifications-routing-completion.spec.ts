@@ -2,52 +2,15 @@ import { notificationValidation } from '../src/notifications/dto/notification-va
 import { ListNotificationsDto } from '../src/notifications/dto/list-notifications.dto';
 import { UpdateNotificationPreferencesDto } from '../src/notifications/dto/update-notification-preferences.dto';
 import { NotificationErrorCode } from '../src/common/errors/notification-error-codes';
-import { InvalidOutboxEventError, assertValidOutboxDraft, auctionActivatedEvent, auctionCancelledEvent, auctionFinalizedEvent, bidAcceptedEvent, kycDecisionEvent, propertyDecisionEvent } from '../src/outbox/outbox-events';
-import { toRealtimeEvent } from '../src/realtime/realtime-events';
+import { InvalidOutboxEventError, assertValidOutboxDraft, kycDecisionEvent, propertyDecisionEvent } from '../src/outbox/outbox-events';
 import { NotificationType } from '../src/notifications/notification.types';
-import { mapNotificationEvent, NOTIFICATION_SUBSCRIBED_EVENT_TYPES } from '../src/notifications/notification-event.mapper';
-import { OutboxEventType } from '../src/outbox/outbox-events';
+import { mapNotificationEvent } from '../src/notifications/notification-event.mapper';
+
 
 const id = (n: number) => `64b0000000000000000000${n.toString(16).padStart(2, '0')}`;
-const AUCTION = id(1);
 const ADVERTISER = id(0xa1);
-const PREV = id(0xb2);
-const BIDDER = id(0xc3);
-const WINNER = id(0xd4);
-const LOSER = id(0xe5);
 const T0 = new Date('2026-09-26T10:00:00.000Z');
-const later = new Date(T0.getTime() + 60_000);
 const delivery = (draft: any) => ({ eventId: id(9), aggregateVersion: 1, attempt: 1, ...draft });
-
-describe('MAZAD-036 completion: realtime independence from notification routing', () => {
-  it('no realtime frame carries any recipient id the notification routing needs', () => {
-    const drafts = [
-      auctionActivatedEvent({ auctionId: AUCTION, occurredAt: T0, currentEndAt: later, advertiserAccountId: ADVERTISER }),
-      auctionCancelledEvent({ auctionId: AUCTION, occurredAt: T0, previousStatus: 'active', advertiserAccountId: ADVERTISER }),
-      bidAcceptedEvent({ auctionId: AUCTION, occurredAt: T0, sequence: 2, amountMinor: 200, currency: 'EGP', acceptedBidCount: 2, currentEndAt: later, previousEndAt: later, extended: false, nextMinimumBidMinor: 250, bidderAccountId: BIDDER, previousHighestBidderAccountId: PREV }),
-      auctionFinalizedEvent({ auctionId: AUCTION, occurredAt: T0, winningBidSequence: 2, winningBidAmountMinor: 200, currency: 'EGP', acceptedBidCount: 2, winnerAccountId: WINNER, losingBidderAccountIds: [LOSER, PREV] }),
-    ];
-    for (const draft of drafts) {
-      const wire = JSON.stringify(toRealtimeEvent(delivery(draft) as any, T0)).toLowerCase();
-      for (const secret of [ADVERTISER, PREV, BIDDER, WINNER, LOSER, 'privaterouting', 'previoushighest', 'losingbidder', 'advertiseraccountid', 'subjectaccountid']) {
-        expect(wire).not.toContain(secret.toLowerCase());
-      }
-    }
-  });
-
-  it('the public payloads of the routed events are unchanged by private routing (no account ids inside them)', () => {
-    const drafts = [
-      auctionActivatedEvent({ auctionId: AUCTION, occurredAt: T0, currentEndAt: later, advertiserAccountId: ADVERTISER }),
-      auctionCancelledEvent({ auctionId: AUCTION, occurredAt: T0, previousStatus: 'scheduled', advertiserAccountId: ADVERTISER }),
-      bidAcceptedEvent({ auctionId: AUCTION, occurredAt: T0, sequence: 2, amountMinor: 200, currency: 'EGP', acceptedBidCount: 2, currentEndAt: later, previousEndAt: later, extended: false, nextMinimumBidMinor: 250, bidderAccountId: BIDDER, previousHighestBidderAccountId: PREV }),
-    ];
-    for (const draft of drafts) {
-      const text = JSON.stringify(draft.payload);
-      for (const account of [ADVERTISER, PREV, BIDDER]) expect(text).not.toContain(account);
-      expect(() => assertValidOutboxDraft(draft)).not.toThrow();
-    }
-  });
-});
 
 describe('MAZAD-036 completion: KYC / property events keep decisions private and reason-free', () => {
   it('KYC events are PRIVATE, route to the subject only, and carry no rejection reason or evidence', () => {
@@ -80,18 +43,8 @@ describe('MAZAD-036 completion: KYC / property events keep decisions private and
 describe('MAZAD-036 completion: required notifications cannot be preference-disabled', () => {
   const pipe = notificationValidation(UpdateNotificationPreferencesDto, NotificationErrorCode.PREFERENCE_INVALID);
 
-  it('there is no preference field for KYC, property, auction start, outbid, won, lost, cancelled or payment notifications', () => {
-    for (const field of ['kycDecisions', 'propertyDecisions', 'auctionStarted', 'outbid', 'auctionWon', 'auctionLost', 'auctionCancelled', 'paymentConfirmed', 'required', 'disableRequired', 'AUCTION_WON', 'OUTBID']) {
-      expect(() => pipe.transform({ [field]: 'OFF' }, {} as any)).toThrow(expect.objectContaining({ response: expect.objectContaining({ code: NotificationErrorCode.PREFERENCE_INVALID }) }));
-    }
-  });
-
   it('every mapped notification is required, whatever the recipient preferences say', () => {
     const drafts = [
-      auctionActivatedEvent({ auctionId: AUCTION, occurredAt: T0, currentEndAt: later, advertiserAccountId: ADVERTISER }),
-      auctionCancelledEvent({ auctionId: AUCTION, occurredAt: T0, previousStatus: 'active', advertiserAccountId: ADVERTISER }),
-      bidAcceptedEvent({ auctionId: AUCTION, occurredAt: T0, sequence: 2, amountMinor: 200, currency: 'EGP', acceptedBidCount: 2, currentEndAt: later, previousEndAt: later, extended: false, nextMinimumBidMinor: 250, bidderAccountId: BIDDER, previousHighestBidderAccountId: PREV }),
-      auctionFinalizedEvent({ auctionId: AUCTION, occurredAt: T0, winningBidSequence: 2, winningBidAmountMinor: 200, currency: 'EGP', acceptedBidCount: 2, winnerAccountId: WINNER, losingBidderAccountIds: [LOSER] }),
       kycDecisionEvent({ accountId: ADVERTISER, occurredAt: T0, decision: 'verified', kycVersion: 1 }),
       propertyDecisionEvent({ propertyId: id(7), revisionId: id(8), occurredAt: T0, decision: 'approved', decisionVersion: 1, advertiserAccountId: ADVERTISER }),
     ];
@@ -103,14 +56,8 @@ describe('MAZAD-036 completion: required notifications cannot be preference-disa
       }
     }
     expect([...types].sort()).toEqual([
-      NotificationType.AUCTION_CANCELLED, NotificationType.AUCTION_LOST, NotificationType.AUCTION_STARTED, NotificationType.AUCTION_WON,
-      NotificationType.KYC_APPROVED, NotificationType.OUTBID, NotificationType.PROPERTY_APPROVED,
+      NotificationType.KYC_APPROVED, NotificationType.PROPERTY_APPROVED,
     ].sort());
-  });
-
-  it('the notifications consumer never subscribes to end-extension or lifecycle events that have no recipient', () => {
-    expect(NOTIFICATION_SUBSCRIBED_EVENT_TYPES).not.toContain(OutboxEventType.AUCTION_END_EXTENDED);
-    expect(NOTIFICATION_SUBSCRIBED_EVENT_TYPES).not.toContain(OutboxEventType.AUCTION_ENDED_NO_BIDS);
   });
 });
 

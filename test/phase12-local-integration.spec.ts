@@ -1,8 +1,8 @@
 /** Opt-in write integration against the rebuilt, disposable localhost database.
  * Run with PHASE12_LOCAL_E2E=1 and the explicit local MONGO_URI. */
+
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
-import { WsAdapter } from '@nestjs/platform-ws';
 import { getConnectionToken } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import { ObjectId } from 'mongodb';
@@ -10,7 +10,6 @@ import { AppModule } from '../src/app.module';
 import { CloudinaryAssetService } from '../src/config/cloudinary-asset.service';
 import { AssetClassification } from '../src/config/evidence-asset.types';
 import { PropertiesService } from '../src/properties/properties.service';
-import { AuctionsQueryService } from '../src/auctions/auctions-query.service';
 import { OutboxService } from '../src/outbox/outbox.service';
 import { AuditLogService } from '../src/audit/audit-log.service';
 import { UsersService } from '../src/users/users.service';
@@ -50,7 +49,6 @@ describeLocal('Phase 12 rebuilt-baseline local write integration', () => {
       })
       .compile();
     app = moduleRef.createNestApplication();
-    app.useWebSocketAdapter(new WsAdapter(app));
     await app.init();
     const connection = app.get<Connection>(getConnectionToken());
     if (!connection.db || connection.db.databaseName !== 'mazad_phase12_disposable') throw new Error('Unexpected MongoDB target');
@@ -204,39 +202,6 @@ describeLocal('Phase 12 rebuilt-baseline local write integration', () => {
     await properties.reviewForAdmin(propertyId, edit.revisionId, edit.decisionVersion, 'approved', undefined, adminId);
     expect(String((await db.collection('properties').findOne({ _id: new ObjectId(propertyId) }))!.currentPublicRevisionId)).toBe(edit.revisionId);
   }, 30000);
-
-  it('keeps an auction discoverable and paginated by its ANCHORED revision after the property moves and a broken anchor exists', async () => {
-    const propertyId = createdIds.get('apartment')!;
-    const property = await db.collection('properties').findOne({ _id: new ObjectId(propertyId) });
-    const anchoredRevisionId = property!.currentPublicRevisionId as ObjectId;
-    const now = new Date();
-    const base = { propertyId: property!._id, status: 'ended_pending_close', startingPriceMinor: 1000, currency: 'EGP', createdAt: now, updatedAt: now };
-    const anchored = await db.collection('auctions').insertOne({ ...base, propertyRevisionId: anchoredRevisionId });
-    const broken = await db.collection('auctions').insertOne({ ...base, propertyRevisionId: new ObjectId(), createdAt: new Date(now.getTime() + 1) });
-    try {
-      const giza = await db.collection('governorates').findOne({ code: 'giza' });
-      const gizaCity = await db.collection('cities').findOne({ governorateId: giza!._id });
-      const edit = await apartmentEdit(propertyId, { governorateCode: 'giza', city: gizaCity!.nameAr, title: 'Phase 12 moved to giza' });
-      await properties.reviewForAdmin(propertyId, edit.revisionId, edit.decisionVersion, 'approved', undefined, adminId);
-      const live = await db.collection('properties').findOne({ _id: property!._id });
-      expect(live!.governorateCode).toBe('giza');
-
-      const query = app.get(AuctionsQueryService);
-      const old = await query.listPublic({ status: 'ended_pending_close', governorateCode: 'cairo' } as any);
-      const ids = (rows: any) => rows.items.map((item: any) => item.id ?? item.auctionId);
-      expect(old.pagination.total).toBe(old.items.length);
-      expect(old.items.some((item: any) => String(item.property.id) === propertyId)).toBe(true);
-      const moved = await query.listPublic({ status: 'ended_pending_close', governorateCode: 'giza' } as any);
-      expect(moved.items.some((item: any) => String(item.property.id) === propertyId)).toBe(false);
-      expect(moved.pagination.total).toBe(moved.items.length);
-      // The broken anchor never inflates a total and stays visible to the integrity gate.
-      const all = await query.listPublic({ status: 'ended_pending_close', limit: 50 } as any);
-      expect(all.pagination.total).toBe(all.items.length);
-      expect(ids(all)).not.toContain(String(broken.insertedId));
-    } finally {
-      await db.collection('auctions').deleteMany({ _id: { $in: [anchored.insertedId, broken.insertedId] } });
-    }
-  }, 60000);
 
   it('a repeated idempotency key replays the first submit result and writes exactly one submission audit row', async () => {
     const propertyId = createdIds.get('apartment')!;
