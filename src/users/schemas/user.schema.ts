@@ -12,6 +12,14 @@ import {
 
 export type UserDocument = User & Document;
 
+/** Terms and privacy policy versions the user agreed to at sign-up. */
+export type UserLegalAcceptance = {
+  termsVersion: number;
+  privacyVersion: number;
+  acceptedAt: Date;
+  ip?: string;
+};
+
 export enum KycStatus {
   NOT_SUBMITTED = 'not_submitted',
   PENDING = 'pending',
@@ -92,6 +100,9 @@ export class User {
 
   @Prop()
   suspendedAt?: Date;
+
+  @Prop({ type: Object })
+  legalAcceptance?: UserLegalAcceptance;
 
   // Privacy lifecycle fields are additive. The workflow collection remains the
   // durable source of deletion history and optimistic state transitions.

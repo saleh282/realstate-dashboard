@@ -8,6 +8,8 @@ const registration = {
   phone: '+201012345678',
   password: 'password',
   confirmPassword: 'password',
+  acceptedTermsVersion: 1,
+  acceptedPrivacyVersion: 1,
 };
 
 function createAuthService(existing?: { emailVerified: boolean; email: string }) {

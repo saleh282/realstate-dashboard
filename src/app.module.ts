@@ -14,6 +14,7 @@ import { CloudinaryModule } from './config/cloudinary.module';
 import { AdminModule } from './admin/admin.module';
 import { PropertyTypesModule } from './property-types/property-types.module';
 import { AmenitiesModule } from './amenities/amenities.module';
+import { LegalDocumentsModule } from './legal-documents/legal-documents.module';
 import { PropertyOptionsModule } from './property-options/property-options.module';
 import { GovernoratesModule } from './governorates/governorates.module';
 import { PropertyFormOptionsModule } from './property-form-options/property-form-options.module';
@@ -50,6 +51,7 @@ import { FakePaymentsDevModule } from './payments/dev/fake-payments-dev.module';
     AdminModule,
     PropertyTypesModule,
     AmenitiesModule,
+    LegalDocumentsModule,
     PropertyOptionsModule,
     GovernoratesModule,
     PropertyFormOptionsModule,

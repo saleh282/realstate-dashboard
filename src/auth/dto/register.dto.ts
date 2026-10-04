@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsInt, IsNotEmpty, IsString, Min } from 'class-validator';
 
 import {
   IsApplicationPassword,
@@ -31,4 +31,14 @@ export class RegisterDto {
   @IsNotEmpty({ message: 'تأكيد كلمة المرور مطلوب' })
   @Match('password', { message: 'كلمتا المرور غير متطابقتين' })
   confirmPassword: string;
+
+  // Versions of the terms and privacy policy the user ticked the box for.
+  // They must be the live versions; see LegalDocumentsService.resolveAcceptance.
+  @IsInt({ message: 'يجب الموافقة على الشروط والأحكام' })
+  @Min(1, { message: 'يجب الموافقة على الشروط والأحكام' })
+  acceptedTermsVersion: number;
+
+  @IsInt({ message: 'يجب الموافقة على سياسة الخصوصية' })
+  @Min(1, { message: 'يجب الموافقة على سياسة الخصوصية' })
+  acceptedPrivacyVersion: number;
 }

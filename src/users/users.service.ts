@@ -9,7 +9,7 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
-import { User, UserDocument, KycStatus } from './schemas/user.schema';
+import { User, UserDocument, KycStatus, UserLegalAcceptance } from './schemas/user.schema';
 import { RefreshTokenService } from '../refresh-token/refresh-token.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
@@ -780,7 +780,12 @@ export class UsersService {
    */
   async replaceUnverifiedRegistration(
     userId: string,
-    data: { passwordHash: string; fullName: string; phone?: string },
+    data: {
+      passwordHash: string;
+      fullName: string;
+      phone?: string;
+      legalAcceptance?: UserLegalAcceptance;
+    },
   ): Promise<boolean> {
     const result = await this.userModel
       .updateOne(
@@ -796,6 +801,7 @@ export class UsersService {
             fullName: data.fullName,
             failedLoginAttempts: 0,
             ...(data.phone ? { phone: data.phone } : {}),
+            ...(data.legalAcceptance ? { legalAcceptance: data.legalAcceptance } : {}),
           },
           $unset: { accountLockedUntil: 1 },
         },

@@ -220,6 +220,8 @@ describe('MAZAD-013 Admin-created COMPANY accounts', () => {
       phone: '+201012345678',
       password: initialPassword,
       confirmPassword: initialPassword,
+      acceptedTermsVersion: 1,
+      acceptedPrivacyVersion: 1,
     });
 
     expect(users.create).toHaveBeenCalledWith(

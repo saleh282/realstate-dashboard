@@ -389,6 +389,7 @@ export class AccountDeletionService {
             $unset: {
               email: 1, phone: 1, emailVerifiedAt: 1, phoneVerifiedAt: 1,
               profileImage: 1, address: 1, suspendReason: 1,
+              'legalAcceptance.ip': 1,
             },
           },
           { session },

@@ -11,6 +11,7 @@ import { MailService } from './mail.service';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtRefreshStrategy } from './jwt-refresh.strategy';
 import { AccountDeletionModule } from '../account-deletion/account-deletion.module';
+import { LegalDocumentsModule } from '../legal-documents/legal-documents.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { AccountDeletionModule } from '../account-deletion/account-deletion.modu
     RefreshTokenModule,
     AuditModule,
     AccountDeletionModule,
+    LegalDocumentsModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, MailService, JwtStrategy, JwtRefreshStrategy],

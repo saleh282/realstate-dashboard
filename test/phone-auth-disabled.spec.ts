@@ -57,6 +57,8 @@ describe('V1 email-only authentication', () => {
         phone,
         password: 'Password123!',
         confirmPassword: 'Password123!',
+        acceptedTermsVersion: 1,
+        acceptedPrivacyVersion: 1,
       })
       .catch((caught) => caught);
 

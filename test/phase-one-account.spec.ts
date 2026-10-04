@@ -32,6 +32,8 @@ describe('Phase 1 account contracts', () => {
       phone: '+201012345678',
       password: 'password',
       confirmPassword: 'password',
+      acceptedTermsVersion: 1,
+      acceptedPrivacyVersion: 1,
     });
     const invalid = Object.assign(new RegisterDto(), {
       ...valid,
