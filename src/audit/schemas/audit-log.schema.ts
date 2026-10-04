@@ -24,6 +24,7 @@ export enum AuditAction {
   ADMIN_USER_STATUS_UPDATED = 'admin_user_status_updated',
   ADMIN_USER_SESSIONS_REVOKED = 'admin_user_sessions_revoked',
   ADMIN_USER_ROLE_UPDATED = 'admin_user_role_updated',
+  ADMIN_USER_PHOTO_REMOVED = 'admin_user_photo_removed',
   ADMIN_COMPANY_ACCOUNT_CREATED = 'admin_company_account_created',
   ADMIN_KYC_REVIEWED = 'admin_kyc_reviewed',
   ADMIN_PROPERTY_TYPE_CREATED = 'admin_property_type_created',

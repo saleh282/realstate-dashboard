@@ -1,12 +1,19 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
   Patch,
+  Put,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { BoundedFile } from '../common/uploads/bounded-upload.interceptor';
+import { UPLOAD_REQUEST_LIMITS } from '../common/uploads/upload-policies';
+import { EvidenceErrorCode } from '../common/errors/evidence-error-codes';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { UsersService } from './users.service';
 import { DeleteAccountDto } from './dto/delete-account.dto';
@@ -18,6 +25,8 @@ import { RequireCapabilities } from '../authorization/capabilities.decorator';
 import { Capability } from '../authorization/capability';
 import { AuthorizationPolicyService } from '../authorization/authorization-policy.service';
 import { AccountDeletionService } from '../account-deletion/account-deletion.service';
+
+const allowedPhotoMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 @UseGuards(JwtAuthGuard, CapabilityGuard)
 @RequireCapabilities(Capability.ACCOUNT_SELF_READ)
@@ -54,6 +63,33 @@ export class UsersController {
       { fullName: dto.fullName, phone: dto.phone },
       req.ip,
     );
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Put('me/photo')
+  @RequireCapabilities(Capability.ACCOUNT_SELF_MANAGE)
+  @UseInterceptors(
+    BoundedFile('photo', {
+      maxRequestBytes: UPLOAD_REQUEST_LIMITS.profilePhoto,
+      multer: {
+        limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+        fileFilter: (_req, file, callback) => {
+          if (!allowedPhotoMimeTypes.has(file.mimetype)) {
+            return callback(new BadRequestException({ message: 'صيغة الصورة غير مدعومة', code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED }), false);
+          }
+          callback(null, true);
+        },
+      },
+    }),
+  )
+  updatePhoto(@Req() req: any, @UploadedFile() file: Express.Multer.File | undefined) {
+    return this.usersService.updateProfilePhoto(req.user.userId, file, req.ip);
+  }
+
+  @Delete('me/photo')
+  @RequireCapabilities(Capability.ACCOUNT_SELF_MANAGE)
+  removePhoto(@Req() req: any) {
+    return this.usersService.removeProfilePhoto(req.user.userId, req.ip);
   }
 
   @Throttle({ default: { limit: 5, ttl: 60000 } })

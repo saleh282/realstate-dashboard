@@ -4,6 +4,8 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -23,6 +25,9 @@ import {
 import { hashPassword } from '../common/security/password-hashing';
 import { AuthErrorCode } from '../common/errors/auth-error-codes';
 import { AssetClassification } from '../config/evidence-asset.types';
+import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
+import { validateEvidenceFile } from '../common/uploads/evidence-file.validator';
+import { EvidenceErrorCode } from '../common/errors/evidence-error-codes';
 import {
   AccountType,
   AccountStatus,
@@ -36,6 +41,8 @@ import { AuthorizationErrorCode } from '../authorization/authorization-error-cod
 import { kycDecisionEvent } from '../outbox/outbox-events';
 import { OutboxService } from '../outbox/outbox.service';
 
+const PROFILE_PHOTO_POLICY = { kind: 'image' as const, maxBytes: 5 * 1024 * 1024, maxImagePixels: 25_000_000 };
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -44,6 +51,7 @@ export class UsersService {
     private auditLogService: AuditLogService,
     @InjectConnection() private readonly connection: Connection,
     private readonly outbox: OutboxService,
+    @Optional() private readonly assets?: CloudinaryAssetService,
   ) {}
 
   static isEmail(identifier: string): boolean {
@@ -84,6 +92,7 @@ export class UsersService {
       fullName: user.fullName,
       email: user.email,
       phone: user.phone,
+      profilePhotoUrl: user.profilePhoto?.secureUrl ?? null,
       ...identityProjection(user),
       kycStatus: user.kycStatus,
       suspendReason: user.suspendReason,
@@ -129,6 +138,98 @@ export class UsersService {
       message: 'تم تحديث البيانات الشخصية بنجاح',
       ...(await this.getProfile(userId)),
     };
+  }
+
+  /**
+   * Replaces the user's profile photo. The new image is stored before the
+   * account is updated and the old one is removed last, so a failed upload
+   * never leaves the account without the photo it had.
+   */
+  async updateProfilePhoto(userId: string, file: Express.Multer.File | undefined, ip?: string) {
+    if (!file) {
+      throw new BadRequestException({
+        message: 'الصورة الشخصية مطلوبة',
+        code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED,
+      });
+    }
+    const assets = this.requireAssets();
+    const detected = validateEvidenceFile(file, PROFILE_PHOTO_POLICY);
+    const user = await this.findById(userId);
+    if (!user) throw new NotFoundException('المستخدم غير موجود');
+
+    const previous = user.profilePhoto;
+    const uploaded = await assets.uploadPublicProfilePhoto(file, detected);
+    user.profilePhoto = uploaded;
+    try {
+      await this.save(user);
+    } catch (error) {
+      await assets.deleteOrEnqueue([uploaded], 'profile-photo-save-failed');
+      throw error;
+    }
+    await assets.deleteOrEnqueue([previous], 'profile-photo-replaced');
+    await this.auditLogService.log(AuditAction.PROFILE_UPDATED, userId, ip);
+
+    return {
+      message: 'تم تحديث الصورة الشخصية بنجاح',
+      ...(await this.getProfile(userId)),
+    };
+  }
+
+  async removeProfilePhoto(userId: string, ip?: string) {
+    const user = await this.findById(userId);
+    if (!user) throw new NotFoundException('المستخدم غير موجود');
+    await this.clearProfilePhoto(user, 'profile-photo-removed');
+    await this.auditLogService.log(AuditAction.PROFILE_UPDATED, userId, ip);
+
+    return {
+      message: 'تم حذف الصورة الشخصية',
+      ...(await this.getProfile(userId)),
+    };
+  }
+
+  /** Moderation: an admin removes a photo that should not be shown publicly. */
+  async removeProfilePhotoForAdmin(options: {
+    actorUserId: string;
+    targetUserId: string;
+    reason: string;
+    ip?: string;
+  }) {
+    if (!Types.ObjectId.isValid(options.targetUserId)) {
+      throw new BadRequestException('معرّف المستخدم غير صالح');
+    }
+    const user = await this.findById(options.targetUserId);
+    if (!user) throw new NotFoundException('المستخدم غير موجود');
+    const removed = await this.clearProfilePhoto(user, 'profile-photo-removed-by-admin');
+    if (removed) {
+      await this.auditLogService.logAdminAction(
+        AuditAction.ADMIN_USER_PHOTO_REMOVED,
+        options.actorUserId,
+        options.targetUserId,
+        options.reason,
+        options.ip,
+      );
+    }
+    return { message: 'تم حذف الصورة الشخصية', removed };
+  }
+
+  private async clearProfilePhoto(user: UserDocument, reason: string): Promise<boolean> {
+    const previous = user.profilePhoto;
+    if (!previous) return false;
+    user.profilePhoto = undefined;
+    await this.save(user);
+    // The account no longer points at the image; removal from storage may be retried.
+    await this.assets?.deleteOrEnqueue([previous], reason);
+    return true;
+  }
+
+  private requireAssets(): CloudinaryAssetService {
+    if (!this.assets) {
+      throw new ServiceUnavailableException({
+        message: 'تعذر رفع الصورة الشخصية، حاول مرة أخرى لاحقاً',
+        code: EvidenceErrorCode.UPLOAD_FAILED,
+      });
+    }
+    return this.assets;
   }
 
   /**

@@ -4,6 +4,7 @@ const MIB = 1024 * 1024;
 // family. Per-file limits stay on each route; these bound the whole request.
 export const UPLOAD_REQUEST_LIMITS = {
   kyc: 16 * MIB,
+  profilePhoto: 6 * MIB,
   broker: 21 * MIB,
   propertyOwner: 64 * MIB,
   propertyAdmin: 100 * MIB,

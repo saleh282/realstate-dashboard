@@ -104,6 +104,10 @@ export class User {
   @Prop({ type: Object })
   legalAcceptance?: UserLegalAcceptance;
 
+  // Publicly delivered image; `secureUrl` is what clients display.
+  @Prop({ type: Object })
+  profilePhoto?: StoredAssetMetadata;
+
   // Privacy lifecycle fields are additive. The workflow collection remains the
   // durable source of deletion history and optimistic state transitions.
   @Prop({ index: true })

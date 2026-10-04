@@ -89,6 +89,21 @@ export class AdminUsersController {
     });
   }
 
+  @Delete(':userId/photo')
+  @RequireCapabilities(Capability.ADMIN_ACCOUNT_MANAGE)
+  removePhoto(
+    @Param('userId') targetUserId: string,
+    @Body() dto: RevokeSessionsDto,
+    @Req() req: any,
+  ) {
+    return this.usersService.removeProfilePhotoForAdmin({
+      actorUserId: req.user.userId,
+      targetUserId,
+      reason: dto?.reason?.trim() || 'profile photo removed by admin',
+      ip: req.ip,
+    });
+  }
+
   @Patch(':userId/role')
   @RequireCapabilities(Capability.SUPER_ADMIN_ROLE_MANAGE)
   updateRole(

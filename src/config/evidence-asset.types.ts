@@ -1,5 +1,6 @@
 export enum AssetClassification {
   PUBLIC_PROPERTY_MEDIA = 'public_property_media',
+  PUBLIC_PROFILE_PHOTO = 'public_profile_photo',
   PRIVATE_PROPERTY_EVIDENCE = 'private_property_evidence',
   PRIVATE_KYC_EVIDENCE = 'private_kyc_evidence',
   PRIVATE_BROKER_EVIDENCE = 'private_broker_evidence',

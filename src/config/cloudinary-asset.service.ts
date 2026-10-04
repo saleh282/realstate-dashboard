@@ -69,10 +69,53 @@ export class CloudinaryAssetService {
     }
   }
 
+  /**
+   * Stores a user's profile photo for public delivery. The image is cropped
+   * to a square around the face on upload, so the original is never kept.
+   */
+  async uploadPublicProfilePhoto(
+    file: Express.Multer.File,
+    detected: DetectedEvidenceFile,
+  ): Promise<StoredAssetMetadata & { secureUrl: string }> {
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        const stream = this.cloudinary.uploader.upload_stream(
+          {
+            folder: 'real-estate-auction/public/users/photos',
+            resource_type: 'image',
+            type: 'upload',
+            use_filename: false,
+            unique_filename: true,
+            overwrite: false,
+            transformation: [{ width: 512, height: 512, crop: 'fill', gravity: 'face' }],
+          },
+          (error: unknown, uploadResult: unknown) =>
+            error || !uploadResult ? reject(error ?? new Error('Missing upload result')) : resolve(uploadResult),
+        );
+        streamifier.createReadStream(file.buffer).pipe(stream);
+      });
+      return {
+        publicId: result.public_id,
+        secureUrl: result.secure_url,
+        resourceType: 'image',
+        deliveryType: 'upload',
+        classification: AssetClassification.PUBLIC_PROFILE_PHOTO,
+        format: detected.format === 'pdf' ? undefined : detected.format,
+        bytes: file.buffer.length,
+      };
+    } catch {
+      this.logger.error('Profile photo upload failed');
+      throw new ServiceUnavailableException({
+        message: 'تعذر رفع الصورة الشخصية، حاول مرة أخرى لاحقاً',
+        code: EvidenceErrorCode.UPLOAD_FAILED,
+      });
+    }
+  }
+
   async uploadPrivateEvidence(
     file: Express.Multer.File,
     folder: string,
-    classification: Exclude<AssetClassification, AssetClassification.PUBLIC_PROPERTY_MEDIA>,
+    classification: Exclude<AssetClassification, AssetClassification.PUBLIC_PROPERTY_MEDIA | AssetClassification.PUBLIC_PROFILE_PHOTO>,
     detected: DetectedEvidenceFile,
   ): Promise<StoredAssetMetadata> {
     const resourceType = detected.mime === 'application/pdf' ? 'raw' : 'image';

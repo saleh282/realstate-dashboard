@@ -1,3 +1,4 @@
+import { CloudinaryAssetService } from '../config/cloudinary-asset.service';
 import {
   BadRequestException,
   ConflictException,
@@ -56,6 +57,7 @@ export class AccountDeletionService {
     @Optional()
     @Inject(ACCOUNT_DELETION_BLOCKER_PROVIDERS)
     private readonly blockerProviders: AccountDeletionBlockerProvider[] = [],
+    @Optional() private readonly assets?: CloudinaryAssetService,
   ) {}
 
   async requestSelfDeletion(userId: string, password: string, ip?: string) {
@@ -359,6 +361,8 @@ export class AccountDeletionService {
       await this.requests.updateOne({ _id: request._id, version: options.version }, { $set: { blockers, lastAttemptAt: new Date(), failureCode: AuthErrorCode.ACCOUNT_DELETION_BLOCKED } }).exec();
       throw new ConflictException({ message: 'توجد التزامات يجب حلها قبل إخفاء الهوية', code: AuthErrorCode.ACCOUNT_DELETION_BLOCKED, blockers });
     }
+    // Read before the account is anonymized so the public image can be removed after.
+    const profilePhoto = (await this.users.findById(targetUserId).select('profilePhoto').lean().exec())?.profilePhoto;
     const now = new Date();
     const pseudonymousActorId = randomUUID();
     const anonymousPassword = await hashPassword(randomBytes(48).toString('base64url'));
@@ -389,7 +393,7 @@ export class AccountDeletionService {
             $unset: {
               email: 1, phone: 1, emailVerifiedAt: 1, phoneVerifiedAt: 1,
               profileImage: 1, address: 1, suspendReason: 1,
-              'legalAcceptance.ip': 1,
+              'legalAcceptance.ip': 1, profilePhoto: 1,
             },
           },
           { session },
@@ -426,6 +430,7 @@ export class AccountDeletionService {
       await session.endSession();
     }
     await this.refreshTokens.revokeAllForUser(options.targetUserId, 'ACCOUNT_ANONYMIZED');
+    await this.assets?.deleteOrEnqueue([profilePhoto], 'account-anonymized');
     return { message: 'تم إخفاء هوية الحساب مع الحفاظ على السجل المرجعي', state: AccountDeletionState.ANONYMIZED, finalPurgeEnabled: false };
   }
 
