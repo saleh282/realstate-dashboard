@@ -1,5 +1,6 @@
 import { ObjectId, type Collection, type Document } from 'mongodb';
 import { managedMarketingPaymentIndexesMigration } from '../038-managed-marketing-payment-indexes';
+import { legalDocumentsMigration } from '../039-legal-documents';
 import { EGP_CURRENCY, propertyMoneyFromStoredRecord } from '../../common/money/money';
 import { planUserIdentityMigration, scanUserIdentityMigration } from '../007-user-identity-contract';
 import { planPropertyMoneyMigration, scanPropertyMoneyMigration } from '../006-property-money-minor-units';
@@ -1343,6 +1344,7 @@ export const CORE_MIGRATIONS: MigrationDefinition[] = [
   mazad035AuctionReviewMigration,
   mazad028PaymentLifecycleMigration,
   managedMarketingPaymentIndexesMigration,
+  legalDocumentsMigration,
 ];
 
 export function validateMigrationRegistry(migrations: MigrationDefinition[] = CORE_MIGRATIONS): void {

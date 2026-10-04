@@ -56,6 +56,7 @@ import {
 } from '../users/identity.types';
 import { AccountDeletionService } from '../account-deletion/account-deletion.service';
 import { ConfirmAccountRecoveryDto, RequestAccountRecoveryDto } from '../account-deletion/dto/account-recovery.dto';
+import { LegalDocumentsService } from '../legal-documents/legal-documents.service';
 
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
@@ -71,6 +72,7 @@ export class AuthService {
     private refreshTokenService: RefreshTokenService,
     private auditLogService: AuditLogService,
     private accountDeletionService?: AccountDeletionService,
+    private legalDocumentsService?: LegalDocumentsService,
   ) {}
 
   private assertCanAuthenticate(user: any): AccountStatus {
@@ -209,6 +211,12 @@ export class AuthService {
     const identifier = this.normalizeEmailAuthIdentifier(dto.identifier);
     const existing = await this.usersService.findByIdentifier(identifier);
     const claimPhone = await this.resolveRegistrationPhone(dto.phone, existing);
+    // Checked before any write: a stale acceptance must not create an account.
+    const legalAcceptance = await this.legalDocumentsService?.resolveAcceptance(
+      dto.acceptedTermsVersion,
+      dto.acceptedPrivacyVersion,
+      ip,
+    );
     if (existing) {
       if (!isIdentifierVerified(existing, identifier)) {
         // An unverified account has no established owner. Whoever registered
@@ -226,6 +234,7 @@ export class AuthService {
               passwordHash: await hashPassword(dto.password),
               fullName: dto.fullName,
               phone: await claimPhone(),
+              legalAcceptance,
             },
           );
           if (!replaced) {
@@ -277,6 +286,7 @@ export class AuthService {
       fullName: dto.fullName,
       email: identifier,
       ...(phone ? { phone } : {}),
+      ...(legalAcceptance ? { legalAcceptance } : {}),
       password: passwordHash,
       systemRole: SystemRole.USER,
       accountType: AccountType.USER,

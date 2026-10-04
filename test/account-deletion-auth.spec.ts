@@ -102,6 +102,8 @@ describe('MAZAD-017 authentication state integration', () => {
       phone: '+201012345678',
       password: 'Password123!',
       confirmPassword: 'Password123!',
+      acceptedTermsVersion: 1,
+      acceptedPrivacyVersion: 1,
     })).rejects.toMatchObject({ status: 409 });
     expect(fixture.users.findByIdentifier).toHaveBeenCalledWith('person@example.com');
     expect(fixture.users.create).toBeUndefined();

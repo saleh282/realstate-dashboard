@@ -9,13 +9,15 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
-import { User, UserDocument, KycStatus } from './schemas/user.schema';
+import { User, UserDocument, KycStatus, UserLegalAcceptance } from './schemas/user.schema';
 import { RefreshTokenService } from '../refresh-token/refresh-token.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditAction } from '../audit/schemas/audit-log.schema';
 import { SystemRole } from '../auth/roles.enum';
 import {
+  CONTACT_PHONE_POLICY_MESSAGE,
   identifierLookupValues,
+  normalizeContactPhone,
   normalizeIdentifier,
 } from '../common/validators/identifier.validator';
 import { hashPassword } from '../common/security/password-hashing';
@@ -24,6 +26,7 @@ import { AssetClassification } from '../config/evidence-asset.types';
 import {
   AccountType,
   AccountStatus,
+  PrimaryIdentifierType,
   VerificationTrustState,
   identityProjection,
   resolveAccountStatus,
@@ -98,18 +101,79 @@ export class UsersService {
     };
   }
 
-  async updateProfile(userId: string, fullName: string, ip?: string) {
+  async updateProfile(
+    userId: string,
+    changes: { fullName?: string; phone?: string },
+    ip?: string,
+  ) {
+    if (changes.fullName === undefined && changes.phone === undefined) {
+      throw new BadRequestException('لا توجد بيانات للتحديث');
+    }
     const user = await this.findById(userId);
     if (!user) throw new NotFoundException('المستخدم غير موجود');
 
-    user.fullName = fullName.trim();
-    await this.save(user);
+    if (changes.fullName !== undefined) user.fullName = changes.fullName.trim();
+    if (changes.phone !== undefined) {
+      user.phone = await this.claimContactPhone(user, changes.phone);
+    }
+    try {
+      await this.save(user);
+    } catch (error: any) {
+      // Another account took the number between the check and the write.
+      if (error?.code === 11000) throw this.phoneInUse();
+      throw error;
+    }
     await this.auditLogService.log(AuditAction.PROFILE_UPDATED, userId, ip);
 
     return {
       message: 'تم تحديث البيانات الشخصية بنجاح',
       ...(await this.getProfile(userId)),
     };
+  }
+
+  /**
+   * Validates a new contact phone for an existing account, with the same
+   * ownership rule as registration: a number held by an established account
+   * is a conflict, one held only by a never-verified sign-up is released.
+   */
+  private async claimContactPhone(user: UserDocument, rawPhone: string): Promise<string> {
+    const phone = normalizeContactPhone(rawPhone);
+    if (!phone) {
+      throw new BadRequestException({
+        message: CONTACT_PHONE_POLICY_MESSAGE,
+        code: AuthErrorCode.INVALID_IDENTIFIER,
+      });
+    }
+    if (phone === user.phone) return phone;
+    // A verified phone is a sign-in identifier; replacing it here would
+    // bypass ownership verification.
+    if (user.phoneVerifiedAt || user.primaryIdentifierType === PrimaryIdentifierType.PHONE) {
+      throw new ConflictException({
+        message: 'لا يمكن تغيير رقم الهاتف المستخدم لتسجيل الدخول',
+        code: AuthErrorCode.PHONE_CHANGE_NOT_ALLOWED,
+      });
+    }
+
+    const holder = await this.findByIdentifier(phone);
+    if (holder && holder._id.toString() !== user._id.toString()) {
+      const pendingSignUp =
+        resolveSystemRole(holder) === SystemRole.USER &&
+        resolveAccountStatus(holder) === AccountStatus.ACTIVE &&
+        !holder.emailVerifiedAt &&
+        !holder.phoneVerifiedAt &&
+        holder.emailVerified !== true;
+      if (!pendingSignUp || !(await this.releaseUnverifiedPhone(holder._id.toString()))) {
+        throw this.phoneInUse();
+      }
+    }
+    return phone;
+  }
+
+  private phoneInUse() {
+    return new ConflictException({
+      message: 'رقم الهاتف مستخدم في حساب آخر',
+      code: AuthErrorCode.PHONE_ALREADY_IN_USE,
+    });
   }
 
   async changePassword(
@@ -780,7 +844,12 @@ export class UsersService {
    */
   async replaceUnverifiedRegistration(
     userId: string,
-    data: { passwordHash: string; fullName: string; phone?: string },
+    data: {
+      passwordHash: string;
+      fullName: string;
+      phone?: string;
+      legalAcceptance?: UserLegalAcceptance;
+    },
   ): Promise<boolean> {
     const result = await this.userModel
       .updateOne(
@@ -796,6 +865,7 @@ export class UsersService {
             fullName: data.fullName,
             failedLoginAttempts: 0,
             ...(data.phone ? { phone: data.phone } : {}),
+            ...(data.legalAcceptance ? { legalAcceptance: data.legalAcceptance } : {}),
           },
           $unset: { accountLockedUntil: 1 },
         },

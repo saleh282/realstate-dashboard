@@ -12,6 +12,7 @@ import { AdminPropertiesController } from '../src/properties/admin-properties.co
 import { PropertiesController } from '../src/properties/properties.controller';
 import { UsersController } from '../src/users/users.controller';
 import { AdminAmenitiesController } from '../src/amenities/admin-amenities.controller';
+import { AdminLegalDocumentsController } from '../src/legal-documents/admin-legal-documents.controller';
 import { AdminGovernoratesController } from '../src/governorates/admin-governorates.controller';
 import { AdminPropertyOptionsController } from '../src/property-options/admin-property-options.controller';
 import { AdminPropertyPurposeCategoriesController } from '../src/property-purpose-categories/admin-property-purpose-categories.controller';
@@ -37,6 +38,7 @@ describe('MAZAD-016 endpoint policy contract', () => {
     [AdminPropertiesController, Capability.ADMIN_PROPERTY_REVIEW],
     [AdminAmenitiesController, Capability.ADMIN_CATALOG_MANAGE],
     [AdminGovernoratesController, Capability.ADMIN_CATALOG_MANAGE],
+    [AdminLegalDocumentsController, Capability.ADMIN_CATALOG_MANAGE],
     [AdminPropertyOptionsController, Capability.ADMIN_CATALOG_MANAGE],
     [AdminPropertyPurposeCategoriesController, Capability.ADMIN_CATALOG_MANAGE],
     [AdminPropertyTypesController, Capability.ADMIN_CATALOG_MANAGE],

@@ -75,6 +75,8 @@ const registration = (overrides: Partial<RegisterDto> = {}): RegisterDto => ({
   phone: '+201012345678',
   password: 'Password123!',
   confirmPassword: 'Password123!',
+  acceptedTermsVersion: 1,
+  acceptedPrivacyVersion: 1,
   ...overrides,
 });
 

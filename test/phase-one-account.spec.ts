@@ -32,6 +32,8 @@ describe('Phase 1 account contracts', () => {
       phone: '+201012345678',
       password: 'password',
       confirmPassword: 'password',
+      acceptedTermsVersion: 1,
+      acceptedPrivacyVersion: 1,
     });
     const invalid = Object.assign(new RegisterDto(), {
       ...valid,
@@ -54,7 +56,7 @@ describe('Phase 1 account contracts', () => {
     service.auditLogService = { log: jest.fn().mockResolvedValue(undefined) };
 
     await expect(
-      service.updateProfile('user-id', '  New Name  ', '127.0.0.1'),
+      service.updateProfile('user-id', { fullName: '  New Name  ' }, '127.0.0.1'),
     ).resolves.toMatchObject({ fullName: 'New Name' });
     expect(user.fullName).toBe('New Name');
     expect(service.auditLogService.log).toHaveBeenCalledWith(
