@@ -8,7 +8,6 @@ import { AuditModule } from '../audit/audit.module';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { MailService } from './mail.service';
-import { SmsService } from './sms.service';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtRefreshStrategy } from './jwt-refresh.strategy';
 import { AccountDeletionModule } from '../account-deletion/account-deletion.module';
@@ -24,7 +23,7 @@ import { AccountDeletionModule } from '../account-deletion/account-deletion.modu
     AccountDeletionModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, MailService, SmsService, JwtStrategy, JwtRefreshStrategy],
+  providers: [AuthService, MailService, JwtStrategy, JwtRefreshStrategy],
   exports: [AuthService, MailService, JwtStrategy],
 })
 export class AuthModule {}

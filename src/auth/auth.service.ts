@@ -149,12 +149,6 @@ export class AuthService {
         code: AuthErrorCode.INVALID_IDENTIFIER,
       });
     }
-    if (normalized.kind === 'phone') {
-      throw new ServiceUnavailableException({
-        message: 'المصادقة برقم الهاتف غير متاحة في الإصدار الحالي. يرجى استخدام البريد الإلكتروني',
-        code: AuthErrorCode.PHONE_AUTH_UNAVAILABLE,
-      });
-    }
     return normalized.value;
   }
 
