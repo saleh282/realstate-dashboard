@@ -5,7 +5,10 @@ import {
   Match,
 } from '../../common/validators/password.validator';
 
-import { IsApplicationIdentifier } from '../../common/validators/identifier.validator';
+import {
+  IsApplicationIdentifier,
+  IsContactPhone,
+} from '../../common/validators/identifier.validator';
 
 export class RegisterDto {
   @IsNotEmpty({ message: 'الاسم الكامل مطلوب' })
@@ -16,8 +19,9 @@ export class RegisterDto {
   @IsApplicationIdentifier()
   identifier: string;
 
+  // Contact number only: stored unverified, never used to sign in or receive OTPs.
   @IsNotEmpty({ message: 'رقم الهاتف مطلوب' })
-  @IsString()
+  @IsContactPhone()
   phone: string;
 
   @IsNotEmpty({ message: 'كلمة المرور مطلوبة' })

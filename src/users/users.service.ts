@@ -780,7 +780,7 @@ export class UsersService {
    */
   async replaceUnverifiedRegistration(
     userId: string,
-    data: { passwordHash: string; fullName: string },
+    data: { passwordHash: string; fullName: string; phone?: string },
   ): Promise<boolean> {
     const result = await this.userModel
       .updateOne(
@@ -795,9 +795,29 @@ export class UsersService {
             password: data.passwordHash,
             fullName: data.fullName,
             failedLoginAttempts: 0,
+            ...(data.phone ? { phone: data.phone } : {}),
           },
           $unset: { accountLockedUntil: 1 },
         },
+      )
+      .exec();
+    return result.modifiedCount === 1;
+  }
+
+  /**
+   * Frees a contact phone held by a registration that was never verified, so
+   * an unconfirmed sign-up cannot reserve somebody else's number.
+   */
+  async releaseUnverifiedPhone(userId: string): Promise<boolean> {
+    const result = await this.userModel
+      .updateOne(
+        {
+          _id: userId,
+          emailVerifiedAt: { $exists: false },
+          phoneVerifiedAt: { $exists: false },
+          emailVerified: { $ne: true },
+        },
+        { $unset: { phone: 1 } },
       )
       .exec();
     return result.modifiedCount === 1;

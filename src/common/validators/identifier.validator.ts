@@ -76,6 +76,47 @@ class ApplicationIdentifierConstraint implements ValidatorConstraintInterface {
   }
 }
 
+const INTERNATIONAL_PHONE_PATTERN = /^\+[1-9]\d{6,14}$/;
+
+export const CONTACT_PHONE_POLICY_MESSAGE =
+  'أدخل رقم هاتف صحيح مع كود الدولة';
+
+/**
+ * Canonical form of a contact phone. Unlike sign-in identifiers, contact
+ * numbers may come from any country: Egyptian and Saudi numbers keep their
+ * existing normalization, anything else must already be E.164.
+ */
+export function normalizeContactPhone(value: string): string | null {
+  const local = normalizePhone(value);
+  if (local) return local;
+  let phone = compactPhone(value.trim());
+  if (phone.startsWith('00')) phone = `+${phone.slice(2)}`;
+  return INTERNATIONAL_PHONE_PATTERN.test(phone) ? phone : null;
+}
+
+@ValidatorConstraint({ name: 'isContactPhone', async: false })
+class ContactPhoneConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    return typeof value === 'string' && normalizeContactPhone(value) !== null;
+  }
+
+  defaultMessage(): string {
+    return CONTACT_PHONE_POLICY_MESSAGE;
+  }
+}
+
+export function IsContactPhone(validationOptions?: ValidationOptions) {
+  return (object: object, propertyName: string) => {
+    registerDecorator({
+      name: 'IsContactPhone',
+      target: object.constructor,
+      propertyName,
+      options: validationOptions,
+      validator: ContactPhoneConstraint,
+    });
+  };
+}
+
 export function IsApplicationIdentifier(validationOptions?: ValidationOptions) {
   return (object: object, propertyName: string) => {
     registerDecorator({

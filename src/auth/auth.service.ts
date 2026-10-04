@@ -28,7 +28,11 @@ import { AuditAction } from '../audit/schemas/audit-log.schema';
 import { hashPassword } from '../common/security/password-hashing';
 import { SystemRole } from './roles.enum';
 import { randomUUID } from 'crypto';
-import { normalizeIdentifier } from '../common/validators/identifier.validator';
+import {
+  CONTACT_PHONE_POLICY_MESSAGE,
+  normalizeContactPhone,
+  normalizeIdentifier,
+} from '../common/validators/identifier.validator';
 import {
   ACCESS_TOKEN_TYPE,
   PASSWORD_RESET_AUDIENCE,
@@ -152,6 +156,45 @@ export class AuthService {
     return normalized.value;
   }
 
+  /**
+   * Validates the contact phone for a registration. Phones are unique but
+   * never verified in V1, so a number held by another established account is
+   * a conflict, while one held by a never-verified sign-up can be taken.
+   *
+   * Nothing is written here: the returned `claim` frees the number from that
+   * pending sign-up and is only called once the registration will be stored.
+   */
+  private async resolveRegistrationPhone(
+    rawPhone: string | undefined,
+    registrant: any,
+  ): Promise<() => Promise<string | undefined>> {
+    if (!rawPhone) return async () => undefined;
+    const phone = normalizeContactPhone(rawPhone);
+    if (!phone) {
+      throw new BadRequestException({
+        message: CONTACT_PHONE_POLICY_MESSAGE,
+        code: AuthErrorCode.INVALID_IDENTIFIER,
+      });
+    }
+    const phoneInUse = () =>
+      new ConflictException({
+        message: 'رقم الهاتف مستخدم في حساب آخر',
+        code: AuthErrorCode.PHONE_ALREADY_IN_USE,
+      });
+
+    const holder = await this.usersService.findByIdentifier(phone);
+    if (!holder || holder._id.toString() === registrant?._id.toString()) {
+      return async () => phone;
+    }
+    if (!this.isSelfRegisteredPendingAccount(holder)) throw phoneInUse();
+
+    return async () => {
+      const released = await this.usersService.releaseUnverifiedPhone(holder._id.toString());
+      if (!released) throw phoneInUse();
+      return phone;
+    };
+  }
+
   private async sendOtp(identifier: string, code: string) {
     const email = this.normalizeEmailAuthIdentifier(identifier);
     await this.mailService.sendOtp(email, code);
@@ -165,6 +208,7 @@ export class AuthService {
 
     const identifier = this.normalizeEmailAuthIdentifier(dto.identifier);
     const existing = await this.usersService.findByIdentifier(identifier);
+    const claimPhone = await this.resolveRegistrationPhone(dto.phone, existing);
     if (existing) {
       if (!isIdentifierVerified(existing, identifier)) {
         // An unverified account has no established owner. Whoever registered
@@ -181,6 +225,7 @@ export class AuthService {
             {
               passwordHash: await hashPassword(dto.password),
               fullName: dto.fullName,
+              phone: await claimPhone(),
             },
           );
           if (!replaced) {
@@ -226,10 +271,12 @@ export class AuthService {
     }
 
     const passwordHash = await hashPassword(dto.password);
+    const phone = await claimPhone();
 
     const user = await this.usersService.create({
       fullName: dto.fullName,
       email: identifier,
+      ...(phone ? { phone } : {}),
       password: passwordHash,
       systemRole: SystemRole.USER,
       accountType: AccountType.USER,
