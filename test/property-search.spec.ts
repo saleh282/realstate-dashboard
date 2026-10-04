@@ -469,12 +469,11 @@ describe('MAZAD-021 approval denormalization', () => {
 });
 
 /**
- * MAZAD-022 favorites reuses the exact same public-visibility gate through
- * two small read helpers on PropertiesService, rather than a parallel
- * favorites-only notion of "visible". These tests exercise those helpers
+ * Two small by-id read helpers on PropertiesService reuse the exact same
+ * public-visibility gate as the listing. These tests exercise those helpers
  * directly against the same fixtures/harness as the MAZAD-021 suite above.
  */
-describe('PropertiesService favorite-support helpers (MAZAD-022)', () => {
+describe('PropertiesService by-id public visibility helpers', () => {
   // getPublicProjectionsByIds/isPubliclyVisible short-circuit on
   // Types.ObjectId.isValid, so fixtures here need real ObjectId-hex ids
   // (unlike the string ids the MAZAD-021 suite above uses elsewhere).

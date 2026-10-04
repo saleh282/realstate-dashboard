@@ -193,7 +193,7 @@ describe('DPF-016 specifications on the read surfaces', () => {
     expect(admin.pendingRevision.specifications).toEqual(pinnedSpecifications);
     expect(admin.currentPublicRevision.specifications).toEqual(legacySpecifications);
   });
-  it('keeps list and favorites responses narrow: no specifications or attributes', async () => {
+  it('keeps list responses narrow: no specifications or attributes', async () => {
     const { instance } = service(property(legacyRevision), [legacyRevision]);
     const listing = await instance.hydratePublicListings([property(legacyRevision)]);
     expect(listing[0]).not.toHaveProperty('specifications');

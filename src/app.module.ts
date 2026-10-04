@@ -26,7 +26,6 @@ import { ManagedMarketingModule } from './managed-marketing/managed-marketing.mo
 import { AuthorizationModule } from './authorization/authorization.module';
 import { AccountDeletionModule } from './account-deletion/account-deletion.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
-import { FavoritesModule } from './favorites/favorites.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { FakePaymentsDevModule } from './payments/dev/fake-payments-dev.module';
@@ -63,7 +62,6 @@ import { FakePaymentsDevModule } from './payments/dev/fake-payments-dev.module';
     AuthorizationModule,
     AccountDeletionModule,
     GeocodingModule,
-    FavoritesModule,
     OutboxModule,
     NotificationsModule,
     HealthModule,

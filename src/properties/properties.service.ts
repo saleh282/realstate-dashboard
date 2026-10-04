@@ -913,10 +913,9 @@ export class PropertiesService {
   /**
    * The single gate every public-facing property query shares: approved,
    * owner-visible, not archived/admin-hidden, and carrying a current public
-   * revision. Centralized so `listPublished`, `getPublished` and the
-   * favorites read paths (MAZAD-022) can never drift apart on what "public"
-   * means — a property that stops meeting this must stop being reachable
-   * through any of them, even if a user had previously favorited it.
+   * revision. Centralized so `listPublished`, `getPublished` and the by-id
+   * helpers below can never drift apart on what "public" means — a property
+   * that stops meeting this must stop being reachable through any of them.
    */
   private publicVisibilityFilter() {
     // Set-membership form of "not hidden by the owner" / "not archived or admin-hidden".
@@ -932,7 +931,7 @@ export class PropertiesService {
     };
   }
 
-  /** Cheap existence+visibility check used to validate a favorite target (MAZAD-022). */
+  /** Cheap existence+visibility check for a single property id. */
   async isPubliclyVisible(id: string): Promise<boolean> {
     if (!Types.ObjectId.isValid(id)) return false;
     const exists = await this.properties.exists({ _id: id, ...this.publicVisibilityFilter() }).exec();
@@ -940,8 +939,7 @@ export class PropertiesService {
   }
 
   /**
-   * Safe public projections for a set of property ids (MAZAD-022 favorites
-   * listing), keyed by property id. Ids that no longer pass
+   * Safe public projections for a set of property ids, keyed by property id. Ids that no longer pass
    * `publicVisibilityFilter` (hidden, archived, rejected, deleted, ...) are
    * simply absent from the result — the caller must not assume every
    * requested id comes back.
