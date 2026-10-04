@@ -49,7 +49,11 @@ export class UsersController {
   @Patch('me')
   @RequireCapabilities(Capability.ACCOUNT_SELF_MANAGE)
   updateProfile(@Req() req: any, @Body() dto: UpdateProfileDto) {
-    return this.usersService.updateProfile(req.user.userId, dto.fullName, req.ip);
+    return this.usersService.updateProfile(
+      req.user.userId,
+      { fullName: dto.fullName, phone: dto.phone },
+      req.ip,
+    );
   }
 
   @Throttle({ default: { limit: 5, ttl: 60000 } })
