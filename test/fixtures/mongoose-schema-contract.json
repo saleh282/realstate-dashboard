@@ -1,0 +1,5111 @@
+{
+  "AccountDeletionRequestSchema": {
+    "collection": "account_deletion_requests",
+    "indexes": [
+      [
+        {
+          "userId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "state": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "recoverableUntil": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "legalHold": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "userId": 1,
+          "workflowVersion": 1
+        },
+        {
+          "background": true,
+          "name": "account_deletion_user_version_unique",
+          "unique": true
+        }
+      ],
+      [
+        {
+          "state": 1,
+          "userId": 1
+        },
+        {
+          "background": true,
+          "name": "account_deletion_active_unique",
+          "partialFilterExpression": {
+            "state": {
+              "$in": [
+                "PENDING",
+                "ANONYMIZING"
+              ]
+            }
+          },
+          "unique": true
+        }
+      ],
+      [
+        {
+          "legalHold": 1,
+          "recoverableUntil": 1,
+          "state": 1
+        },
+        {
+          "background": true,
+          "name": "account_deletion_processing_queue"
+        }
+      ]
+    ],
+    "paths": {
+      "userId": {
+        "instance": "Mixed",
+        "constraints": {
+          "index": true,
+          "ref": "User",
+          "required": true
+        }
+      },
+      "workflowVersion": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1,
+          "required": true
+        }
+      },
+      "state": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "ANONYMIZED": "ANONYMIZED",
+            "ANONYMIZING": "ANONYMIZING",
+            "PENDING": "PENDING",
+            "PURGE_DISABLED": "PURGE_DISABLED",
+            "RESTORED": "RESTORED"
+          },
+          "index": true,
+          "required": true
+        }
+      },
+      "requestedAt": {
+        "instance": "Date",
+        "constraints": {
+          "required": true
+        }
+      },
+      "recoverableUntil": {
+        "instance": "Date",
+        "constraints": {
+          "index": true,
+          "required": true
+        }
+      },
+      "source": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "SELF",
+            "ADMIN"
+          ],
+          "required": true
+        }
+      },
+      "requestedByActorId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "reason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500
+        }
+      },
+      "blockers": {
+        "instance": "Array",
+        "constraints": {}
+      },
+      "legalHold": {
+        "instance": "Boolean",
+        "constraints": {
+          "index": true
+        }
+      },
+      "legalHoldReason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500,
+          "select": false
+        }
+      },
+      "legalHoldPlacedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "legalHoldPlacedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "legalHoldRemovedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "legalHoldRemovedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "legalHoldRemovalReason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500,
+          "select": false
+        }
+      },
+      "restoredAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "restoredByActorId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "anonymizationStartedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "anonymizedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "failureCode": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100
+        }
+      },
+      "lastAttemptAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "evidenceRetentionState": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "RETAIN_PENDING_POLICY"
+          ],
+          "required": true
+        }
+      },
+      "finalPurgeEligible": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "AmenitySchema": {
+    "collection": "amenities",
+    "indexes": [
+      [
+        {
+          "code": 1
+        },
+        {
+          "background": true,
+          "unique": true
+        }
+      ],
+      [
+        {
+          "category": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "isActive": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "sortOrder": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "category": 1,
+          "isActive": 1,
+          "nameAr": 1,
+          "sortOrder": 1
+        },
+        {
+          "background": true
+        }
+      ]
+    ],
+    "paths": {
+      "code": {
+        "instance": "String",
+        "constraints": {
+          "lowercase": true,
+          "maxlength": 50,
+          "required": true,
+          "trim": true,
+          "unique": true
+        }
+      },
+      "nameAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "nameEn": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "descriptionAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500,
+          "trim": true
+        }
+      },
+      "iconKey": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 50,
+          "required": true,
+          "trim": true
+        }
+      },
+      "category": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "feature",
+            "service",
+            "facility"
+          ],
+          "index": true,
+          "required": true
+        }
+      },
+      "isActive": {
+        "instance": "Boolean",
+        "constraints": {
+          "index": true
+        }
+      },
+      "sortOrder": {
+        "instance": "Number",
+        "constraints": {
+          "index": true,
+          "required": true
+        }
+      },
+      "createdBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User",
+          "required": true
+        }
+      },
+      "updatedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "usageCount": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "AuditLogSchema": {
+    "collection": "audit_logs",
+    "indexes": [
+      [
+        {
+          "requestId": 1
+        },
+        {
+          "background": true
+        }
+      ]
+    ],
+    "paths": {
+      "userId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "action": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "ACCOUNT_ANONYMIZATION_COMPLETED": "account_anonymization_completed",
+            "ACCOUNT_ANONYMIZATION_STARTED": "account_anonymization_started",
+            "ACCOUNT_DELETED": "account_deleted",
+            "ACCOUNT_DELETION_REQUESTED": "account_deletion_requested",
+            "ACCOUNT_DELETION_RESTORED": "account_deletion_restored",
+            "ACCOUNT_LEGAL_HOLD_PLACED": "account_legal_hold_placed",
+            "ACCOUNT_LEGAL_HOLD_REMOVED": "account_legal_hold_removed",
+            "ACCOUNT_PURGE_ELIGIBILITY_REVIEWED": "account_purge_eligibility_reviewed",
+            "ADMIN_AMENITY_CREATED": "admin_amenity_created",
+            "ADMIN_AMENITY_DELETED": "admin_amenity_deleted",
+            "ADMIN_AMENITY_UPDATED": "admin_amenity_updated",
+            "ADMIN_BROKER_APPLICATION_REVIEWED": "admin_broker_application_reviewed",
+            "ADMIN_BROKER_REQUIREMENT_ARCHIVED": "admin_broker_requirement_archived",
+            "ADMIN_BROKER_REQUIREMENT_CREATED": "admin_broker_requirement_created",
+            "ADMIN_BROKER_REQUIREMENT_UPDATED": "admin_broker_requirement_updated",
+            "ADMIN_BROKER_RESTORED": "admin_broker_restored",
+            "ADMIN_BROKER_REVOKED": "admin_broker_revoked",
+            "ADMIN_BROKER_SUSPENDED": "admin_broker_suspended",
+            "ADMIN_CITY_CREATED": "admin_city_created",
+            "ADMIN_CITY_DELETED": "admin_city_deleted",
+            "ADMIN_CITY_UPDATED": "admin_city_updated",
+            "ADMIN_COMPANY_ACCOUNT_CREATED": "admin_company_account_created",
+            "ADMIN_FORM_DEFINITION_ARCHIVED": "admin_form_definition_archived",
+            "ADMIN_FORM_DEFINITION_CREATED": "admin_form_definition_created",
+            "ADMIN_FORM_DEFINITION_RESTORED": "admin_form_definition_restored",
+            "ADMIN_FORM_DRAFT_CREATED": "admin_form_draft_created",
+            "ADMIN_FORM_DRAFT_DISCARDED": "admin_form_draft_discarded",
+            "ADMIN_FORM_DRAFT_UPDATED": "admin_form_draft_updated",
+            "ADMIN_FORM_VERSION_PUBLISHED": "admin_form_version_published",
+            "ADMIN_GOVERNORATE_CREATED": "admin_governorate_created",
+            "ADMIN_GOVERNORATE_DELETED": "admin_governorate_deleted",
+            "ADMIN_GOVERNORATE_UPDATED": "admin_governorate_updated",
+            "ADMIN_KYC_REVIEWED": "admin_kyc_reviewed",
+            "ADMIN_LEGAL_DOCUMENT_DRAFT_CREATED": "admin_legal_document_draft_created",
+            "ADMIN_LEGAL_DOCUMENT_DRAFT_UPDATED": "admin_legal_document_draft_updated",
+            "ADMIN_LEGAL_DOCUMENT_PUBLISHED": "admin_legal_document_published",
+            "ADMIN_MANAGED_MARKETING_PACKAGE_CREATED": "admin_managed_marketing_package_created",
+            "ADMIN_MANAGED_MARKETING_PACKAGE_UPDATED": "admin_managed_marketing_package_updated",
+            "ADMIN_MANAGED_MARKETING_REQUEST_REVIEWED": "admin_managed_marketing_request_reviewed",
+            "ADMIN_PROPERTY_OPTION_CREATED": "admin_property_option_created",
+            "ADMIN_PROPERTY_OPTION_DELETED": "admin_property_option_deleted",
+            "ADMIN_PROPERTY_OPTION_UPDATED": "admin_property_option_updated",
+            "ADMIN_PROPERTY_PROXY_CREATED": "admin_property_proxy_created",
+            "ADMIN_PROPERTY_PURPOSE_CREATED": "admin_property_purpose_created",
+            "ADMIN_PROPERTY_PURPOSE_UPDATED": "admin_property_purpose_updated",
+            "ADMIN_PROPERTY_STATUS_UPDATED": "admin_property_status_updated",
+            "ADMIN_PROPERTY_TYPE_CREATED": "admin_property_type_created",
+            "ADMIN_PROPERTY_TYPE_DELETED": "admin_property_type_deleted",
+            "ADMIN_PROPERTY_TYPE_UPDATED": "admin_property_type_updated",
+            "ADMIN_USER_DELETED": "admin_user_deleted",
+            "ADMIN_USER_PHOTO_REMOVED": "admin_user_photo_removed",
+            "ADMIN_USER_ROLE_UPDATED": "admin_user_role_updated",
+            "ADMIN_USER_SESSIONS_REVOKED": "admin_user_sessions_revoked",
+            "ADMIN_USER_STATUS_UPDATED": "admin_user_status_updated",
+            "BROKER_APPLICATION_SUBMITTED": "broker_application_submitted",
+            "LOGIN_FAILED": "login_failed",
+            "LOGIN_SUCCESS": "login_success",
+            "LOGOUT": "logout",
+            "MANAGED_MARKETING_PAYMENT_CONFIRMED": "managed_marketing_payment_confirmed",
+            "MANAGED_MARKETING_PAYMENT_EXPIRED": "managed_marketing_payment_expired",
+            "MANAGED_MARKETING_PAYMENT_FAILED": "managed_marketing_payment_failed",
+            "MANAGED_MARKETING_PAYMENT_INITIATED": "managed_marketing_payment_initiated",
+            "MANAGED_MARKETING_PAYMENT_REJECTED": "managed_marketing_payment_rejected",
+            "MANAGED_MARKETING_REQUEST_CANCELLED": "managed_marketing_request_cancelled",
+            "MANAGED_MARKETING_REQUEST_CREATED": "managed_marketing_request_created",
+            "OTP_FAILED": "otp_failed",
+            "PASSWORD_CHANGED": "password_changed",
+            "PASSWORD_RESET": "password_reset",
+            "PRIVATE_EVIDENCE_ACCESSED": "private_evidence_accessed",
+            "PRIVATE_EVIDENCE_UPLOADED": "private_evidence_uploaded",
+            "PROFILE_UPDATED": "profile_updated",
+            "PROPERTY_ADMIN_HIDDEN": "property_admin_hidden",
+            "PROPERTY_ADMIN_RESTORED": "property_admin_restored",
+            "PROPERTY_ARCHIVED": "property_archived",
+            "PROPERTY_CREATED": "property_created",
+            "PROPERTY_MEDIA_ACCESSED": "property_media_accessed",
+            "PROPERTY_MEDIA_REMOVED": "property_media_removed",
+            "PROPERTY_MEDIA_REPLACED": "property_media_replaced",
+            "PROPERTY_MEDIA_UPDATED": "property_media_updated",
+            "PROPERTY_MEDIA_UPLOADED": "property_media_uploaded",
+            "PROPERTY_RESTORED": "property_restored",
+            "PROPERTY_REVISION_APPROVED": "property_revision_approved",
+            "PROPERTY_REVISION_CREATED": "property_revision_created",
+            "PROPERTY_REVISION_DRAFT_UPDATED": "property_revision_draft_updated",
+            "PROPERTY_REVISION_REJECTED": "property_revision_rejected",
+            "PROPERTY_REVISION_SUBMITTED": "property_revision_submitted",
+            "REGISTER": "register"
+          },
+          "required": true
+        }
+      },
+      "ip": {
+        "instance": "String",
+        "constraints": {}
+      },
+      "actorUserId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "targetUserId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "reason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500
+        }
+      },
+      "targetResourceId": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100
+        }
+      },
+      "metadata": {
+        "instance": "Mixed",
+        "constraints": {}
+      },
+      "requestId": {
+        "instance": "String",
+        "constraints": {
+          "index": true,
+          "maxlength": 100,
+          "required": true
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      }
+    }
+  },
+  "BrokerApplicationSchema": {
+    "collection": "broker_applications",
+    "indexes": [
+      [
+        {
+          "applicantAccountId": 1,
+          "applicationVersion": 1
+        },
+        {
+          "background": true,
+          "name": "broker_application_version_unique",
+          "unique": true
+        }
+      ],
+      [
+        {
+          "applicantAccountId": 1,
+          "idempotencyKeyHash": 1
+        },
+        {
+          "background": true,
+          "name": "broker_application_idempotency_unique",
+          "unique": true
+        }
+      ],
+      [
+        {
+          "applicantAccountId": 1,
+          "status": 1
+        },
+        {
+          "background": true,
+          "name": "broker_application_pending_unique",
+          "partialFilterExpression": {
+            "status": "PENDING"
+          },
+          "unique": true
+        }
+      ],
+      [
+        {
+          "_id": 1,
+          "status": 1,
+          "submittedAt": 1
+        },
+        {
+          "background": true,
+          "name": "broker_application_review_queue"
+        }
+      ]
+    ],
+    "paths": {
+      "applicantAccountId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "User",
+          "required": true
+        }
+      },
+      "applicationVersion": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": true,
+          "min": 1,
+          "required": true
+        }
+      },
+      "status": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "APPROVED": "APPROVED",
+            "PENDING": "PENDING",
+            "REJECTED": "REJECTED"
+          },
+          "required": true
+        }
+      },
+      "documentIds": {
+        "instance": "Array",
+        "constraints": {
+          "immutable": true,
+          "ref": "BrokerVerificationDocument"
+        }
+      },
+      "submittedAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "submittedByActorId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "User",
+          "required": true
+        }
+      },
+      "idempotencyKeyHash": {
+        "instance": "String",
+        "constraints": {
+          "immutable": true,
+          "maxlength": 64,
+          "required": true
+        }
+      },
+      "reviewedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "reviewedByActorId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "reviewReason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500,
+          "trim": true
+        }
+      },
+      "version": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0,
+          "required": true
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "BrokerVerificationDocumentSchema": {
+    "collection": "broker_verification_documents",
+    "indexes": [
+      [
+        {
+          "applicationId": 1,
+          "requirementCode": 1
+        },
+        {
+          "background": true,
+          "name": "broker_document_application_requirement_unique",
+          "unique": true
+        }
+      ],
+      [
+        {
+          "applicantAccountId": 1,
+          "submittedAt": -1
+        },
+        {
+          "background": true,
+          "name": "broker_document_applicant_history"
+        }
+      ]
+    ],
+    "paths": {
+      "applicationId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "BrokerApplication",
+          "required": true
+        }
+      },
+      "applicantAccountId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "User",
+          "required": true
+        }
+      },
+      "assetRef": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "submittedAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "IdempotencyRecordSchema": {
+    "collection": "idempotency_records",
+    "indexes": [
+      [
+        {
+          "accountId": 1,
+          "keyHash": 1,
+          "scope": 1
+        },
+        {
+          "background": true,
+          "name": "idempotency_account_scope_key_unique",
+          "unique": true
+        }
+      ],
+      [
+        {
+          "expiresAt": 1
+        },
+        {
+          "background": true,
+          "expireAfterSeconds": 0,
+          "name": "idempotency_expiry_ttl"
+        }
+      ]
+    ],
+    "paths": {
+      "scope": {
+        "instance": "String",
+        "constraints": {
+          "required": true
+        }
+      },
+      "accountId": {
+        "instance": "Mixed",
+        "constraints": {
+          "required": true
+        }
+      },
+      "keyHash": {
+        "instance": "String",
+        "constraints": {
+          "required": true
+        }
+      },
+      "fingerprint": {
+        "instance": "String",
+        "constraints": {
+          "required": true
+        }
+      },
+      "status": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "in_progress",
+            "completed"
+          ],
+          "required": true
+        }
+      },
+      "response": {
+        "instance": "Mixed",
+        "constraints": {}
+      },
+      "leaseExpiresAt": {
+        "instance": "Date",
+        "constraints": {
+          "required": true
+        }
+      },
+      "expiresAt": {
+        "instance": "Date",
+        "constraints": {
+          "required": true
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "EvidenceCleanupTaskSchema": {
+    "collection": "evidence_cleanup_tasks",
+    "indexes": [
+      [
+        {
+          "publicId": 1
+        },
+        {
+          "background": true,
+          "unique": true
+        }
+      ],
+      [
+        {
+          "status": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "createdAt": 1,
+          "status": 1
+        },
+        {
+          "background": true
+        }
+      ]
+    ],
+    "paths": {
+      "publicId": {
+        "instance": "String",
+        "constraints": {
+          "index": true,
+          "required": true,
+          "unique": true
+        }
+      },
+      "resourceType": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "image",
+            "raw"
+          ],
+          "required": true
+        }
+      },
+      "deliveryType": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "authenticated",
+            "upload"
+          ],
+          "required": true
+        }
+      },
+      "classification": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "PRIVATE_BROKER_EVIDENCE": "private_broker_evidence",
+            "PRIVATE_KYC_EVIDENCE": "private_kyc_evidence",
+            "PRIVATE_PROPERTY_EVIDENCE": "private_property_evidence",
+            "PUBLIC_PROFILE_PHOTO": "public_profile_photo",
+            "PUBLIC_PROPERTY_MEDIA": "public_property_media"
+          },
+          "required": true
+        }
+      },
+      "status": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "pending",
+            "completed"
+          ],
+          "index": true,
+          "required": true
+        }
+      },
+      "reason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true
+        }
+      },
+      "attempts": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "lastError": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500
+        }
+      },
+      "completedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "nextAttemptAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "CitySchema": {
+    "collection": "cities",
+    "indexes": [
+      [
+        {
+          "governorateId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "isActive": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "sortOrder": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "code": 1,
+          "governorateId": 1
+        },
+        {
+          "background": true,
+          "unique": true
+        }
+      ],
+      [
+        {
+          "governorateId": 1,
+          "nameAr": 1
+        },
+        {
+          "background": true,
+          "unique": true
+        }
+      ],
+      [
+        {
+          "governorateId": 1,
+          "isActive": 1,
+          "nameAr": 1,
+          "sortOrder": 1
+        },
+        {
+          "background": true
+        }
+      ]
+    ],
+    "paths": {
+      "governorateId": {
+        "instance": "Mixed",
+        "constraints": {
+          "index": true,
+          "ref": "Governorate",
+          "required": true
+        }
+      },
+      "code": {
+        "instance": "String",
+        "constraints": {
+          "lowercase": true,
+          "maxlength": 50,
+          "required": true,
+          "trim": true
+        }
+      },
+      "nameAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "nameEn": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "isActive": {
+        "instance": "Boolean",
+        "constraints": {
+          "index": true
+        }
+      },
+      "sortOrder": {
+        "instance": "Number",
+        "constraints": {
+          "index": true,
+          "required": true
+        }
+      },
+      "createdBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "updatedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "usageCount": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "GovernorateSchema": {
+    "collection": "governorates",
+    "indexes": [
+      [
+        {
+          "code": 1
+        },
+        {
+          "background": true,
+          "unique": true
+        }
+      ],
+      [
+        {
+          "isActive": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "sortOrder": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "isActive": 1,
+          "nameAr": 1,
+          "sortOrder": 1
+        },
+        {
+          "background": true
+        }
+      ]
+    ],
+    "paths": {
+      "code": {
+        "instance": "String",
+        "constraints": {
+          "lowercase": true,
+          "maxlength": 50,
+          "required": true,
+          "trim": true,
+          "unique": true
+        }
+      },
+      "nameAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "nameEn": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "iconKey": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 50,
+          "required": true,
+          "trim": true
+        }
+      },
+      "isActive": {
+        "instance": "Boolean",
+        "constraints": {
+          "index": true
+        }
+      },
+      "sortOrder": {
+        "instance": "Number",
+        "constraints": {
+          "index": true,
+          "required": true
+        }
+      },
+      "createdBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "updatedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "usageCount": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "mapViewport": {
+        "instance": "Mixed",
+        "constraints": {}
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "LegalDocumentSchema": {
+    "collection": "legal_documents",
+    "indexes": [
+      [
+        {
+          "type": 1,
+          "version": 1
+        },
+        {
+          "background": true,
+          "name": "legal_document_type_version_unique",
+          "unique": true
+        }
+      ],
+      [
+        {
+          "status": 1,
+          "type": 1,
+          "version": -1
+        },
+        {
+          "background": true,
+          "name": "legal_document_current_lookup"
+        }
+      ]
+    ],
+    "paths": {
+      "type": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "PRIVACY": "PRIVACY",
+            "TERMS": "TERMS"
+          },
+          "required": true
+        }
+      },
+      "version": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1,
+          "required": true
+        }
+      },
+      "status": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "ARCHIVED": "ARCHIVED",
+            "DRAFT": "DRAFT",
+            "PUBLISHED": "PUBLISHED"
+          },
+          "required": true
+        }
+      },
+      "titleAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 200,
+          "required": true,
+          "trim": true
+        }
+      },
+      "titleEn": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 200,
+          "required": true,
+          "trim": true
+        }
+      },
+      "sections": {
+        "instance": "Array",
+        "constraints": {}
+      },
+      "changeSummary": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500,
+          "trim": true
+        }
+      },
+      "publishedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "publishedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "createdBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "updatedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "ManagedMarketingPackageSchema": {
+    "collection": "managed_marketing_packages",
+    "indexes": [
+      [
+        {
+          "isActive": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "sortOrder": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "code": 1
+        },
+        {
+          "background": true,
+          "name": "managed_marketing_package_code_unique",
+          "unique": true
+        }
+      ],
+      [
+        {
+          "isActive": 1,
+          "nameAr": 1,
+          "sortOrder": 1
+        },
+        {
+          "background": true,
+          "name": "managed_marketing_package_active_order"
+        }
+      ]
+    ],
+    "paths": {
+      "code": {
+        "instance": "String",
+        "constraints": {
+          "lowercase": true,
+          "maxlength": 50,
+          "required": true,
+          "trim": true
+        }
+      },
+      "nameAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "nameEn": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "detailsAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 1000,
+          "trim": true
+        }
+      },
+      "detailsEn": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 1000,
+          "trim": true
+        }
+      },
+      "includedServiceCodes": {
+        "instance": "Array",
+        "constraints": {
+          "required": true
+        }
+      },
+      "benefitsAr": {
+        "instance": "Array",
+        "constraints": {
+          "required": true
+        }
+      },
+      "benefitsEn": {
+        "instance": "Array",
+        "constraints": {
+          "required": true
+        }
+      },
+      "priceMinor": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "currency": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "EGP"
+          ],
+          "immutable": true
+        }
+      },
+      "isActive": {
+        "instance": "Boolean",
+        "constraints": {
+          "index": true
+        }
+      },
+      "sortOrder": {
+        "instance": "Number",
+        "constraints": {
+          "index": true,
+          "min": 0
+        }
+      },
+      "version": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1
+        }
+      },
+      "createdByActorId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User",
+          "required": true
+        }
+      },
+      "updatedByActorId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "ManagedMarketingRequestSchema": {
+    "collection": "managed_marketing_requests",
+    "indexes": [
+      [
+        {
+          "propertyId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "propertyRevisionId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "advertiserAccountId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "status": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "paymentStatus": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "advertiserAccountId": 1,
+          "createdAt": -1
+        },
+        {
+          "background": true,
+          "name": "managed_marketing_request_advertiser_history"
+        }
+      ],
+      [
+        {
+          "_id": 1,
+          "createdAt": 1,
+          "status": 1
+        },
+        {
+          "background": true,
+          "name": "managed_marketing_request_review_queue"
+        }
+      ],
+      [
+        {
+          "propertyRevisionId": 1
+        },
+        {
+          "background": true,
+          "name": "managed_marketing_request_revision_unique",
+          "unique": true
+        }
+      ]
+    ],
+    "paths": {
+      "propertyId": {
+        "instance": "Mixed",
+        "constraints": {
+          "index": true,
+          "ref": "Property",
+          "required": true
+        }
+      },
+      "propertyRevisionId": {
+        "instance": "Mixed",
+        "constraints": {
+          "index": true,
+          "ref": "PropertyRevision",
+          "required": true
+        }
+      },
+      "advertiserAccountId": {
+        "instance": "Mixed",
+        "constraints": {
+          "index": true,
+          "ref": "User",
+          "required": true
+        }
+      },
+      "createdByActorId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User",
+          "required": true
+        }
+      },
+      "packageSnapshot": {
+        "instance": "Embedded",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "status": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "APPROVED": "APPROVED",
+            "CANCELLED": "CANCELLED",
+            "COMPLETED": "COMPLETED",
+            "INSPECTION_COMPLETED": "INSPECTION_COMPLETED",
+            "INSPECTION_SCHEDULED": "INSPECTION_SCHEDULED",
+            "MARKETING_ACTIVE": "MARKETING_ACTIVE",
+            "PAID": "PAID",
+            "PENDING_REVIEW": "PENDING_REVIEW",
+            "PHOTOGRAPHY_COMPLETED": "PHOTOGRAPHY_COMPLETED",
+            "PHOTOGRAPHY_SCHEDULED": "PHOTOGRAPHY_SCHEDULED",
+            "REJECTED": "REJECTED"
+          },
+          "index": true,
+          "required": true
+        }
+      },
+      "paymentStatus": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "AWAITING_PAYMENT": "AWAITING_PAYMENT",
+            "FAILED": "FAILED",
+            "NOT_ELIGIBLE": "NOT_ELIGIBLE",
+            "PENDING": "PENDING",
+            "RECONCILIATION_REQUIRED": "RECONCILIATION_REQUIRED",
+            "SUCCEEDED": "SUCCEEDED"
+          },
+          "index": true,
+          "required": true
+        }
+      },
+      "reviewedByActorId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "reviewedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "reviewReason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 1000,
+          "trim": true
+        }
+      },
+      "cancellationReason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 1000,
+          "trim": true
+        }
+      },
+      "cancelledAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "paidAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "paidPaymentId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "ManagedMarketingPayment"
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "NotificationDeliverySchema": {
+    "collection": "notification_deliveries",
+    "indexes": [
+      [
+        {
+          "channel": 1,
+          "notificationId": 1
+        },
+        {
+          "background": true,
+          "name": "notification_delivery_channel_unique",
+          "unique": true
+        }
+      ]
+    ],
+    "paths": {
+      "notificationId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "Notification",
+          "required": true
+        }
+      },
+      "channel": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "IN_APP"
+          ],
+          "immutable": true,
+          "required": true
+        }
+      },
+      "status": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "DELIVERED"
+          ],
+          "required": true
+        }
+      },
+      "attempts": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1,
+          "required": true
+        }
+      },
+      "lastAttemptAt": {
+        "instance": "Date",
+        "constraints": {
+          "required": true
+        }
+      },
+      "deliveredAt": {
+        "instance": "Date",
+        "constraints": {
+          "required": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      }
+    }
+  },
+  "NotificationPreferenceSchema": {
+    "collection": "notification_preferences",
+    "indexes": [
+      [
+        {
+          "recipientAccountId": 1
+        },
+        {
+          "background": true,
+          "name": "notification_preference_recipient_unique",
+          "unique": true
+        }
+      ]
+    ],
+    "paths": {
+      "recipientAccountId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "User",
+          "required": true
+        }
+      },
+      "newPropertyAlerts": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "IMMEDIATE",
+            "OFF"
+          ],
+          "required": true
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "NotificationSchema": {
+    "collection": "notifications",
+    "indexes": [
+      [
+        {
+          "recipientAccountId": 1,
+          "sourceEventId": 1,
+          "type": 1
+        },
+        {
+          "background": true,
+          "name": "notification_source_recipient_type_unique",
+          "unique": true
+        }
+      ],
+      [
+        {
+          "_id": -1,
+          "createdAt": -1,
+          "recipientAccountId": 1
+        },
+        {
+          "background": true,
+          "name": "notification_recipient_created"
+        }
+      ],
+      [
+        {
+          "createdAt": -1,
+          "readAt": 1,
+          "recipientAccountId": 1
+        },
+        {
+          "background": true,
+          "name": "notification_recipient_read_created"
+        }
+      ]
+    ],
+    "paths": {
+      "recipientAccountId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "User",
+          "required": true
+        }
+      },
+      "type": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "KYC_APPROVED",
+            "KYC_REJECTED",
+            "PROPERTY_APPROVED",
+            "PROPERTY_REJECTED",
+            "MANAGED_MARKETING_PAYMENT_CONFIRMED"
+          ],
+          "immutable": true,
+          "required": true
+        }
+      },
+      "schemaVersion": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": true,
+          "min": 1,
+          "required": true
+        }
+      },
+      "sourceEventId": {
+        "instance": "String",
+        "constraints": {
+          "immutable": true,
+          "match": "/^[a-f0-9]{24}$/",
+          "required": true
+        }
+      },
+      "aggregateType": {
+        "instance": "String",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "aggregateId": {
+        "instance": "String",
+        "constraints": {
+          "immutable": true,
+          "match": "/^[a-f0-9]{24}$/",
+          "required": true
+        }
+      },
+      "required": {
+        "instance": "Boolean",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "title": {
+        "instance": "String",
+        "constraints": {
+          "immutable": true,
+          "maxlength": 120,
+          "required": true
+        }
+      },
+      "message": {
+        "instance": "String",
+        "constraints": {
+          "immutable": true,
+          "maxlength": 500,
+          "required": true
+        }
+      },
+      "target": {
+        "instance": "Embedded",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "readAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      }
+    }
+  },
+  "OtpVerificationSchema": {
+    "collection": "otp_verifications",
+    "indexes": [
+      [
+        {
+          "identifier": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "expiresAt": 1
+        },
+        {
+          "background": true,
+          "expireAfterSeconds": 0
+        }
+      ]
+    ],
+    "paths": {
+      "identifier": {
+        "instance": "String",
+        "constraints": {
+          "index": true,
+          "required": true
+        }
+      },
+      "otpHash": {
+        "instance": "String",
+        "constraints": {
+          "required": true
+        }
+      },
+      "purpose": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "ACCOUNT_RESTORE": "account_restore",
+            "PASSWORD_RESET": "password_reset",
+            "REGISTER": "register"
+          },
+          "required": true
+        }
+      },
+      "attempts": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "isUsed": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "expiresAt": {
+        "instance": "Date",
+        "constraints": {
+          "required": true
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      }
+    }
+  },
+  "OutboxEventSchema": {
+    "collection": "outbox_events",
+    "indexes": [
+      [
+        {
+          "aggregateId": 1,
+          "aggregateType": 1,
+          "aggregateVersion": 1
+        },
+        {
+          "background": true,
+          "name": "outbox_aggregate_version",
+          "unique": true
+        }
+      ]
+    ],
+    "paths": {
+      "type": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "MANAGED_MARKETING_PAYMENT_CONFIRMED",
+            "KYC_APPROVED",
+            "KYC_REJECTED",
+            "PROPERTY_APPROVED",
+            "PROPERTY_REJECTED"
+          ],
+          "immutable": true,
+          "required": true
+        }
+      },
+      "schemaVersion": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": true,
+          "min": 1,
+          "required": true
+        }
+      },
+      "aggregateType": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "MANAGED_MARKETING_REQUEST",
+            "KYC",
+            "PROPERTY"
+          ],
+          "immutable": true,
+          "required": true
+        }
+      },
+      "aggregateId": {
+        "instance": "String",
+        "constraints": {
+          "immutable": true,
+          "match": "/^[a-f0-9]{24}$/",
+          "required": true
+        }
+      },
+      "aggregateVersion": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": true,
+          "min": 1,
+          "required": true
+        }
+      },
+      "occurredAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "audience": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "PUBLIC",
+            "PRIVATE"
+          ],
+          "immutable": true,
+          "required": true
+        }
+      },
+      "payload": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "privateRouting": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "delivery": {
+        "instance": "Mixed",
+        "constraints": {}
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      }
+    }
+  },
+  "ManagedMarketingPaymentSchema": {
+    "collection": "managed_marketing_payments",
+    "indexes": [
+      [
+        {
+          "requestId": 1
+        },
+        {
+          "background": true,
+          "name": "mm_payment_one_live_per_request",
+          "partialFilterExpression": {
+            "isLive": true
+          },
+          "unique": true
+        }
+      ],
+      [
+        {
+          "provider": 1,
+          "providerReference": 1
+        },
+        {
+          "background": true,
+          "name": "mm_payment_provider_reference",
+          "partialFilterExpression": {
+            "providerReference": {
+              "$type": "string"
+            }
+          },
+          "unique": true
+        }
+      ],
+      [
+        {
+          "initiatedAt": 1,
+          "status": 1
+        },
+        {
+          "background": true,
+          "name": "mm_payment_status_initiated"
+        }
+      ],
+      [
+        {
+          "advertiserAccountId": 1,
+          "createdAt": -1
+        },
+        {
+          "background": true,
+          "name": "mm_payment_advertiser_history"
+        }
+      ],
+      [
+        {
+          "nextVerifyAt": 1,
+          "status": 1
+        },
+        {
+          "background": true,
+          "name": "mm_payment_status_next_verify"
+        }
+      ],
+      [
+        {
+          "reconciliationFlag": 1
+        },
+        {
+          "background": true,
+          "name": "mm_payment_reconciliation_flag",
+          "partialFilterExpression": {
+            "reconciliationFlag": {
+              "$exists": true
+            }
+          }
+        }
+      ]
+    ],
+    "paths": {
+      "purpose": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "MANAGED_MARKETING"
+          ],
+          "immutable": true,
+          "required": true
+        }
+      },
+      "requestId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "ManagedMarketingRequest",
+          "required": true
+        }
+      },
+      "advertiserAccountId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "User",
+          "required": true
+        }
+      },
+      "amountMinor": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "currency": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "EGP"
+          ],
+          "immutable": true,
+          "required": true
+        }
+      },
+      "status": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "EXPIRED": "EXPIRED",
+            "FAILED": "FAILED",
+            "INITIATED": "INITIATED",
+            "SUCCEEDED": "SUCCEEDED"
+          },
+          "required": true
+        }
+      },
+      "isLive": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "initiatedAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true,
+          "required": true
+        }
+      },
+      "confirmedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "failedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "failureCode": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100
+        }
+      },
+      "provider": {
+        "instance": "String",
+        "constraints": {
+          "immutable": true,
+          "maxlength": 50,
+          "required": true
+        }
+      },
+      "providerReference": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 200
+        }
+      },
+      "providerEventId": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 200
+        }
+      },
+      "reconciliationFlag": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "AMOUNT_MISMATCH": "AMOUNT_MISMATCH",
+            "CONFIRMED_AFTER_EXPIRY": "CONFIRMED_AFTER_EXPIRY",
+            "CONFIRMED_AFTER_FAILURE": "CONFIRMED_AFTER_FAILURE",
+            "CURRENCY_MISMATCH": "CURRENCY_MISMATCH",
+            "REFERENCE_MISMATCH": "REFERENCE_MISMATCH"
+          }
+        }
+      },
+      "lastVerifiedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "expiredAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "clientHandoff": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 2000
+        }
+      },
+      "nextVerifyAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "verifyAttempts": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "initiationClaimedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "PropertyRevisionSchema": {
+    "collection": "property_revisions",
+    "indexes": [
+      [
+        {
+          "propertyId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "moderationStatus": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "propertyId": 1,
+          "revisionNumber": 1
+        },
+        {
+          "background": true,
+          "name": "property_revision_sequence_unique",
+          "unique": true
+        }
+      ],
+      [
+        {
+          "_id": 1,
+          "createdAt": 1,
+          "moderationStatus": 1
+        },
+        {
+          "background": true,
+          "name": "property_revision_review_queue"
+        }
+      ],
+      [
+        {
+          "moderationStatus": 1,
+          "propertyId": 1
+        },
+        {
+          "background": true,
+          "name": "property_one_pending_revision",
+          "partialFilterExpression": {
+            "moderationStatus": "pending_review"
+          },
+          "unique": true
+        }
+      ],
+      [
+        {
+          "moderationStatus": 1,
+          "propertyId": 1
+        },
+        {
+          "background": true,
+          "name": "property_one_draft_revision",
+          "partialFilterExpression": {
+            "moderationStatus": "draft"
+          },
+          "unique": true
+        }
+      ]
+    ],
+    "paths": {
+      "propertyId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "index": true,
+          "ref": "Property",
+          "required": true
+        }
+      },
+      "revisionNumber": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": true,
+          "min": 1,
+          "required": true
+        }
+      },
+      "createdByActorId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "User",
+          "required": true
+        }
+      },
+      "operationType": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "sale",
+            "rent"
+          ],
+          "immutable": "immutableOutsideDraft",
+          "required": true
+        }
+      },
+      "purposeCategoryId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "ref": "PropertyPurposeCategory"
+        }
+      },
+      "purposeSubcategoryId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "ref": "PropertyType"
+        }
+      },
+      "purposeSubcategoryIds": {
+        "instance": "Array",
+        "constraints": {
+          "immutable": "immutableOutsideDraft"
+        }
+      },
+      "legacyPropertyTypeCode": {
+        "instance": "String",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "maxlength": 50,
+          "trim": true
+        }
+      },
+      "title": {
+        "instance": "String",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "maxlength": 150,
+          "required": true,
+          "trim": true
+        }
+      },
+      "description": {
+        "instance": "String",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "maxlength": 3000,
+          "required": true,
+          "trim": true
+        }
+      },
+      "governorateCode": {
+        "instance": "String",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "maxlength": 50,
+          "required": true,
+          "trim": true
+        }
+      },
+      "city": {
+        "instance": "String",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "district": {
+        "instance": "String",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "street": {
+        "instance": "String",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "maxlength": 200,
+          "trim": true
+        }
+      },
+      "additionalAddressDetails": {
+        "instance": "String",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "maxlength": 500,
+          "trim": true
+        }
+      },
+      "latitude": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "max": 90,
+          "min": -90,
+          "required": true
+        }
+      },
+      "longitude": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "max": 180,
+          "min": -180,
+          "required": true
+        }
+      },
+      "area": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "min": 1,
+          "required": true
+        }
+      },
+      "bedrooms": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "max": 100,
+          "min": 0
+        }
+      },
+      "livingRooms": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "max": 100,
+          "min": 0
+        }
+      },
+      "kitchens": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "max": 100,
+          "min": 0
+        }
+      },
+      "bathrooms": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "max": 100,
+          "min": 0
+        }
+      },
+      "floor": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "max": 300,
+          "min": -10
+        }
+      },
+      "totalFloors": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "max": 300,
+          "min": 1
+        }
+      },
+      "buildingYear": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "max": 2200,
+          "min": 1800
+        }
+      },
+      "finishingStatusCode": {
+        "instance": "String",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "maxlength": 50,
+          "trim": true
+        }
+      },
+      "deliveryStatusCode": {
+        "instance": "String",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "maxlength": 50,
+          "trim": true
+        }
+      },
+      "amenityCodes": {
+        "instance": "Array",
+        "constraints": {
+          "immutable": "immutableOutsideDraft"
+        }
+      },
+      "formDefinitionId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "ref": "PropertyFormDefinition"
+        }
+      },
+      "formDefinitionVersionId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "ref": "PropertyFormDefinitionVersion"
+        }
+      },
+      "formDefinitionVersion": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "min": 1
+        }
+      },
+      "formContentHash": {
+        "instance": "String",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "match": "/^[a-f0-9]{64}$/"
+        }
+      },
+      "attributes": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": "immutableOutsideDraft"
+        }
+      },
+      "totalPriceMinor": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "required": true
+        }
+      },
+      "currency": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "EGP"
+          ],
+          "immutable": "immutableOutsideDraft",
+          "required": true
+        }
+      },
+      "legacyDownPaymentMinor": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft"
+        }
+      },
+      "isPriceNegotiable": {
+        "instance": "Boolean",
+        "constraints": {
+          "immutable": "immutableOutsideDraft"
+        }
+      },
+      "paymentMethodCodes": {
+        "instance": "Array",
+        "constraints": {
+          "immutable": "immutableOutsideDraft"
+        }
+      },
+      "marketingMode": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "PLATFORM_MANAGED": "PLATFORM_MANAGED",
+            "SELF_SERVICE": "SELF_SERVICE"
+          },
+          "immutable": "immutableOutsideDraft"
+        }
+      },
+      "entranceImageAsset": {
+        "instance": "Embedded",
+        "constraints": {
+          "immutable": "immutableOutsideDraft"
+        }
+      },
+      "galleryMedia": {
+        "instance": "Array",
+        "constraints": {
+          "immutable": "immutableOutsideDraft"
+        }
+      },
+      "privateEvidenceAssets": {
+        "instance": "Array",
+        "constraints": {
+          "immutable": "immutableOutsideDraft"
+        }
+      },
+      "supersededAssets": {
+        "instance": "Array",
+        "constraints": {}
+      },
+      "coverImageIndex": {
+        "instance": "Number",
+        "constraints": {
+          "immutable": "immutableOutsideDraft",
+          "min": 0,
+          "required": true
+        }
+      },
+      "hidePhone": {
+        "instance": "Boolean",
+        "constraints": {
+          "immutable": "immutableOutsideDraft"
+        }
+      },
+      "moderationStatus": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "APPROVED": "approved",
+            "DRAFT": "draft",
+            "PENDING_REVIEW": "pending_review",
+            "REJECTED": "rejected"
+          },
+          "index": true,
+          "required": true
+        }
+      },
+      "decisionVersion": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "submittedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "reviewReason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 1000,
+          "trim": true
+        }
+      },
+      "reviewedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "reviewedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "migrationVersion": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1
+        }
+      },
+      "migrationRunId": {
+        "instance": "String",
+        "constraints": {
+          "trim": true
+        }
+      },
+      "migratedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "PropertyFacetsSchema": {
+    "collection": null,
+    "indexes": [],
+    "paths": {
+      "bedrooms": {
+        "instance": "Number",
+        "constraints": {
+          "max": 100,
+          "min": 0
+        }
+      },
+      "shopFloorLevel": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "ground",
+            "basement",
+            "mezzanine",
+            "upper"
+          ]
+        }
+      },
+      "commercialUseTypes": {
+        "instance": "Array",
+        "constraints": {}
+      },
+      "builtAreaSqm": {
+        "instance": "Number",
+        "constraints": {
+          "max": 1000000,
+          "min": 0
+        }
+      },
+      "powerSource": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "grid",
+            "generator",
+            "both",
+            "none"
+          ]
+        }
+      },
+      "industrialUseType": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "light",
+            "medium",
+            "heavy",
+            "warehouse_related",
+            "other"
+          ]
+        }
+      },
+      "soilType": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "clay",
+            "sandy",
+            "loamy",
+            "mixed",
+            "other"
+          ]
+        }
+      },
+      "waterSource": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "well",
+            "canal",
+            "municipal",
+            "none"
+          ]
+        }
+      }
+    }
+  },
+  "PropertySchema": {
+    "collection": "properties",
+    "indexes": [
+      [
+        {
+          "ownerId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "advertiserAccountId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "advertiserAccountTypeSnapshot": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "createdByActorId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "lifecycleStatus": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "operationType": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "propertyTypeCode": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "purposeCategoryId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "purposeSubcategoryId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "governorateCode": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "isOwnerVisible": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "status": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "createdAt": -1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "advertiserAccountId": 1,
+          "createdAt": -1
+        },
+        {
+          "background": true,
+          "name": "property_advertiser_created"
+        }
+      ],
+      [
+        {
+          "_id": -1,
+          "createdAt": -1,
+          "isOwnerVisible": 1,
+          "lifecycleStatus": 1,
+          "status": 1
+        },
+        {
+          "background": true,
+          "name": "property_public_listing_newest_v2"
+        }
+      ],
+      [
+        {
+          "_id": -1,
+          "createdAt": -1,
+          "isOwnerVisible": 1,
+          "lifecycleStatus": 1,
+          "operationType": 1,
+          "status": 1
+        },
+        {
+          "background": true,
+          "name": "property_public_listing_operation_type_v2"
+        }
+      ],
+      [
+        {
+          "_id": -1,
+          "createdAt": -1,
+          "governorateCode": 1,
+          "isOwnerVisible": 1,
+          "lifecycleStatus": 1,
+          "status": 1
+        },
+        {
+          "background": true,
+          "name": "property_public_listing_governorate_v2"
+        }
+      ],
+      [
+        {
+          "_id": -1,
+          "createdAt": -1,
+          "isOwnerVisible": 1,
+          "lifecycleStatus": 1,
+          "purposeCategoryId": 1,
+          "status": 1
+        },
+        {
+          "background": true,
+          "name": "property_public_listing_purpose_category_v2"
+        }
+      ],
+      [
+        {
+          "_id": -1,
+          "createdAt": -1,
+          "isOwnerVisible": 1,
+          "lifecycleStatus": 1,
+          "purposeSubcategoryIds": 1,
+          "status": 1
+        },
+        {
+          "background": true,
+          "name": "property_public_listing_type_v2"
+        }
+      ],
+      [
+        {
+          "_id": 1,
+          "isOwnerVisible": 1,
+          "lifecycleStatus": 1,
+          "status": 1,
+          "totalPriceMinor": 1
+        },
+        {
+          "background": true,
+          "name": "property_public_listing_price_v2"
+        }
+      ]
+    ],
+    "paths": {
+      "ownerId": {
+        "instance": "Mixed",
+        "constraints": {
+          "index": true,
+          "ref": "User",
+          "required": true
+        }
+      },
+      "advertiserAccountId": {
+        "instance": "Mixed",
+        "constraints": {
+          "index": true,
+          "ref": "User"
+        }
+      },
+      "advertiserAccountTypeSnapshot": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "BROKER": "BROKER",
+            "COMPANY": "COMPANY",
+            "USER": "USER"
+          },
+          "index": true
+        }
+      },
+      "createdByActorId": {
+        "instance": "Mixed",
+        "constraints": {
+          "index": true,
+          "ref": "User"
+        }
+      },
+      "currentPublicRevisionId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "PropertyRevision"
+        }
+      },
+      "pendingRevisionId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "PropertyRevision"
+        }
+      },
+      "revisionSequence": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "lifecycleStatus": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "ACTIVE": "active",
+            "ADMIN_HIDDEN": "admin_hidden",
+            "ARCHIVED": "archived"
+          },
+          "index": true,
+          "required": true
+        }
+      },
+      "lifecycleVersion": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "publishedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "archivedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "lifecycleReason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 1000,
+          "trim": true
+        }
+      },
+      "propertyContractVersion": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1
+        }
+      },
+      "propertyContractMigratedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "propertyContractMigrationRunId": {
+        "instance": "String",
+        "constraints": {
+          "trim": true
+        }
+      },
+      "operationType": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "sale",
+            "rent"
+          ],
+          "index": true,
+          "required": true
+        }
+      },
+      "propertyTypeCode": {
+        "instance": "String",
+        "constraints": {
+          "index": true,
+          "maxlength": 50,
+          "required": true,
+          "trim": true
+        }
+      },
+      "purposeCategoryId": {
+        "instance": "Mixed",
+        "constraints": {
+          "index": true,
+          "ref": "PropertyPurposeCategory"
+        }
+      },
+      "purposeSubcategoryId": {
+        "instance": "Mixed",
+        "constraints": {
+          "index": true,
+          "ref": "PropertyType"
+        }
+      },
+      "purposeSubcategoryIds": {
+        "instance": "Array",
+        "constraints": {}
+      },
+      "title": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 150,
+          "required": true,
+          "trim": true
+        }
+      },
+      "description": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 3000,
+          "required": true,
+          "trim": true
+        }
+      },
+      "governorateCode": {
+        "instance": "String",
+        "constraints": {
+          "index": true,
+          "maxlength": 50,
+          "required": true,
+          "trim": true
+        }
+      },
+      "city": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "district": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "street": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 200,
+          "trim": true
+        }
+      },
+      "additionalAddressDetails": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500,
+          "trim": true
+        }
+      },
+      "latitude": {
+        "instance": "Number",
+        "constraints": {
+          "max": 90,
+          "min": -90,
+          "required": true
+        }
+      },
+      "longitude": {
+        "instance": "Number",
+        "constraints": {
+          "max": 180,
+          "min": -180,
+          "required": true
+        }
+      },
+      "area": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1,
+          "required": true
+        }
+      },
+      "bedrooms": {
+        "instance": "Number",
+        "constraints": {
+          "max": 100,
+          "min": 0
+        }
+      },
+      "livingRooms": {
+        "instance": "Number",
+        "constraints": {
+          "max": 100,
+          "min": 0
+        }
+      },
+      "kitchens": {
+        "instance": "Number",
+        "constraints": {
+          "max": 100,
+          "min": 0
+        }
+      },
+      "bathrooms": {
+        "instance": "Number",
+        "constraints": {
+          "max": 100,
+          "min": 0
+        }
+      },
+      "floor": {
+        "instance": "Number",
+        "constraints": {
+          "max": 300,
+          "min": -10
+        }
+      },
+      "totalFloors": {
+        "instance": "Number",
+        "constraints": {
+          "max": 300,
+          "min": 1
+        }
+      },
+      "buildingYear": {
+        "instance": "Number",
+        "constraints": {
+          "max": 2200,
+          "min": 1800
+        }
+      },
+      "finishingStatusCode": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 50,
+          "trim": true
+        }
+      },
+      "deliveryStatusCode": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 50,
+          "trim": true
+        }
+      },
+      "amenityCodes": {
+        "instance": "Array",
+        "constraints": {}
+      },
+      "facets": {
+        "instance": "Embedded",
+        "constraints": {}
+      },
+      "totalPrice": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "downPayment": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "totalPriceMinor": {
+        "instance": "Number",
+        "constraints": {
+          "required": true
+        }
+      },
+      "downPaymentMinor": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "currency": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "EGP"
+          ],
+          "immutable": true,
+          "required": true
+        }
+      },
+      "moneyMigratedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "moneyMigrationRunId": {
+        "instance": "String",
+        "constraints": {
+          "trim": true
+        }
+      },
+      "moneyMigrationVersion": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1
+        }
+      },
+      "isPriceNegotiable": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "paymentMethodCode": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 50,
+          "trim": true
+        }
+      },
+      "images": {
+        "instance": "Array",
+        "constraints": {
+          "required": true
+        }
+      },
+      "coverImageIndex": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0,
+          "required": true
+        }
+      },
+      "titleDeed": {
+        "instance": "Embedded",
+        "constraints": {}
+      },
+      "advertiserType": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "owner",
+            "office",
+            "broker"
+          ]
+        }
+      },
+      "hidePhone": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "isOwnerVisible": {
+        "instance": "Boolean",
+        "constraints": {
+          "index": true
+        }
+      },
+      "status": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "pending_review",
+            "approved",
+            "rejected",
+            "hidden"
+          ],
+          "index": true,
+          "required": true
+        }
+      },
+      "reviewReason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 1000,
+          "trim": true
+        }
+      },
+      "reviewedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "reviewedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "PropertyAttributeSchema": {
+    "collection": "property_attributes",
+    "indexes": [
+      [
+        {
+          "key": 1
+        },
+        {
+          "background": true,
+          "unique": true
+        }
+      ],
+      [
+        {
+          "key": 1,
+          "status": 1
+        },
+        {
+          "background": true,
+          "name": "property_attribute_status_key"
+        }
+      ]
+    ],
+    "paths": {
+      "key": {
+        "instance": "String",
+        "constraints": {
+          "immutable": true,
+          "required": true,
+          "unique": true
+        }
+      },
+      "dataType": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "text",
+            "textarea",
+            "integer",
+            "decimal",
+            "boolean",
+            "singleSelect",
+            "multiSelect",
+            "date"
+          ],
+          "immutable": true,
+          "required": true
+        }
+      },
+      "unit": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "sqm",
+            "m",
+            "kw"
+          ],
+          "immutable": true
+        }
+      },
+      "labelAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 80,
+          "required": true,
+          "trim": true
+        }
+      },
+      "labelEn": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 80,
+          "trim": true
+        }
+      },
+      "hardBounds": {
+        "instance": "Embedded",
+        "constraints": {}
+      },
+      "optionSource": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "inline",
+            "catalog"
+          ],
+          "immutable": true
+        }
+      },
+      "catalogGroup": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "finishing_status",
+            "delivery_status"
+          ],
+          "immutable": true
+        }
+      },
+      "options": {
+        "instance": "Array",
+        "constraints": {}
+      },
+      "facetKey": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "bedrooms",
+            "shopFloorLevel",
+            "commercialUseTypes",
+            "builtAreaSqm",
+            "powerSource",
+            "industrialUseType",
+            "soilType",
+            "waterSource"
+          ]
+        }
+      },
+      "status": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "active",
+            "deprecated"
+          ],
+          "required": true
+        }
+      },
+      "origin": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "system"
+          ],
+          "immutable": true,
+          "required": true
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "PropertyFormDefinitionVersionSchema": {
+    "collection": "property_form_definition_versions",
+    "indexes": [
+      [
+        {
+          "definitionId": 1,
+          "version": 1
+        },
+        {
+          "background": true,
+          "name": "property_form_version_number_unique",
+          "partialFilterExpression": {
+            "version": {
+              "$exists": true
+            }
+          },
+          "unique": true
+        }
+      ],
+      [
+        {
+          "definitionId": 1
+        },
+        {
+          "background": true,
+          "name": "property_form_version_one_draft",
+          "partialFilterExpression": {
+            "state": "draft"
+          },
+          "unique": true
+        }
+      ],
+      [
+        {
+          "definitionId": 1
+        },
+        {
+          "background": true,
+          "name": "property_form_version_one_published",
+          "partialFilterExpression": {
+            "state": "published"
+          },
+          "unique": true
+        }
+      ],
+      [
+        {
+          "purposeSubcategoryId": 1,
+          "state": 1
+        },
+        {
+          "background": true,
+          "name": "property_form_version_subcategory_state"
+        }
+      ]
+    ],
+    "paths": {
+      "definitionId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "PropertyFormDefinition",
+          "required": true
+        }
+      },
+      "purposeSubcategoryId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "PropertyType",
+          "required": true
+        }
+      },
+      "version": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1
+        }
+      },
+      "state": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "draft",
+            "published",
+            "superseded"
+          ],
+          "required": true
+        }
+      },
+      "fields": {
+        "instance": "Array",
+        "constraints": {}
+      },
+      "mediaProfile": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "residential_rooms",
+            "land",
+            "commercial_unit",
+            "industrial",
+            "generic"
+          ],
+          "required": true
+        }
+      },
+      "amenitiesEnabled": {
+        "instance": "Boolean",
+        "constraints": {
+          "required": true
+        }
+      },
+      "allowedAmenityCodes": {
+        "instance": "Array",
+        "constraints": {}
+      },
+      "changeNote": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500,
+          "trim": true
+        }
+      },
+      "basedOnVersionId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "PropertyFormDefinitionVersion"
+        }
+      },
+      "draftRevision": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0,
+          "required": true
+        }
+      },
+      "rendererVersion": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1
+        }
+      },
+      "legacyWritable": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "contentHash": {
+        "instance": "String",
+        "constraints": {
+          "match": "/^[a-f0-9]{64}$/"
+        }
+      },
+      "publishedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "publishedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "supersededAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "PropertyFormDefinitionSchema": {
+    "collection": "property_form_definitions",
+    "indexes": [
+      [
+        {
+          "purposeSubcategoryId": 1
+        },
+        {
+          "background": true,
+          "name": "property_form_definition_subcategory_unique",
+          "unique": true
+        }
+      ],
+      [
+        {
+          "purposeSubcategoryId": 1,
+          "status": 1
+        },
+        {
+          "background": true,
+          "name": "property_form_definition_status"
+        }
+      ]
+    ],
+    "paths": {
+      "purposeSubcategoryId": {
+        "instance": "Mixed",
+        "constraints": {
+          "immutable": true,
+          "ref": "PropertyType",
+          "required": true
+        }
+      },
+      "status": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "active",
+            "archived"
+          ],
+          "required": true
+        }
+      },
+      "currentVersionId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "PropertyFormDefinitionVersion"
+        }
+      },
+      "currentVersion": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1
+        }
+      },
+      "draftVersionId": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "PropertyFormDefinitionVersion"
+        }
+      },
+      "nextVersionNumber": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1,
+          "required": true
+        }
+      },
+      "version": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0,
+          "required": true
+        }
+      },
+      "archivedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "archivedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "archivedReason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500,
+          "trim": true
+        }
+      },
+      "createdBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "updatedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "PropertyOptionSchema": {
+    "collection": "property_options",
+    "indexes": [
+      [
+        {
+          "group": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "isActive": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "sortOrder": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "code": 1,
+          "group": 1
+        },
+        {
+          "background": true,
+          "unique": true
+        }
+      ],
+      [
+        {
+          "group": 1,
+          "isActive": 1,
+          "nameAr": 1,
+          "sortOrder": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "group": 1,
+          "isDefault": 1
+        },
+        {
+          "background": true,
+          "partialFilterExpression": {
+            "isDefault": true
+          },
+          "unique": true
+        }
+      ]
+    ],
+    "paths": {
+      "code": {
+        "instance": "String",
+        "constraints": {
+          "lowercase": true,
+          "maxlength": 50,
+          "required": true,
+          "trim": true
+        }
+      },
+      "group": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "finishing_status",
+            "delivery_status",
+            "payment_method"
+          ],
+          "index": true,
+          "required": true
+        }
+      },
+      "nameAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "nameEn": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "descriptionAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500,
+          "trim": true
+        }
+      },
+      "iconKey": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 50,
+          "required": true,
+          "trim": true
+        }
+      },
+      "isActive": {
+        "instance": "Boolean",
+        "constraints": {
+          "index": true
+        }
+      },
+      "isDefault": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "sortOrder": {
+        "instance": "Number",
+        "constraints": {
+          "index": true,
+          "required": true
+        }
+      },
+      "createdBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "updatedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "usageCount": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "PropertyPurposeCategorySchema": {
+    "collection": "property_purpose_categories",
+    "indexes": [
+      [
+        {
+          "isActive": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "sortOrder": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "code": 1
+        },
+        {
+          "background": true,
+          "name": "property_purpose_code_unique",
+          "unique": true
+        }
+      ],
+      [
+        {
+          "isActive": 1,
+          "nameAr": 1,
+          "sortOrder": 1
+        },
+        {
+          "background": true,
+          "name": "property_purpose_active_order"
+        }
+      ]
+    ],
+    "paths": {
+      "code": {
+        "instance": "String",
+        "constraints": {
+          "lowercase": true,
+          "maxlength": 50,
+          "required": true,
+          "trim": true
+        }
+      },
+      "nameAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "nameEn": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "descriptionAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500,
+          "trim": true
+        }
+      },
+      "isActive": {
+        "instance": "Boolean",
+        "constraints": {
+          "index": true
+        }
+      },
+      "sortOrder": {
+        "instance": "Number",
+        "constraints": {
+          "index": true,
+          "required": true
+        }
+      },
+      "version": {
+        "instance": "Number",
+        "constraints": {
+          "min": 1,
+          "required": true
+        }
+      },
+      "createdBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User",
+          "required": true
+        }
+      },
+      "updatedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "usageCount": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "PropertyTypeSchema": {
+    "collection": "property_types",
+    "indexes": [
+      [
+        {
+          "code": 1
+        },
+        {
+          "background": true,
+          "unique": true
+        }
+      ],
+      [
+        {
+          "purposeCategoryId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "isActive": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "sortOrder": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "isActive": 1,
+          "nameAr": 1,
+          "sortOrder": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "isActive": 1,
+          "purposeCategoryId": 1,
+          "sortOrder": 1
+        },
+        {
+          "background": true,
+          "name": "property_subcategory_parent_active_order"
+        }
+      ]
+    ],
+    "paths": {
+      "code": {
+        "instance": "String",
+        "constraints": {
+          "lowercase": true,
+          "maxlength": 50,
+          "required": true,
+          "trim": true,
+          "unique": true
+        }
+      },
+      "nameAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "required": true,
+          "trim": true
+        }
+      },
+      "nameEn": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "trim": true
+        }
+      },
+      "descriptionAr": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500,
+          "trim": true
+        }
+      },
+      "iconKey": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 50,
+          "trim": true
+        }
+      },
+      "purposeCategoryId": {
+        "instance": "Mixed",
+        "constraints": {
+          "index": true,
+          "ref": "PropertyPurposeCategory"
+        }
+      },
+      "isActive": {
+        "instance": "Boolean",
+        "constraints": {
+          "index": true
+        }
+      },
+      "sortOrder": {
+        "instance": "Number",
+        "constraints": {
+          "index": true,
+          "required": true
+        }
+      },
+      "createdBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User",
+          "required": true
+        }
+      },
+      "updatedBy": {
+        "instance": "Mixed",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "usageCount": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "version": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "RefreshTokenSchema": {
+    "collection": "refresh_tokens",
+    "indexes": [
+      [
+        {
+          "userId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "sessionId": 1
+        },
+        {
+          "background": true,
+          "sparse": true
+        }
+      ],
+      [
+        {
+          "familyId": 1
+        },
+        {
+          "background": true,
+          "sparse": true
+        }
+      ],
+      [
+        {
+          "state": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "selector": 1
+        },
+        {
+          "background": true,
+          "sparse": true,
+          "unique": true
+        }
+      ],
+      [
+        {
+          "sessionId": 1,
+          "state": 1,
+          "userId": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "familyId": 1,
+          "state": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "expiresAt": 1
+        },
+        {
+          "background": true,
+          "expireAfterSeconds": 0
+        }
+      ]
+    ],
+    "paths": {
+      "userId": {
+        "instance": "Mixed",
+        "constraints": {
+          "index": true,
+          "ref": "User",
+          "required": true
+        }
+      },
+      "sessionId": {
+        "instance": "String",
+        "constraints": {
+          "index": true,
+          "sparse": true
+        }
+      },
+      "familyId": {
+        "instance": "String",
+        "constraints": {
+          "index": true,
+          "sparse": true
+        }
+      },
+      "selector": {
+        "instance": "String",
+        "constraints": {}
+      },
+      "tokenHash": {
+        "instance": "String",
+        "constraints": {
+          "required": true
+        }
+      },
+      "state": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "ACTIVE": "ACTIVE",
+            "REVOKED": "REVOKED",
+            "ROTATED": "ROTATED"
+          },
+          "index": true
+        }
+      },
+      "rotatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "revokedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "lastUsedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "revokeReason": {
+        "instance": "String",
+        "constraints": {}
+      },
+      "device": {
+        "instance": "String",
+        "constraints": {}
+      },
+      "expiresAt": {
+        "instance": "Date",
+        "constraints": {
+          "required": true
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      }
+    }
+  },
+  "UserSchema": {
+    "collection": null,
+    "indexes": [
+      [
+        {
+          "email": 1
+        },
+        {
+          "background": true,
+          "sparse": true,
+          "unique": true
+        }
+      ],
+      [
+        {
+          "phone": 1
+        },
+        {
+          "background": true,
+          "sparse": true,
+          "unique": true
+        }
+      ],
+      [
+        {
+          "systemRole": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "accountType": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "accountStatus": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "brokerStatus": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "verificationTrustState": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "role": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "deletionRequestedAt": 1
+        },
+        {
+          "background": true
+        }
+      ]
+    ],
+    "paths": {
+      "fullName": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "trim": true
+        }
+      },
+      "email": {
+        "instance": "String",
+        "constraints": {
+          "lowercase": true,
+          "sparse": true,
+          "trim": true,
+          "unique": true
+        }
+      },
+      "phone": {
+        "instance": "String",
+        "constraints": {
+          "sparse": true,
+          "trim": true,
+          "unique": true
+        }
+      },
+      "password": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "select": false
+        }
+      },
+      "systemRole": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "ADMIN": "ADMIN",
+            "SUPER_ADMIN": "SUPER_ADMIN",
+            "USER": "USER"
+          },
+          "index": true
+        }
+      },
+      "accountType": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "BROKER": "BROKER",
+            "COMPANY": "COMPANY",
+            "USER": "USER"
+          },
+          "index": true
+        }
+      },
+      "accountStatus": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "ACTIVE": "ACTIVE",
+            "ANONYMIZED": "ANONYMIZED",
+            "BLOCKED": "BLOCKED",
+            "DELETION_PENDING": "DELETION_PENDING",
+            "PERMANENTLY_BANNED": "PERMANENTLY_BANNED",
+            "SUSPENDED": "SUSPENDED"
+          },
+          "index": true
+        }
+      },
+      "brokerStatus": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "APPROVED": "APPROVED",
+            "NOT_APPLIED": "NOT_APPLIED",
+            "PENDING": "PENDING",
+            "REJECTED": "REJECTED",
+            "REVOKED": "REVOKED",
+            "SUSPENDED": "SUSPENDED"
+          },
+          "index": true
+        }
+      },
+      "brokerVersion": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "verificationTrustState": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "UNVERIFIED": "UNVERIFIED",
+            "VERIFIED": "VERIFIED"
+          },
+          "index": true
+        }
+      },
+      "primaryIdentifierType": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "EMAIL": "email",
+            "PHONE": "phone"
+          }
+        }
+      },
+      "emailVerifiedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "phoneVerifiedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "legacyVerifiedIdentifierType": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "EMAIL": "email",
+            "PHONE": "phone"
+          }
+        }
+      },
+      "identityMigratedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "identityMigrationRunId": {
+        "instance": "String",
+        "constraints": {}
+      },
+      "identityMigrationVersion": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "role": {
+        "instance": "String",
+        "constraints": {
+          "enum": [
+            "user",
+            "admin"
+          ],
+          "index": true
+        }
+      },
+      "emailVerified": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "isActive": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "suspendReason": {
+        "instance": "String",
+        "constraints": {
+          "trim": true
+        }
+      },
+      "suspendedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "legalAcceptance": {
+        "instance": "Mixed",
+        "constraints": {}
+      },
+      "profilePhoto": {
+        "instance": "Mixed",
+        "constraints": {}
+      },
+      "deletionRequestedAt": {
+        "instance": "Date",
+        "constraints": {
+          "index": true
+        }
+      },
+      "deletionRecoverableUntil": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "anonymizationStartedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "anonymizedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "pseudonymousActorId": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 100,
+          "select": false,
+          "trim": true
+        }
+      },
+      "failedLoginAttempts": {
+        "instance": "Number",
+        "constraints": {
+          "select": false
+        }
+      },
+      "accountLockedUntil": {
+        "instance": "Date",
+        "constraints": {
+          "select": false
+        }
+      },
+      "kycStatus": {
+        "instance": "String",
+        "constraints": {
+          "enum": {
+            "NOT_SUBMITTED": "not_submitted",
+            "PENDING": "pending",
+            "REJECTED": "rejected",
+            "VERIFIED": "verified"
+          }
+        }
+      },
+      "idFrontUrl": {
+        "instance": "String",
+        "constraints": {}
+      },
+      "idFrontAsset": {
+        "instance": "Mixed",
+        "constraints": {}
+      },
+      "idBackUrl": {
+        "instance": "String",
+        "constraints": {}
+      },
+      "idBackAsset": {
+        "instance": "Mixed",
+        "constraints": {}
+      },
+      "selfieUrl": {
+        "instance": "String",
+        "constraints": {}
+      },
+      "selfieAsset": {
+        "instance": "Mixed",
+        "constraints": {}
+      },
+      "kycSubmittedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "kycReviewedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "kycRejectionReason": {
+        "instance": "String",
+        "constraints": {}
+      },
+      "kycVersion": {
+        "instance": "Number",
+        "constraints": {
+          "min": 0
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  }
+}

@@ -19,8 +19,8 @@ jobs:
           cache: npm
       - name: Install dependencies from lockfile
         run: npm ci
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Check JavaScript
+        run: npm run check
       - name: Validate migration registry
         run: npm run migration:list
       - name: Test

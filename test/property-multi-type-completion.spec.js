@@ -1,0 +1,882 @@
+'use strict';
+
+const { ObjectId } = require('mongodb');
+const { selectMigrations } = require('../src/migrations/cli');
+const {
+  CORE_MIGRATIONS,
+  propertyTypeListingIndexesMigration,
+  propertyTypeSelectionBackfillMigration,
+  retirePurposeListingIndexMigration,
+} = require('../src/migrations/framework/core-migrations');
+const { MigrationRunner } = require('../src/migrations/framework/migration.runner');
+const {
+  MemoryDb,
+  MemoryStore,
+  evaluate,
+  idOf,
+  matches,
+  sortDocs,
+} = require('./support/memory-mongo');
+const { runIntegrityChecks } = require('../src/migrations/integrity-checker');
+const { PropertiesService } = require('../src/services/properties.service');
+const { PropertySchema } = require('../src/models/property.model');
+const {
+  PROPERTY_TYPE_LISTING_INDEXES,
+  RETIRED_PURPOSE_LISTING_INDEX,
+} = require('../src/domain/properties/property-listing-indexes');
+/**
+ * DPF-006 (backfill + integrity) and DPF-007 (any-selected-type search + M-G
+ * indexes). No disposable MongoDB is available here, so the migration,
+ * integrity and search pipelines run against a small in-memory evaluator that
+ * implements exactly the MongoDB query/aggregation semantics they use.
+ */
+// ---------------------------------------------------------------- fixtures
+const PURPOSE_RES = new ObjectId('64b000000000000000000010');
+const PURPOSE_COM = new ObjectId('64b000000000000000000020');
+const APARTMENT = new ObjectId('64b0000000000000000000a1');
+const DUPLEX = new ObjectId('64b0000000000000000000a2');
+const VILLA = new ObjectId('64b0000000000000000000a3');
+const OFFICE = new ObjectId('64b0000000000000000000b1');
+const GONE = new ObjectId('64b0000000000000000000ff');
+const oid = (n) => new ObjectId(`64b00000000000000000${String(n).padStart(4, '0')}`);
+const types = () => [
+  {
+    _id: APARTMENT,
+    code: 'apartment',
+    purposeCategoryId: PURPOSE_RES,
+    isActive: true,
+    usageCount: 0,
+  },
+  { _id: DUPLEX, code: 'duplex', purposeCategoryId: PURPOSE_RES, isActive: true, usageCount: 0 },
+  { _id: VILLA, code: 'villa', purposeCategoryId: PURPOSE_RES, isActive: true, usageCount: 0 },
+  { _id: OFFICE, code: 'office', purposeCategoryId: PURPOSE_COM, isActive: true, usageCount: 0 },
+];
+// ================================================================= DPF-006
+describe('DPF-006 M-F backfill (022-property-type-selection-backfill)', () => {
+  const legacyDb = () =>
+    new MemoryDb()
+      .seed('property_types', types())
+      .seed('properties', [
+        {
+          _id: oid(1),
+          purposeCategoryId: PURPOSE_RES,
+          purposeSubcategoryId: APARTMENT,
+          lifecycleStatus: 'active',
+          status: 'approved',
+        },
+        {
+          _id: oid(2),
+          purposeCategoryId: PURPOSE_RES,
+          purposeSubcategoryId: VILLA,
+          lifecycleStatus: 'archived',
+          status: 'approved',
+        },
+        {
+          _id: oid(3),
+          purposeCategoryId: PURPOSE_RES,
+          purposeSubcategoryId: DUPLEX,
+          lifecycleStatus: 'admin_hidden',
+          status: 'pending_review',
+        },
+        {
+          _id: oid(4),
+          purposeCategoryId: PURPOSE_RES,
+          purposeSubcategoryId: APARTMENT,
+          purposeSubcategoryIds: [APARTMENT, DUPLEX],
+          status: 'approved',
+        },
+        { _id: oid(5), propertyTypeCode: 'chalet', status: 'rejected' },
+      ])
+      .seed('property_revisions', [
+        { _id: oid(101), propertyId: oid(1), purposeSubcategoryId: APARTMENT },
+        {
+          _id: oid(104),
+          propertyId: oid(4),
+          purposeSubcategoryId: APARTMENT,
+          purposeSubcategoryIds: [APARTMENT, DUPLEX],
+        },
+      ]);
+  const runner = (db, store = new MemoryStore(), batchSize = 2) => {
+    store.markComplete('015-property-attribution-revisions');
+    return { store, runner: new MigrationRunner(db, store, { batchSize }) };
+  };
+  it('backfills [primary] for every lifecycle state, in checkpointed batches, and leaves populated arrays and revisions alone', async () => {
+    const db = legacyDb();
+    const revisionsBefore = JSON.stringify(db.docs('property_revisions'));
+    const populatedBefore = db.docs('properties')[3].purposeSubcategoryIds;
+    const { runner: migrationRunner } = runner(db);
+    const report = await migrationRunner.run(propertyTypeSelectionBackfillMigration, 'apply');
+    expect(report).toMatchObject({ status: 'complete', modified: 3, scanned: 3, batches: 2 });
+    const selection = (n) =>
+      db.docs('properties').find((doc) => idOf(doc._id) === idOf(oid(n))).purposeSubcategoryIds;
+    expect(selection(1).map(String)).toEqual([String(APARTMENT)]);
+    expect(selection(2).map(String)).toEqual([String(VILLA)]);
+    expect(selection(3).map(String)).toEqual([String(DUPLEX)]);
+    expect(selection(4)).toBe(populatedBefore);
+    expect(selection(5)).toBeUndefined();
+    expect(JSON.stringify(db.docs('property_revisions'))).toBe(revisionsBefore);
+    expect(db.writes.filter((write) => write.collection !== 'properties')).toEqual([]);
+  });
+  it('is idempotent: a rerun is skipped by the ledger and a fresh run over backfilled data modifies nothing', async () => {
+    const db = legacyDb();
+    const { store, runner: first } = runner(db);
+    await first.run(propertyTypeSelectionBackfillMigration, 'apply');
+    const snapshot = JSON.stringify(db.docs('properties'));
+    expect((await first.run(propertyTypeSelectionBackfillMigration, 'apply')).status).toBe(
+      'skipped-complete',
+    );
+    const fresh = runner(db).runner;
+    expect(await fresh.run(propertyTypeSelectionBackfillMigration, 'apply')).toMatchObject({
+      status: 'complete',
+      modified: 0,
+    });
+    expect(JSON.stringify(db.docs('properties'))).toBe(snapshot);
+    expect(store.records.get('022-property-type-selection-backfill')?.status).toBe('complete');
+  });
+  it('never overwrites a row the application re-pointed between the scan and the write', async () => {
+    const db = legacyDb();
+    const { runner: migrationRunner } = runner(db, new MemoryStore(), 10);
+    const properties = db.collection('properties');
+    // Simulate a concurrent approval that changed the primary after the batch was read.
+    db.collection = ((collection) => (name) => {
+      const handle = collection(name);
+      if (name !== 'properties') return handle;
+      return {
+        ...handle,
+        find: (...args) => {
+          const chain = properties.find(...args);
+          const toArray = chain.toArray;
+          chain.toArray = async () => {
+            const rows = await toArray();
+            db.docs('properties')[0].purposeSubcategoryId = VILLA;
+            return rows;
+          };
+          return chain;
+        },
+      };
+    })(db.collection.bind(db));
+    await migrationRunner
+      .run(propertyTypeSelectionBackfillMigration, 'apply')
+      .catch(() => undefined);
+    expect(db.docs('properties')[0].purposeSubcategoryIds).toBeUndefined();
+  });
+  it('reports legacy data in the dry-run preflight without blocking or correcting it', async () => {
+    const db = legacyDb().seed('property_types', [
+      ...types(),
+      { _id: new ObjectId(), code: 'orphan', isActive: true },
+      { _id: new ObjectId(), code: 'retired', isActive: false },
+    ]);
+    db.docs('property_revisions').push({
+      _id: oid(105),
+      propertyId: oid(5),
+      purposeSubcategoryId: null,
+    });
+    const report = await runner(db).runner.run(propertyTypeSelectionBackfillMigration, 'dry-run');
+    expect(report.status).toBe('dry-run-complete');
+    expect(report.preflight).toEqual({
+      eligible: 3,
+      alreadyApplied: 1,
+      blockers: [],
+      summary: {
+        propertiesMissingPurposeSubcategoryId: 1,
+        revisionsMissingPurposeSubcategoryId: 1,
+        activeTypesWithoutPurposeCategoryId: 1,
+        propertiesWithMultipleSelectedTypes: 1,
+        revisionsWithMultipleSelectedTypes: 1,
+        propertiesWithSelectionMissingPrimary: 0,
+      },
+    });
+    expect(db.writes).toEqual([]);
+  });
+  it('fails validation, without rewriting anything, when a stored selection lacks its primary', async () => {
+    const db = legacyDb();
+    db.docs('properties').push({
+      _id: oid(6),
+      purposeSubcategoryId: APARTMENT,
+      purposeSubcategoryIds: [DUPLEX],
+    });
+    await expect(
+      runner(db).runner.run(propertyTypeSelectionBackfillMigration, 'apply'),
+    ).rejects.toThrow(/PROPERTY_TYPE_SELECTION_MISSING_PRIMARY/);
+    expect(
+      db
+        .docs('properties')
+        .find((doc) => idOf(doc._id) === idOf(oid(6)))
+        .purposeSubcategoryIds.map(String),
+    ).toEqual([String(DUPLEX)]);
+  });
+});
+describe('DPF-006 integrity checks for multi-type classification', () => {
+  const codes = async (db) =>
+    Object.fromEntries(
+      (await runIntegrityChecks(db)).findings.map((finding) => [
+        finding.code,
+        { count: finding.count, severity: finding.severity, sampleIds: finding.sampleIds },
+      ]),
+    );
+  const consistent = () =>
+    new MemoryDb()
+      .seed(
+        'property_types',
+        types().map((type) => ({
+          ...type,
+          usageCount: type._id.equals(APARTMENT) ? 2 : type._id.equals(DUPLEX) ? 1 : 0,
+        })),
+      )
+      .seed('properties', [
+        {
+          _id: oid(1),
+          purposeCategoryId: PURPOSE_RES,
+          purposeSubcategoryId: APARTMENT,
+          purposeSubcategoryIds: [APARTMENT, DUPLEX],
+          status: 'approved',
+        },
+        {
+          _id: oid(2),
+          purposeCategoryId: PURPOSE_RES,
+          purposeSubcategoryId: APARTMENT,
+          purposeSubcategoryIds: [APARTMENT],
+          status: 'approved',
+        },
+      ])
+      .seed('property_revisions', [
+        {
+          _id: oid(101),
+          purposeCategoryId: PURPOSE_RES,
+          purposeSubcategoryId: APARTMENT,
+          purposeSubcategoryIds: [APARTMENT, DUPLEX],
+        },
+      ]);
+  it('reports nothing for consistent primary + additional classification', async () => {
+    expect(await codes(consistent())).toEqual({});
+  });
+  it('counts usage by selected-type membership, including additional types and legacy code-only rows', async () => {
+    const db = consistent();
+    db.docs('properties').push({ _id: oid(3), propertyTypeCode: 'villa', status: 'approved' });
+    db.docs('property_types').find((type) => type._id.equals(VILLA)).usageCount = 1;
+    expect((await codes(db)).PROPERTY_TYPE_USAGE_DRIFT).toBeUndefined();
+    db.docs('property_types').find((type) => type._id.equals(DUPLEX)).usageCount = 0;
+    expect((await codes(db)).PROPERTY_TYPE_USAGE_DRIFT).toEqual({
+      count: 1,
+      severity: 'warning',
+      sampleIds: [String(DUPLEX)],
+    });
+  });
+  it('treats usageCount as a conservative deletion guard: overcounts are safe, undercounts are reported', async () => {
+    const db = consistent().seed('property_options', [
+      { _id: oid(401), group: 'payment_method', code: 'cash', usageCount: 3 },
+      { _id: oid(402), group: 'payment_method', code: 'installment', usageCount: 0 },
+    ]);
+    db.docs('property_types').find((type) => type._id.equals(DUPLEX)).usageCount = 5;
+    db.docs('properties')[0].paymentMethodCode = 'cash';
+    expect((await codes(db)).PROPERTY_TYPE_USAGE_DRIFT).toBeUndefined();
+    expect((await codes(db)).PROPERTY_OPTION_USAGE_DRIFT).toBeUndefined();
+    db.docs('properties')[1].paymentMethodCode = 'installment';
+    expect((await codes(db)).PROPERTY_OPTION_USAGE_DRIFT).toEqual({
+      count: 1,
+      severity: 'warning',
+      sampleIds: [String(oid(402))],
+    });
+  });
+  it('flags a missing backfill, and a stored selection missing its primary on properties and revisions', async () => {
+    const db = consistent();
+    db.docs('properties').push({
+      _id: oid(3),
+      purposeCategoryId: PURPOSE_RES,
+      purposeSubcategoryId: VILLA,
+      status: 'approved',
+    });
+    db.docs('properties').push({
+      _id: oid(4),
+      purposeCategoryId: PURPOSE_RES,
+      purposeSubcategoryId: VILLA,
+      purposeSubcategoryIds: [DUPLEX],
+      status: 'approved',
+    });
+    db.docs('property_revisions').push({
+      _id: oid(102),
+      purposeCategoryId: PURPOSE_RES,
+      purposeSubcategoryId: VILLA,
+      purposeSubcategoryIds: null,
+    });
+    db.docs('property_revisions').push({
+      _id: oid(103),
+      purposeCategoryId: PURPOSE_RES,
+      purposeSubcategoryId: VILLA,
+    });
+    const findings = await codes(db);
+    expect(findings.PROPERTY_TYPE_SELECTION_BACKFILL_MISSING).toEqual({
+      count: 1,
+      severity: 'error',
+      sampleIds: [String(oid(3))],
+    });
+    expect(findings.PROPERTY_TYPE_SELECTION_MISSING_PRIMARY).toEqual({
+      count: 1,
+      severity: 'error',
+      sampleIds: [String(oid(4))],
+    });
+    expect(findings.REVISION_TYPE_SELECTION_MISSING_PRIMARY).toEqual({
+      count: 1,
+      severity: 'error',
+      sampleIds: [String(oid(102))],
+    });
+  });
+  it('flags a selected type under another purpose and selected types that no longer exist', async () => {
+    const db = consistent();
+    db.docs('properties').push({
+      _id: oid(5),
+      purposeCategoryId: PURPOSE_RES,
+      purposeSubcategoryId: APARTMENT,
+      purposeSubcategoryIds: [APARTMENT, OFFICE],
+    });
+    db.docs('properties').push({
+      _id: oid(6),
+      purposeCategoryId: PURPOSE_RES,
+      purposeSubcategoryId: APARTMENT,
+      purposeSubcategoryIds: [APARTMENT, GONE],
+    });
+    db.docs('property_revisions').push({
+      _id: oid(106),
+      purposeCategoryId: PURPOSE_RES,
+      purposeSubcategoryId: GONE,
+    });
+    db.docs('property_revisions').push({
+      _id: oid(107),
+      purposeCategoryId: PURPOSE_RES,
+      purposeSubcategoryId: APARTMENT,
+      purposeSubcategoryIds: [OFFICE, APARTMENT],
+    });
+    const findings = await codes(db);
+    expect(findings.PROPERTY_TYPE_SELECTION_MIXED_PURPOSE).toMatchObject({
+      count: 1,
+      severity: 'error',
+      sampleIds: [String(oid(5))],
+    });
+    expect(findings.REVISION_TYPE_SELECTION_MIXED_PURPOSE).toMatchObject({
+      count: 1,
+      sampleIds: [String(oid(107))],
+    });
+    expect(findings.DANGLING_SELECTED_PROPERTY_TYPE).toMatchObject({
+      count: 1,
+      severity: 'error',
+      sampleIds: [String(oid(6))],
+    });
+    expect(findings.DANGLING_REVISION_SELECTED_PROPERTY_TYPE).toMatchObject({
+      count: 1,
+      sampleIds: [String(oid(106))],
+    });
+  });
+  it('reports active types without a purpose and records without a primary as warnings only', async () => {
+    const db = consistent();
+    const orphan = new ObjectId();
+    db.docs('property_types').push({ _id: orphan, code: 'orphan', isActive: true, usageCount: 0 });
+    db.docs('properties').push({ _id: oid(7), status: 'approved' });
+    db.docs('property_revisions').push({ _id: oid(108), purposeSubcategoryId: null });
+    const report = await runIntegrityChecks(db);
+    const findings = Object.fromEntries(report.findings.map((finding) => [finding.code, finding]));
+    expect(findings.ACTIVE_PROPERTY_TYPE_WITHOUT_PURPOSE).toMatchObject({
+      severity: 'warning',
+      sampleIds: [String(orphan)],
+    });
+    expect(findings.PROPERTY_MISSING_PRIMARY_TYPE).toMatchObject({
+      severity: 'warning',
+      sampleIds: [String(oid(7))],
+    });
+    expect(findings.REVISION_MISSING_PRIMARY_TYPE).toMatchObject({
+      severity: 'warning',
+      sampleIds: [String(oid(108))],
+    });
+    expect(report.ok).toBe(true);
+  });
+});
+// ================================================================= DPF-007
+const CATEGORY_RES = String(PURPOSE_RES);
+function listingDb() {
+  const listing = (n, selection, extra = {}) => ({
+    _id: oid(n),
+    status: 'approved',
+    isOwnerVisible: true,
+    lifecycleStatus: 'active',
+    currentPublicRevisionId: oid(1000 + n),
+    purposeCategoryId: PURPOSE_RES,
+    purposeSubcategoryId: selection[0],
+    purposeSubcategoryIds: selection,
+    governorateCode: 'cairo',
+    city: 'القاهرة',
+    district: 'التجمع',
+    title: `عقار ${n}`,
+    totalPriceMinor: 100_000 * n,
+    createdAt: new Date(Date.UTC(2026, 0, n)),
+    ...extra,
+  });
+  return [
+    listing(1, [APARTMENT, DUPLEX]),
+    listing(2, [APARTMENT]),
+    listing(3, [DUPLEX], { governorateCode: 'giza' }),
+    listing(4, [VILLA]),
+    listing(5, [VILLA, DUPLEX], { totalPriceMinor: 900_000 }),
+    listing(6, [OFFICE], { purposeCategoryId: PURPOSE_COM }),
+    listing(7, [APARTMENT, DUPLEX], { isOwnerVisible: false }),
+  ];
+}
+function searchService(docs) {
+  const db = new MemoryDb().seed('properties', docs).seed('property_types', types());
+  const service = Object.create(PropertiesService.prototype);
+  const filters = [];
+  service.properties = {
+    find: (filter) => {
+      filters.push(filter);
+      let rows = db.docs('properties').filter((doc) => matches(doc, filter));
+      const chain = {
+        sort: (spec) => {
+          rows = sortDocs(rows, spec);
+          return chain;
+        },
+        skip: (n) => {
+          rows = rows.slice(n);
+          return chain;
+        },
+        limit: (n) => {
+          rows = rows.slice(0, n);
+          return chain;
+        },
+        populate: () => chain,
+        lean: () => chain,
+        exec: async () => rows,
+      };
+      return chain;
+    },
+    countDocuments: (filter) => ({
+      exec: async () => db.docs('properties').filter((doc) => matches(doc, filter)).length,
+    }),
+  };
+  service.propertyTypes = {
+    findById: (id) => ({
+      lean: () => ({
+        exec: async () => db.docs('property_types').find((type) => idOf(type._id) === id) ?? null,
+      }),
+    }),
+  };
+  service.purposeCategories = { exists: () => ({ exec: async () => ({ _id: PURPOSE_RES }) }) };
+  service.hydratePublicListings = async (items) => items.map((item) => ({ id: String(item._id) }));
+  return { service: service, db, filters };
+}
+const ids = (result) => result.items.map((item) => item.id);
+const n = (...values) => values.map((value) => String(oid(value)));
+describe('DPF-007 public search matches any selected type', () => {
+  it('finds a listing through its primary and through its additional type, never through an unrelated type', async () => {
+    const { service } = searchService(listingDb());
+    expect(ids(await service.listPublished({ purposeSubcategoryId: String(APARTMENT) }))).toEqual(
+      n(2, 1),
+    );
+    expect(ids(await service.listPublished({ purposeSubcategoryId: String(DUPLEX) }))).toEqual(
+      n(5, 3, 1),
+    );
+    expect(ids(await service.listPublished({ purposeSubcategoryId: String(VILLA) }))).toEqual(
+      n(5, 4),
+    );
+  });
+  it('keeps single-type (backfilled) listings behaving exactly as the primary-only search did', async () => {
+    const singleType = listingDb().map((doc) => ({
+      ...doc,
+      purposeSubcategoryIds: [doc.purposeSubcategoryId],
+    }));
+    const { service } = searchService(singleType);
+    for (const type of [APARTMENT, DUPLEX, VILLA]) {
+      const expected = singleType
+        .filter((doc) => doc.isOwnerVisible && idOf(doc.purposeSubcategoryId) === idOf(type))
+        .sort((a, b) => +b.createdAt - +a.createdAt)
+        .map((doc) => String(doc._id));
+      expect(ids(await service.listPublished({ purposeSubcategoryId: String(type) }))).toEqual(
+        expected,
+      );
+    }
+  });
+  it('keeps purpose-only, no-type and non-type filters unchanged', async () => {
+    const { service, filters } = searchService(listingDb());
+    expect(ids(await service.listPublished({ purposeCategoryId: CATEGORY_RES }))).toEqual(
+      n(5, 4, 3, 2, 1),
+    );
+    expect(ids(await service.listPublished({}))).toEqual(n(6, 5, 4, 3, 2, 1));
+    await service.listPublished({ governorateCode: 'giza', minPriceMinor: 1 });
+    for (const filter of [filters[0], filters[1], filters[2]]) {
+      expect(filter).not.toHaveProperty('purposeSubcategoryIds');
+      expect(filter).not.toHaveProperty('purposeSubcategoryId');
+    }
+    expect(Object.keys(filters[2]).sort()).toEqual([
+      'currentPublicRevisionId',
+      'governorateCode',
+      'isOwnerVisible',
+      'lifecycleStatus',
+      'status',
+      'totalPriceMinor',
+    ]);
+  });
+  it('combines the type with price and governorate filters', async () => {
+    const { service } = searchService(listingDb());
+    expect(
+      ids(
+        await service.listPublished({
+          purposeSubcategoryId: String(DUPLEX),
+          maxPriceMinor: 300_000,
+        }),
+      ),
+    ).toEqual(n(3, 1));
+    expect(
+      ids(
+        await service.listPublished({
+          purposeSubcategoryId: String(DUPLEX),
+          minPriceMinor: 400_000,
+        }),
+      ),
+    ).toEqual(n(5));
+    expect(
+      ids(
+        await service.listPublished({
+          purposeSubcategoryId: String(DUPLEX),
+          governorateCode: 'giza',
+        }),
+      ),
+    ).toEqual(n(3));
+    expect(
+      ids(
+        await service.listPublished({ purposeSubcategoryId: String(DUPLEX), sort: 'price_desc' }),
+      ),
+    ).toEqual(n(5, 3, 1));
+  });
+  it('paginates by createdAt with correct totals and no duplicate rows from the multikey array', async () => {
+    const { service } = searchService(listingDb());
+    const first = await service.listPublished({
+      purposeSubcategoryId: String(DUPLEX),
+      limit: 2,
+      page: 1,
+    });
+    const second = await service.listPublished({
+      purposeSubcategoryId: String(DUPLEX),
+      limit: 2,
+      page: 2,
+    });
+    expect(first.pagination).toEqual({ page: 1, limit: 2, total: 3, totalPages: 2 });
+    expect([...ids(first), ...ids(second)]).toEqual(n(5, 3, 1));
+    expect(new Set([...ids(first), ...ids(second)]).size).toBe(3);
+  });
+  it('builds the type filter on purposeSubcategoryIds with the derived purpose, keeping hierarchy validation', async () => {
+    const { service, filters } = searchService(listingDb());
+    await service.listPublished({ purposeSubcategoryId: String(DUPLEX) });
+    expect(filters[0]).toMatchObject({
+      purposeSubcategoryIds: DUPLEX,
+      purposeCategoryId: PURPOSE_RES,
+    });
+    expect(filters[0]).not.toHaveProperty('purposeSubcategoryId');
+    await expect(
+      service.listPublished({
+        purposeSubcategoryId: String(OFFICE),
+        purposeCategoryId: CATEGORY_RES,
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'PROPERTY_PURPOSE_HIERARCHY_MISMATCH' }),
+    });
+  });
+});
+describe('DPF-007 M-G listing indexes', () => {
+  const listingIndexes = () =>
+    PropertySchema.indexes().filter(([, options]) =>
+      String(options?.name ?? '').startsWith('property_public_listing_'),
+    );
+  it('keeps the DPF-007 migration shapes frozen and declares the Phase 13 sortable set instead of the superseded indexes', () => {
+    // Migrations 023/024 own these exact shapes and must keep creating them on a fresh database.
+    expect(
+      JSON.stringify(PROPERTY_TYPE_LISTING_INDEXES.map((index) => [index.options.name, index.key])),
+    ).toBe(
+      JSON.stringify([
+        [
+          'property_public_listing_purpose_category',
+          { status: 1, isOwnerVisible: 1, lifecycleStatus: 1, purposeCategoryId: 1, createdAt: -1 },
+        ],
+        [
+          'property_public_listing_type',
+          {
+            status: 1,
+            isOwnerVisible: 1,
+            lifecycleStatus: 1,
+            purposeSubcategoryIds: 1,
+            createdAt: -1,
+          },
+        ],
+      ]),
+    );
+    const byName = Object.fromEntries(
+      listingIndexes().map(([key, options]) => [options.name, JSON.stringify(key)]),
+    );
+    expect(byName).not.toHaveProperty('property_public_listing_purpose');
+    // The schema declares only the sortable *_v2 set (each ends with the sort incl. its _id tie-breaker); the old names are retired by manual migration 035.
+    expect(Object.keys(byName).sort()).toEqual([
+      'property_public_listing_governorate_v2',
+      'property_public_listing_newest_v2',
+      'property_public_listing_operation_type_v2',
+      'property_public_listing_price_v2',
+      'property_public_listing_purpose_category_v2',
+      'property_public_listing_type_v2',
+    ]);
+    expect(byName.property_public_listing_type_v2).toBe(
+      JSON.stringify({
+        status: 1,
+        isOwnerVisible: 1,
+        lifecycleStatus: 1,
+        purposeSubcategoryIds: 1,
+        createdAt: -1,
+        _id: -1,
+      }),
+    );
+    expect(listingIndexes().length).toBeLessThanOrEqual(8);
+    // Only one array field per compound index (a MongoDB multikey constraint).
+    for (const [key] of listingIndexes())
+      expect(
+        Object.keys(key).filter((field) =>
+          ['purposeSubcategoryIds', 'amenityCodes', 'paymentMethodCodes'].includes(field),
+        ).length,
+      ).toBeLessThanOrEqual(1);
+  });
+  it('creates both indexes through the migration, idempotently, and validates their exact keys', async () => {
+    const db = new MemoryDb();
+    db.indexes.set('properties', [
+      { name: RETIRED_PURPOSE_LISTING_INDEX.options.name, key: RETIRED_PURPOSE_LISTING_INDEX.key },
+    ]);
+    const store = new MemoryStore();
+    store.markComplete('022-property-type-selection-backfill');
+    const report = await new MigrationRunner(db, store).run(
+      propertyTypeListingIndexesMigration,
+      'apply',
+    );
+    expect(report.status).toBe('complete');
+    expect(
+      (db.indexes.get('properties') ?? []).map((index) => [index.name, JSON.stringify(index.key)]),
+    ).toEqual([
+      [
+        RETIRED_PURPOSE_LISTING_INDEX.options.name,
+        JSON.stringify(RETIRED_PURPOSE_LISTING_INDEX.key),
+      ],
+      ...PROPERTY_TYPE_LISTING_INDEXES.map((index) => [
+        index.options.name,
+        JSON.stringify(index.key),
+      ]),
+    ]);
+    const fresh = new MemoryStore();
+    fresh.markComplete('022-property-type-selection-backfill');
+    expect(
+      await new MigrationRunner(db, fresh).run(propertyTypeListingIndexesMigration, 'apply'),
+    ).toMatchObject({ status: 'complete', preflight: { eligible: 0, alreadyApplied: 2 } });
+  });
+  it('blocks when an index of the same name exists with another key, and requires the backfill first', async () => {
+    const db = new MemoryDb();
+    db.indexes.set('properties', [
+      { name: 'property_public_listing_type', key: { status: 1, purposeSubcategoryId: 1 } },
+    ]);
+    const store = new MemoryStore();
+    store.markComplete('022-property-type-selection-backfill');
+    await expect(
+      new MigrationRunner(db, store).run(propertyTypeListingIndexesMigration, 'apply'),
+    ).rejects.toThrow(/PROPERTY_LISTING_INDEX_CONFLICT/);
+    await expect(
+      new MigrationRunner(new MemoryDb(), new MemoryStore()).run(
+        propertyTypeListingIndexesMigration,
+        'apply',
+      ),
+    ).rejects.toThrow(/Dependency 022-property-type-selection-backfill/);
+    expect(propertyTypeListingIndexesMigration.dependencies).toEqual([
+      '022-property-type-selection-backfill',
+    ]);
+  });
+  it('retires the replaced index only when explicitly selected, after the replacements and backfill are in place', async () => {
+    expect(retirePurposeListingIndexMigration.manualOnly).toBe(true);
+    expect(selectMigrations(CORE_MIGRATIONS).map((migration) => migration.id)).not.toContain(
+      retirePurposeListingIndexMigration.id,
+    );
+    expect(selectMigrations(CORE_MIGRATIONS).map((migration) => migration.id)).toEqual(
+      expect.arrayContaining([
+        '022-property-type-selection-backfill',
+        '023-property-type-listing-indexes',
+      ]),
+    );
+    expect(selectMigrations(CORE_MIGRATIONS, retirePurposeListingIndexMigration.id)).toEqual([
+      retirePurposeListingIndexMigration,
+    ]);
+    const retired = {
+      name: RETIRED_PURPOSE_LISTING_INDEX.options.name,
+      key: RETIRED_PURPOSE_LISTING_INDEX.key,
+    };
+    const store = () => {
+      const value = new MemoryStore();
+      value.markComplete('023-property-type-listing-indexes');
+      return value;
+    };
+    const withoutReplacements = new MemoryDb();
+    withoutReplacements.indexes.set('properties', [retired]);
+    await expect(
+      new MigrationRunner(withoutReplacements, store()).run(
+        retirePurposeListingIndexMigration,
+        'apply',
+      ),
+    ).rejects.toThrow(/PROPERTY_LISTING_REPLACEMENT_INDEX_MISSING/);
+    expect(withoutReplacements.indexes.get('properties')).toEqual([retired]);
+    const notBackfilled = new MemoryDb().seed('properties', [
+      { _id: oid(1), purposeSubcategoryId: APARTMENT },
+    ]);
+    notBackfilled.indexes.set('properties', [
+      retired,
+      ...PROPERTY_TYPE_LISTING_INDEXES.map((index) => ({
+        name: index.options.name,
+        key: index.key,
+      })),
+    ]);
+    await expect(
+      new MigrationRunner(notBackfilled, store()).run(retirePurposeListingIndexMigration, 'apply'),
+    ).rejects.toThrow(/PROPERTY_TYPE_SELECTION_BACKFILL_INCOMPLETE/);
+    expect(notBackfilled.indexes.get('properties')).toContainEqual(retired);
+    const ready = new MemoryDb();
+    ready.indexes.set('properties', [
+      retired,
+      ...PROPERTY_TYPE_LISTING_INDEXES.map((index) => ({
+        name: index.options.name,
+        key: index.key,
+      })),
+    ]);
+    expect(
+      await new MigrationRunner(ready, store()).run(retirePurposeListingIndexMigration, 'apply'),
+    ).toMatchObject({ status: 'complete', modified: 1 });
+    expect((ready.indexes.get('properties') ?? []).map((index) => index.name)).toEqual(
+      PROPERTY_TYPE_LISTING_INDEXES.map((index) => index.options.name),
+    );
+    expect(
+      await new MigrationRunner(ready, store()).run(retirePurposeListingIndexMigration, 'apply'),
+    ).toMatchObject({ status: 'complete', modified: 0 });
+  });
+  it('keeps the migration registry valid and ordered backfill -> create -> retire', () => {
+    const order = CORE_MIGRATIONS.map((migration) => migration.id);
+    expect(order.indexOf('022-property-type-selection-backfill')).toBeLessThan(
+      order.indexOf('023-property-type-listing-indexes'),
+    );
+    expect(order.indexOf('023-property-type-listing-indexes')).toBeLessThan(
+      order.indexOf('024-retire-property-purpose-listing-index'),
+    );
+    expect(retirePurposeListingIndexMigration.rollback).toMatchObject({ kind: 'automatic' });
+  });
+});
+// Evaluator self-check: MongoDB rejects $in on a non-array; the selection expressions must never hit that.
+describe('evaluator guards', () => {
+  it('throws on $in over a non-array so an unsafe expression cannot pass silently', () => {
+    expect(() => evaluate({ $in: ['$a', '$b'] }, { a: 1, b: null })).toThrow();
+  });
+});
+// ================================================================= DPF-008 (Backend contract)
+describe('DPF-008 admin reads expose the reviewed classification as propertyTypes', () => {
+  const catalog = [
+    { _id: APARTMENT, code: 'apartment', nameAr: 'شقة', iconKey: 'building', sortOrder: 1 },
+    { _id: DUPLEX, code: 'duplex', nameAr: 'دوبلكس', iconKey: 'duplex', sortOrder: 2 },
+    { _id: VILLA, code: 'villa', nameAr: 'فيلا', iconKey: 'villa', sortOrder: 3 },
+  ];
+  const revision = (id, primary, selection, status) => ({
+    _id: id,
+    revisionNumber: 1,
+    title: 'عقار',
+    moderationStatus: status,
+    decisionVersion: 0,
+    purposeSubcategoryId: primary,
+    purposeSubcategoryIds: selection,
+    legacyPropertyTypeCode: 'apartment',
+    galleryMedia: [],
+    privateEvidenceAssets: [],
+    totalPriceMinor: 100,
+    currency: 'EGP',
+  });
+  const aggregate = (extra) => ({
+    _id: oid(1),
+    title: 'عقار',
+    status: 'approved',
+    lifecycleStatus: 'active',
+    createdAt: new Date(),
+    images: [],
+    propertyContractVersion: 1,
+    totalPriceMinor: 100,
+    currency: 'EGP',
+    ...extra,
+  });
+  const adminService = (items, revisions = []) => {
+    const service = Object.create(PropertiesService.prototype);
+    const chain = (value) => {
+      const query = {
+        sort: () => query,
+        skip: () => query,
+        limit: () => query,
+        populate: () => query,
+        lean: () => query,
+        exec: async () => value,
+      };
+      return query;
+    };
+    const typesFind = jest.fn((filter) => chain(catalog.filter((type) => matches(type, filter))));
+    Object.assign(service, {
+      properties: {
+        find: () => chain(items),
+        findById: () => chain(items[0]),
+        countDocuments: () => ({ exec: async () => items.length }),
+      },
+      revisions: { find: () => chain(revisions) },
+      propertyTypes: { find: typesFind },
+      purposeCategories: { find: () => chain([]) },
+      options: { find: () => chain([]) },
+    });
+    return { service, typesFind };
+  };
+  it("lists the pending revision's types (primary first) and falls back to the public revision", async () => {
+    const pending = revision(oid(201), DUPLEX, [APARTMENT, DUPLEX, VILLA], 'pending_review');
+    const current = revision(oid(202), APARTMENT, [APARTMENT], 'approved');
+    const { service, typesFind } = adminService([
+      aggregate({ pendingRevisionId: pending, currentPublicRevisionId: current }),
+      aggregate({
+        _id: oid(2),
+        currentPublicRevisionId: revision(oid(203), APARTMENT, [APARTMENT, VILLA], 'approved'),
+      }),
+    ]);
+    const { items } = await service.listForAdmin({});
+    expect(items[0].propertyTypes.map((type) => [type.nameAr, type.isPrimary])).toEqual([
+      ['دوبلكس', true],
+      ['شقة', false],
+      ['فيلا', false],
+    ]);
+    expect(items[1].propertyTypes.map((type) => [type.nameAr, type.isPrimary])).toEqual([
+      ['شقة', true],
+      ['فيلا', false],
+    ]);
+    expect(items[0].propertyTypes[0]).toEqual({
+      id: String(DUPLEX),
+      code: 'duplex',
+      nameAr: 'دوبلكس',
+      iconKey: 'duplex',
+      isPrimary: true,
+    });
+    expect(typesFind).toHaveBeenCalledTimes(1);
+  });
+  it('returns the reviewed classification at the top of the admin detail and per revision', async () => {
+    const pending = revision(oid(201), DUPLEX, [DUPLEX, VILLA], 'pending_review');
+    const current = revision(oid(202), APARTMENT, [APARTMENT, DUPLEX], 'approved');
+    const { service } = adminService(
+      [aggregate({ pendingRevisionId: pending, currentPublicRevisionId: current })],
+      [pending, current],
+    );
+    const { property } = await service.getForAdmin(String(oid(1)));
+    expect(property.propertyTypes.map((type) => type.id)).toEqual([String(DUPLEX), String(VILLA)]);
+    expect(
+      property.pendingRevision.propertyTypes.map((type) => [type.nameAr, type.isPrimary]),
+    ).toEqual([
+      ['دوبلكس', true],
+      ['فيلا', false],
+    ]);
+    expect(
+      property.currentPublicRevision.propertyTypes.map((type) => [type.nameAr, type.isPrimary]),
+    ).toEqual([
+      ['شقة', true],
+      ['دوبلكس', false],
+    ]);
+  });
+});

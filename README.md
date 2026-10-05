@@ -1,6 +1,29 @@
-# Real Estate Backend — Phase 0 baseline and Phase 1 accounts
+# Real Estate Backend — Express MVC
 
-NestJS + MongoDB backend for authentication and KYC. Phase 0 adds production-safe configuration, role authorization, secure OTP handling, real SMTP delivery, and request throttling.
+Plain JavaScript backend using Node.js, Express and MongoDB/Mongoose. The API includes authentication, accounts, KYC, property listings, catalog administration, managed marketing, payments and notifications.
+
+## MVC structure
+
+```text
+src/
+  server.js       # Connect MongoDB, start HTTP and workers, graceful shutdown
+  app.js          # Express application and shared middleware
+  routes/         # URLs, authentication, authorization, uploads and validation
+  controllers/    # Request actions that call services
+  models/         # Mongoose schemas, indexes and model registration
+  views/          # JSON response envelope and binary responses
+  services/       # Business logic and background workers
+  validators/     # Input validation and transformation
+  domain/         # Domain constants, policies and provider adapters
+  middleware/     # JWT, roles, capabilities, errors, rate limits and uploads
+  config/         # Environment, database and explicit service construction
+  common/         # Shared utilities
+  migrations/     # Database migrations and integrity checks
+  seeds/          # Admin and catalog bootstrap scripts
+  scripts/        # Operational commands
+```
+
+This is an API, so the view layer renders JSON or binary responses. Services receive their dependencies explicitly in `src/config/services.js`. No Nest modules, decorators, dependency-injection container or TypeScript build is required. Validation rules still use class-validator/class-transformer through ordinary JavaScript function calls.
 
 > **Phase 13 operations docs:** [environment safety](docs/PHASE-13-environment-safety.md) ·
 > [release and rollout runbook](docs/PHASE-13-release-runbook.md) ·
@@ -13,7 +36,7 @@ Use Node.js 22 LTS and npm 10. The supported ranges are enforced by
 
 1. Copy `.env.example` to `.env` and replace every placeholder needed by the features you use.
 2. Run `npm ci`.
-3. Run `npm run typecheck` and `npm test`.
+3. Run `npm run check` and `npm test`.
 4. Run `npm run start:dev` only when you intentionally want the API server.
 
 All routes use the `/api/v1` prefix.
@@ -196,13 +219,16 @@ Auction APIs, bidding, workers and the WebSocket channel have been removed. See 
 ## Commands
 
 ```bash
-npm run typecheck
+npm run check
 npm test
 npm run build
 npm run seed:admin
 npm run mail:test
 ```
 
-The repository currently has no ESLint configuration, so CI uses TypeScript
-typechecking as the static code check. Adding and adopting a lint policy is a
-separate task rather than silently accepting lint failures.
+`npm run check` validates JavaScript syntax and resolves application imports.
+`npm run build` runs the same checks; JavaScript runs directly from `src`.
+Use `npm start` for normal startup or `npm run start:dev` for Node's watch mode.
+
+Historical phase documents describe the system before the Express migration;
+use the folder layout and commands in this README for current development.
