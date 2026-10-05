@@ -55,11 +55,10 @@ function createService(options = {}) {
     findOne: jest.fn(() => query(user)),
     updateOne: jest.fn(() => ({ exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }) })),
   };
-  const properties = {
-    countDocuments: jest.fn(() => ({
-      exec: jest.fn().mockResolvedValue(options.propertyBlockers ?? 0),
-    })),
-  };
+  // Other domains report what must be resolved before anonymization.
+  const blockerProviders = [
+    { blockersForAccount: jest.fn().mockResolvedValue(options.blockers ?? []) },
+  ];
   const created = workflow();
   const requests = {
     findOne: jest
@@ -82,13 +81,13 @@ function createService(options = {}) {
   };
   const service = new AccountDeletionService(
     users,
-    properties,
     requests,
     connection,
     refreshTokens,
     audit,
+    blockerProviders,
   );
-  return { service, user, users, properties, requests, refreshTokens, audit, created };
+  return { service, user, users, requests, refreshTokens, audit, created };
 }
 describe('MAZAD-017 retention-safe account deletion', () => {
   it('moves ACTIVE to DELETION_PENDING, creates a durable workflow, and revokes sessions without deleting the user', async () => {
@@ -180,9 +179,12 @@ describe('MAZAD-017 retention-safe account deletion', () => {
       'ACCOUNT_RESTORED_FRESH_LOGIN_REQUIRED',
     );
   });
-  it('blocks anonymization while a property lifecycle blocker remains', async () => {
+  it('blocks anonymization while another domain still reports a blocker', async () => {
     const expired = workflow({ recoverableUntil: new Date(Date.now() - 1000) });
-    const fixture = createService({ active: expired, propertyBlockers: 2 });
+    const fixture = createService({
+      active: expired,
+      blockers: [{ code: 'OPEN_RESOURCE', category: 'RESOURCE', count: 2 }],
+    });
     fixture.requests.findOne.mockReset().mockReturnValue(query(expired));
     const error = await fixture.service
       .anonymize({
@@ -271,9 +273,9 @@ describe('MAZAD-017 retention-safe account deletion', () => {
     );
     expect(fixture.users.updateOne).not.toHaveBeenCalled();
   });
-  it('anonymizes PII but preserves the User ID, property references, evidence, and history', async () => {
+  it('anonymizes PII but preserves the User ID, evidence, and history', async () => {
     const expired = workflow({ recoverableUntil: new Date(Date.now() - 1000) });
-    const fixture = createService({ propertyBlockers: 0 });
+    const fixture = createService();
     fixture.requests.findOne.mockReset().mockReturnValue(query(expired));
     fixture.requests.findOneAndUpdate.mockReturnValue({
       exec: jest.fn().mockResolvedValue(workflow({ state: AccountDeletionState.ANONYMIZING })),
@@ -297,7 +299,6 @@ describe('MAZAD-017 retention-safe account deletion', () => {
       }),
       expect.anything(),
     );
-    expect(fixture.properties.deleteMany).toBeUndefined();
     expect(fixture.users.findByIdAndDelete).toBeUndefined();
   });
   it('returns the completed anonymization result deterministically when retried', async () => {

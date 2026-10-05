@@ -10,11 +10,6 @@ const { JwtStrategy } = require('../src/services/access-token.service');
 const { SystemRole } = require('../src/domain/auth/roles.enum');
 const { AuthErrorCode } = require('../src/common/errors/auth-error-codes');
 const {
-  applyUserIdentityMigration,
-  isIdentityMigrationApplyMode,
-  planUserIdentityMigration,
-} = require('../src/migrations/007-user-identity-contract');
-const {
   AccountStatus,
   AccountType,
   BrokerStatus,
@@ -186,106 +181,5 @@ describe('MAZAD-007 identity contract', () => {
         sid: 'session-id',
       }),
     ).resolves.toMatchObject({ systemRole: SystemRole.USER });
-  });
-});
-describe('MAZAD-007 migration planning', () => {
-  it('defaults to dry-run and requires an explicit --apply flag', () => {
-    expect(isIdentityMigrationApplyMode(['node', 'migration.ts'])).toBe(false);
-    expect(isIdentityMigrationApplyMode(['node', 'migration.ts', '--apply'])).toBe(true);
-  });
-  it('maps legacy admin/suspended/KYC data without deleting legacy fields', () => {
-    expect(
-      planUserIdentityMigration({
-        _id: '1',
-        email: 'admin@example.com',
-        role: 'admin',
-        isActive: false,
-        emailVerified: true,
-        kycStatus: 'verified',
-      }),
-    ).toEqual({
-      systemRole: SystemRole.ADMIN,
-      accountType: AccountType.USER,
-      accountStatus: AccountStatus.SUSPENDED,
-      brokerStatus: BrokerStatus.NOT_APPLIED,
-      verificationTrustState: VerificationTrustState.VERIFIED,
-      primaryIdentifierType: PrimaryIdentifierType.EMAIL,
-      legacyVerifiedIdentifierType: PrimaryIdentifierType.EMAIL,
-    });
-  });
-  it('does not fabricate SUPER_ADMIN or verified KYC trust', () => {
-    expect(
-      planUserIdentityMigration({
-        _id: '2',
-        phone: '+201001234567',
-        role: 'user',
-        isActive: true,
-        emailVerified: false,
-        kycStatus: 'pending',
-      }),
-    ).toMatchObject({
-      systemRole: SystemRole.USER,
-      verificationTrustState: VerificationTrustState.UNVERIFIED,
-      primaryIdentifierType: PrimaryIdentifierType.PHONE,
-    });
-  });
-  it('blocks ambiguous, malformed, and partially migrated rows', () => {
-    expect(() =>
-      planUserIdentityMigration({ _id: '3', email: 'a@b.com', phone: '+201001234567' }),
-    ).toThrow('Exactly one');
-    expect(() => planUserIdentityMigration({ _id: '4', email: 'a@b.com', role: 'owner' })).toThrow(
-      'Unsupported legacy role',
-    );
-    expect(() =>
-      planUserIdentityMigration({
-        _id: '5',
-        email: 'a@b.com',
-        systemRole: SystemRole.USER,
-      }),
-    ).toThrow('automatic overwrite is forbidden');
-  });
-  it('is resumable and idempotent when the apply step is repeated', async () => {
-    const documents = [
-      {
-        _id: '6',
-        email: 'resume@example.com',
-        role: 'user',
-        isActive: true,
-        emailVerified: true,
-        kycStatus: 'pending',
-      },
-    ];
-    const matchesUnmigrated = (document) =>
-      [
-        'systemRole',
-        'accountType',
-        'accountStatus',
-        'brokerStatus',
-        'verificationTrustState',
-        'primaryIdentifierType',
-      ].every((field) => document[field] === undefined);
-    const collection = {
-      find: jest.fn(() => ({
-        async *[Symbol.asyncIterator]() {
-          for (const document of documents.filter(matchesUnmigrated)) yield document;
-        },
-      })),
-      updateOne: jest.fn(async (filter, update) => {
-        const document = documents.find(
-          (candidate) => candidate._id === filter._id && matchesUnmigrated(candidate),
-        );
-        if (!document) return { modifiedCount: 0 };
-        Object.assign(document, update.$set);
-        return { modifiedCount: 1 };
-      }),
-    };
-    await expect(applyUserIdentityMigration(collection, 'run-1')).resolves.toBe(1);
-    await expect(applyUserIdentityMigration(collection, 'run-2')).resolves.toBe(0);
-    expect(documents[0]).toMatchObject({
-      systemRole: SystemRole.USER,
-      accountType: AccountType.USER,
-      primaryIdentifierType: PrimaryIdentifierType.EMAIL,
-      identityMigrationRunId: 'run-1',
-    });
   });
 });

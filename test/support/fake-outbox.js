@@ -185,7 +185,7 @@ class FakeOutboxStore {
   seed(row) {
     const doc = {
       _id: new Types.ObjectId(),
-      type: 'PROPERTY_APPROVED',
+      type: 'KYC_APPROVED',
       schemaVersion: 1,
       occurredAt: new Date('2026-05-02T10:00:00Z'),
       audience: 'PUBLIC',

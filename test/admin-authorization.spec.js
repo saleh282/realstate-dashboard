@@ -12,9 +12,6 @@ const { AuditLogService } = require('../src/services/audit-log.service');
 const { UserRole } = require('../src/domain/auth/roles.enum');
 const { CloudinaryAssetService } = require('../src/services/cloudinary-asset.service');
 const { UsersService } = require('../src/services/users.service');
-const { AdminPropertiesController } = require('../src/controllers/admin-properties.controller');
-const { PropertiesController } = require('../src/controllers/properties.controller');
-const { PropertiesService } = require('../src/services/properties.service');
 const {
   AdminBrokerApplicationsController,
 } = require('../src/controllers/admin-broker-applications.controller');
@@ -64,20 +61,6 @@ describe('admin controller authorization', () => {
       contentType: 'image/jpeg',
     }),
   };
-  const propertiesService = {
-    downloadTitleDeedForOwner: jest
-      .fn()
-      .mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
-    downloadTitleDeedForAdmin: jest
-      .fn()
-      .mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
-    downloadPrivateEvidenceForOwner: jest
-      .fn()
-      .mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
-    downloadPrivateEvidenceForAdmin: jest
-      .fn()
-      .mockResolvedValue({ buffer: Buffer.from('%PDF'), contentType: 'application/pdf' }),
-  };
   const brokerApplicationsService = {
     listOwnApplications: jest.fn().mockResolvedValue({ items: [] }),
     reviewApplication: jest.fn().mockResolvedValue({
@@ -111,7 +94,6 @@ describe('admin controller authorization', () => {
       services.AccountDeletionService = accountDeletionService;
       services.CloudinaryAssetService = cloudinaryAssetService;
       services.AuditLogService = auditLogService;
-      services.PropertiesService = propertiesService;
       services.BrokerApplicationsService = brokerApplicationsService;
       services.CompanyAccountsService = companyAccountsService;
       return {
@@ -134,14 +116,6 @@ describe('admin controller authorization', () => {
             app.use(
               '/api/v1/admin/audit-logs',
               require('../src/routes/admin-audit.routes').createRouter(services),
-            );
-            app.use(
-              '/api/v1/admin/properties',
-              require('../src/routes/admin-properties.routes').createRouter(services),
-            );
-            app.use(
-              '/api/v1/properties',
-              require('../src/routes/properties.routes').createRouter(services),
             );
             app.use(
               '/api/v1/admin',
@@ -226,21 +200,6 @@ describe('admin controller authorization', () => {
       await request(app.getHttpServer()).get(path).set('Authorization', 'Bearer admin').expect(200);
     },
   );
-  it('prevents unauthenticated and marketplace users from uploading platform property media', async () => {
-    const path =
-      '/api/v1/admin/properties/64b000000000000000000090/revisions/64b000000000000000000091/media';
-    await request(app.getHttpServer()).post(path).expect(401);
-    await request(app.getHttpServer())
-      .post(path)
-      .set('Authorization', 'Bearer user')
-      .field('tagCode', 'exterior')
-      .field('version', '0')
-      .attach('image', Buffer.from([0xff, 0xd8, 0xff]), {
-        filename: 'photo.jpg',
-        contentType: 'image/jpeg',
-      })
-      .expect(403);
-  });
   it('requires authentication for a broker applicant history', async () => {
     await request(app.getHttpServer()).get('/api/v1/broker/applications/me').expect(401);
     await request(app.getHttpServer())
@@ -280,47 +239,6 @@ describe('admin controller authorization', () => {
       .set('Authorization', 'Bearer admin')
       .expect('Content-Type', 'image/jpeg')
       .expect('Cache-Control', 'private, no-store, max-age=0')
-      .expect(200);
-  });
-  it('protects property evidence for the owner and administrative review', async () => {
-    const ownerPath = '/api/v1/properties/mine/64b000000000000000000099/evidence/title-deed';
-    await request(app.getHttpServer()).get(ownerPath).expect(401);
-    await request(app.getHttpServer())
-      .get(ownerPath)
-      .set('Authorization', 'Bearer user')
-      .expect('Cache-Control', 'private, no-store, max-age=0')
-      .expect(200);
-    const adminPath = '/api/v1/admin/properties/64b000000000000000000099/evidence/title-deed';
-    await request(app.getHttpServer())
-      .get(adminPath)
-      .set('Authorization', 'Bearer user')
-      .expect(403);
-    await request(app.getHttpServer())
-      .get(adminPath)
-      .set('Authorization', 'Bearer admin')
-      .expect('Cache-Control', 'private, no-store, max-age=0')
-      .expect(200);
-  });
-  it('protects revision-scoped private evidence and emits no-store headers', async () => {
-    const suffix = '64b000000000000000000099/revisions/64b000000000000000000088/evidence/0';
-    const ownerPath = `/api/v1/properties/mine/${suffix}`;
-    const adminPath = `/api/v1/admin/properties/${suffix}`;
-    await request(app.getHttpServer()).get(ownerPath).expect(401);
-    await request(app.getHttpServer())
-      .get(ownerPath)
-      .set('Authorization', 'Bearer user')
-      .expect('Cache-Control', 'private, no-store, max-age=0')
-      .expect('X-Content-Type-Options', 'nosniff')
-      .expect(200);
-    await request(app.getHttpServer())
-      .get(adminPath)
-      .set('Authorization', 'Bearer user')
-      .expect(403);
-    await request(app.getHttpServer())
-      .get(adminPath)
-      .set('Authorization', 'Bearer admin')
-      .expect('Cache-Control', 'private, no-store, max-age=0')
-      .expect('X-Content-Type-Options', 'nosniff')
       .expect(200);
   });
   it('protects the canonical KYC review route', async () => {

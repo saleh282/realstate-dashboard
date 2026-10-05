@@ -83,7 +83,7 @@ class HttpExceptionFilter {
       requestId,
     });
   }
-  /** Counts and logs the expected failures operators care about (stale form 409, amenity/spec rejections, payment trouble, rate limiting). */
+  /** Counts and logs the expected failures operators care about (the observed domain codes and rate limiting). */
   observe(statusCode, code, requestId, request) {
     const observation = classifyRejection(statusCode, code);
     if (!observation) return;

@@ -28,18 +28,8 @@ const {
   AccountDeletionState,
 } = require('../domain/account-deletion/account-deletion.types');
 class AccountDeletionService {
-  constructor(
-    users,
-    properties,
-    requests,
-    connection,
-    refreshTokens,
-    audit,
-    blockerProviders = [],
-    assets,
-  ) {
+  constructor(users, requests, connection, refreshTokens, audit, blockerProviders = [], assets) {
     this.users = users;
-    this.properties = properties;
     this.requests = requests;
     this.connection = connection;
     this.refreshTokens = refreshTokens;
@@ -303,16 +293,11 @@ class AccountDeletionService {
   async getAdminImpact(userId) {
     if (!Types.ObjectId.isValid(userId)) throw new BadRequestException('معرف المستخدم غير صالح');
     const accountId = new Types.ObjectId(userId);
-    const [request, history, account, brokerApplicationCount, propertyCount] = await Promise.all([
+    const [request, history, account, brokerApplicationCount] = await Promise.all([
       this.requests.findOne({ userId: accountId }).sort({ workflowVersion: -1 }).exec(),
       this.requests.find({ userId: accountId }).sort({ workflowVersion: -1 }).limit(20).exec(),
       this.users.findById(accountId).select('accountType accountStatus brokerStatus').lean().exec(),
       this.connection.collection('broker_applications').countDocuments({ userId: accountId }),
-      this.properties
-        .countDocuments({
-          $or: [{ advertiserAccountId: accountId }, { ownerId: accountId }],
-        })
-        .exec(),
     ]);
     const blockers = await this.blockersFor(userId);
     return {
@@ -320,7 +305,6 @@ class AccountDeletionService {
       workflow: request ? this.adminProjection(request) : null,
       history: history.map((item) => this.adminProjection(item)),
       impact: {
-        propertyCount,
         brokerApplicationCount,
         accountType: account?.accountType,
         accountStatus: account ? resolveAccountStatus(account) : undefined,
@@ -594,26 +578,10 @@ class AccountDeletionService {
       .exec();
   }
   async blockersFor(userId) {
-    const id = new Types.ObjectId(userId);
-    const unresolvedProperties = await this.properties
-      .countDocuments({
-        $or: [{ advertiserAccountId: id }, { ownerId: id }],
-        status: { $in: ['approved', 'pending_review'] },
-      })
-      .exec();
-    const propertyBlockers = unresolvedProperties
-      ? [
-          {
-            code: 'PROPERTY_LIFECYCLE_RESOLUTION_REQUIRED',
-            category: 'RESOURCE',
-            count: unresolvedProperties,
-          },
-        ]
-      : [];
     const futureBlockers = await Promise.all(
       this.blockerProviders.map((provider) => provider.blockersForAccount(userId)),
     );
-    return [...propertyBlockers, ...futureBlockers.flat()];
+    return futureBlockers.flat();
   }
   customerProjection(request) {
     const now = Date.now();

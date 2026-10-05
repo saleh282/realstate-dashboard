@@ -8,7 +8,6 @@ const {
 const { AuthorizationPolicyService } = require('../services/authorization-policy.service');
 const { AuthorizationErrorCode } = require('../domain/authorization/authorization-error-codes');
 const { SystemRole } = require('../domain/auth/roles.enum');
-const { fakePaymentsDevRoutesAllowed } = require('../domain/payments/dev/fake-payments-dev-policy');
 
 function authenticate(tokens, { optional = false } = {}) {
   return async (req, res, next) => {
@@ -65,13 +64,4 @@ function requireCapabilities(...capabilities) {
     }
   };
 }
-function fakePaymentsOnly(services) {
-  return (req, res, next) =>
-    fakePaymentsDevRoutesAllowed(services.paymentProvider, {
-      NODE_ENV: services.ConfigService.get('NODE_ENV'),
-      DEPLOYMENT_ENV: services.ConfigService.get('DEPLOYMENT_ENV'),
-    })
-      ? next()
-      : next(new NotFoundException());
-}
-module.exports = { authenticate, requireRoles, requireCapabilities, fakePaymentsOnly };
+module.exports = { authenticate, requireRoles, requireCapabilities };

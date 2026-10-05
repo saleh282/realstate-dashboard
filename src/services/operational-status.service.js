@@ -3,16 +3,6 @@
 const { operationalMetrics } = require('../common/observability/operational-metrics');
 const { resolveDeploymentEnv } = require('../config/deployment-environment');
 const DEFAULT_CLEANUP_ALERT_AGE_SECONDS = 3600;
-const DEFAULT_PAYMENT_STALE_ALERT_SECONDS = 3600;
-const PAYMENT_COLLECTIONS = ['managed_marketing_payments'];
-const NO_PAYMENTS = {
-  pending: 0,
-  due: 0,
-  stale: 0,
-  expired: 0,
-  flagged: 0,
-  confirmedAfterExpiry: 0,
-};
 /**
  * Operator-facing diagnostics (Phase 13). It is deliberately NOT part of the
  * readiness probe: a failed migration, a stuck cleanup queue or a dead-lettered
@@ -21,10 +11,9 @@ const NO_PAYMENTS = {
  * cleanup queue is indexed by status.
  */
 class OperationalStatusService {
-  constructor(connection, config, provider) {
+  constructor(connection, config) {
     this.connection = connection;
     this.config = config;
-    this.provider = provider;
   }
   async status(now = new Date()) {
     const db = this.connection.db;
@@ -36,7 +25,6 @@ class OperationalStatusService {
     const base = {
       deploymentEnv: resolved.env ?? null,
       uptimeSeconds: Math.floor((Date.now() - operationalMetrics.startedAt) / 1000),
-      payment: { provider: this.provider.providerKey, configured: this.provider.configured },
       counters: operationalMetrics.snapshot(),
     };
     if (!db)
@@ -45,13 +33,11 @@ class OperationalStatusService {
         database: 'down',
         migrations: { failed: [], running: [], lockHeld: false, complete: 0 },
         evidenceCleanup: { pending: 0, oldestPendingAgeSeconds: null },
-        payments: { ...NO_PAYMENTS },
         attention: ['database'],
       };
     let database = 'up';
     let migrations = { failed: [], running: [], lockHeld: false, complete: 0 };
     let evidenceCleanup = { pending: 0, oldestPendingAgeSeconds: null };
-    let payments = { ...NO_PAYMENTS };
     try {
       const ledger = await db
         .collection('migration_ledger')
@@ -90,7 +76,6 @@ class OperationalStatusService {
             )
           : null,
       };
-      payments = await this.paymentCounts(db, now);
     } catch {
       database = 'down';
     }
@@ -105,34 +90,7 @@ class OperationalStatusService {
     )
       attention.push('evidence_cleanup_stalled');
     if ((base.counters.outbox_dead_lettered ?? 0) > 0) attention.push('outbox_dead_lettered');
-    if (payments.flagged > 0) attention.push('payments_reconciliation_required');
-    if (payments.stale > 0) attention.push('payments_stale');
-    return { ...base, database, migrations, evidenceCleanup, payments, attention };
-  }
-  /** Indexed counts only: (status, nextVerifyAt), (status, initiatedAt) and the partial flag indexes. */
-  async paymentCounts(db, now) {
-    const staleSeconds =
-      Number(this.config.get('PAYMENT_STALE_ALERT_SECONDS')) || DEFAULT_PAYMENT_STALE_ALERT_SECONDS;
-    const staleBefore = new Date(now.getTime() - staleSeconds * 1000);
-    const totals = { ...NO_PAYMENTS };
-    for (const name of PAYMENT_COLLECTIONS) {
-      const collection = db.collection(name);
-      const [pending, due, stale, expired, flagged, confirmedAfterExpiry] = await Promise.all([
-        collection.countDocuments({ status: 'INITIATED' }),
-        collection.countDocuments({ status: 'INITIATED', nextVerifyAt: { $lte: now } }),
-        collection.countDocuments({ status: 'INITIATED', initiatedAt: { $lte: staleBefore } }),
-        collection.countDocuments({ status: 'EXPIRED' }),
-        collection.countDocuments({ reconciliationFlag: { $exists: true } }),
-        collection.countDocuments({ reconciliationFlag: 'CONFIRMED_AFTER_EXPIRY' }),
-      ]);
-      totals.pending += pending;
-      totals.due += due;
-      totals.stale += stale;
-      totals.expired += expired;
-      totals.flagged += flagged;
-      totals.confirmedAfterExpiry += confirmedAfterExpiry;
-    }
-    return totals;
+    return { ...base, database, migrations, evidenceCleanup, attention };
   }
 }
 

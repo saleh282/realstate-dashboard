@@ -2,7 +2,6 @@
 const { ConfigService } = require('./config');
 const { JwtService } = require('../common/security/jwt');
 const { v2: cloudinary } = require('cloudinary');
-const { paymentProviderPortFactory } = require('../domain/payments/payment-provider.factory');
 const { readGeocodingOptions } = require('../domain/geocoding/geocoding.config');
 const { GoogleGeocodingProvider } = require('../domain/geocoding/google-geocoding.provider');
 const { NominatimGeocodingProvider } = require('../domain/geocoding/nominatim-geocoding.provider');
@@ -15,7 +14,6 @@ const { CloudinaryAssetService } = require('./../services/cloudinary-asset.servi
 const { UsersService } = require('./../services/users.service');
 const { OperationalStatusService } = require('./../services/operational-status.service');
 const { AccountDeletionService } = require('./../services/account-deletion.service');
-const { AmenitiesService } = require('./../services/amenities.service');
 const { OtpVerificationService } = require('./../services/otp-verification.service');
 const { MailService } = require('./../services/mail.service');
 const { LegalDocumentsService } = require('./../services/legal-documents.service');
@@ -25,30 +23,9 @@ const { GeocodingService } = require('./../services/geocoding.service');
 const { GovernoratesService } = require('./../services/governorates.service');
 const { HealthService } = require('./../services/health.service');
 const { KycService } = require('./../services/kyc.service');
-const { ManagedMarketingService } = require('./../services/managed-marketing.service');
 const { ClockService } = require('./../services/clock.service');
-const {
-  ManagedMarketingPaymentService,
-} = require('./../services/managed-marketing-payment.service');
 const { NotificationsService } = require('./../services/notifications.service');
 const { IdempotencyService } = require('./../services/idempotency.service');
-const { PropertiesService } = require('./../services/properties.service');
-const {
-  AdminPropertyFormDefinitionsService,
-} = require('./../services/admin-property-form-definitions.service');
-const {
-  PropertyFormDefinitionsService,
-} = require('./../services/property-form-definitions.service');
-const { PropertyOptionsService } = require('./../services/property-options.service');
-const {
-  PropertyPurposeCategoriesService,
-} = require('./../services/property-purpose-categories.service');
-const { PropertyTypesService } = require('./../services/property-types.service');
-const {
-  ManagedMarketingPaymentConfirmationService,
-} = require('./../services/managed-marketing-payment-confirmation.service');
-const { PaymentConfirmationRouter } = require('./../services/payment-confirmation-router.service');
-const { FakePaymentsDevService } = require('./../services/fake-payments-dev.service');
 const { JwtStrategy } = require('./../services/access-token.service');
 const { EnvironmentGuardService } = require('./../services/environment-guard.service');
 const { EvidenceCleanupWorker } = require('./../services/evidence-cleanup.worker');
@@ -57,8 +34,6 @@ const { NotificationsOutboxConsumer } = require('./../services/notifications-out
 const { OutboxDispatcherService } = require('./../services/outbox-dispatcher.service');
 const { OutboxWakeup } = require('./../domain/outbox/outbox-wakeup');
 const { OutboxDispatcherWorker } = require('./../services/outbox-dispatcher.worker');
-const { PaymentReconciliationService } = require('./../services/payment-reconciliation.service');
-const { PaymentReconciliationWorker } = require('./../services/payment-reconciliation.worker');
 
 // Explicit construction keeps dependencies visible without a DI framework.
 function createServices(connection, models, env = process.env) {
@@ -69,8 +44,6 @@ function createServices(connection, models, env = process.env) {
     api_key: config.get('CLOUDINARY_API_KEY'),
     api_secret: config.get('CLOUDINARY_API_SECRET'),
   });
-  const paymentProvider = paymentProviderPortFactory(config);
-  services.paymentProvider = paymentProvider;
   const geocoding = require('./geocoding').createGeocoding(config);
   services.AuditLogService = new AuditLogService(models.AuditLog);
   services.CompanyAccountsService = new CompanyAccountsService(
@@ -95,11 +68,9 @@ function createServices(connection, models, env = process.env) {
   services.OperationalStatusService = new OperationalStatusService(
     connection,
     services.ConfigService,
-    paymentProvider,
   );
   services.AccountDeletionService = new AccountDeletionService(
     models.User,
-    models.Property,
     models.AccountDeletionRequest,
     connection,
     services.RefreshTokenService,
@@ -107,7 +78,6 @@ function createServices(connection, models, env = process.env) {
     [],
     services.CloudinaryAssetService,
   );
-  services.AmenitiesService = new AmenitiesService(models.Amenity, services.AuditLogService);
   services.OtpVerificationService = new OtpVerificationService(
     models.OtpVerification,
     services.ConfigService,
@@ -144,94 +114,12 @@ function createServices(connection, models, env = process.env) {
   );
   services.HealthService = new HealthService(connection, services.ConfigService);
   services.KycService = new KycService(services.UsersService, services.CloudinaryAssetService);
-  services.ManagedMarketingService = new ManagedMarketingService(
-    models.ManagedMarketingPackage,
-    models.ManagedMarketingRequest,
-    models.Property,
-    models.PropertyRevision,
-    connection,
-    services.AuditLogService,
-  );
   services.ClockService = new ClockService();
-  services.ManagedMarketingPaymentService = new ManagedMarketingPaymentService(
-    models.ManagedMarketingRequest,
-    models.ManagedMarketingPayment,
-    models.User,
-    services.AuditLogService,
-    services.ClockService,
-    paymentProvider,
-    connection,
-  );
   services.NotificationsService = new NotificationsService(
     models.Notification,
     models.NotificationPreference,
   );
   services.IdempotencyService = new IdempotencyService(models.IdempotencyRecord);
-  services.PropertiesService = new PropertiesService(
-    models.Property,
-    models.PropertyRevision,
-    models.PropertyType,
-    models.PropertyPurposeCategory,
-    models.User,
-    models.Amenity,
-    models.PropertyOption,
-    models.Governorate,
-    models.City,
-    services.CloudinaryAssetService,
-    services.AuditLogService,
-    connection,
-    services.OutboxService,
-    services.IdempotencyService,
-    models.PropertyFormDefinitionVersion,
-    models.PropertyFormDefinition,
-  );
-  services.AdminPropertyFormDefinitionsService = new AdminPropertyFormDefinitionsService(
-    models.PropertyFormDefinition,
-    models.PropertyFormDefinitionVersion,
-    models.PropertyAttribute,
-    models.PropertyType,
-    models.Amenity,
-    services.AuditLogService,
-    connection,
-  );
-  services.PropertyFormDefinitionsService = new PropertyFormDefinitionsService(
-    models.PropertyFormDefinition,
-    models.PropertyFormDefinitionVersion,
-  );
-  services.PropertyOptionsService = new PropertyOptionsService(
-    models.PropertyOption,
-    services.AuditLogService,
-  );
-  services.PropertyPurposeCategoriesService = new PropertyPurposeCategoriesService(
-    models.PropertyPurposeCategory,
-    services.AuditLogService,
-  );
-  services.PropertyTypesService = new PropertyTypesService(
-    models.PropertyType,
-    models.PropertyPurposeCategory,
-    services.AuditLogService,
-    models.Property,
-    models.PropertyRevision,
-    connection,
-  );
-  services.ManagedMarketingPaymentConfirmationService =
-    new ManagedMarketingPaymentConfirmationService(
-      models.ManagedMarketingRequest,
-      models.ManagedMarketingPayment,
-      services.AuditLogService,
-      services.ClockService,
-      paymentProvider,
-      connection,
-      services.OutboxService,
-    );
-  services.PaymentConfirmationRouter = new PaymentConfirmationRouter(
-    models.ManagedMarketingPayment,
-    services.ManagedMarketingPaymentConfirmationService,
-  );
-  services.FakePaymentsDevService = new FakePaymentsDevService(
-    services.PaymentConfirmationRouter,
-    paymentProvider,
-  );
   services.JwtStrategy = new JwtStrategy(
     services.ConfigService,
     services.UsersService,
@@ -264,16 +152,6 @@ function createServices(connection, models, env = process.env) {
     services.OutboxConsumerRegistry,
     services.ConfigService,
     services.OutboxWakeup,
-  );
-  services.PaymentReconciliationService = new PaymentReconciliationService(
-    services.PaymentConfirmationRouter,
-    services.ClockService,
-    services.ConfigService,
-  );
-  services.PaymentReconciliationWorker = new PaymentReconciliationWorker(
-    services.PaymentReconciliationService,
-    services.ConfigService,
-    paymentProvider,
   );
   return services;
 }

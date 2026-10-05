@@ -7,12 +7,7 @@ const {
   OutboxConsumerRegistry,
   OutboxPermanentDeliveryError,
 } = require('../src/domain/outbox/outbox-consumer.port');
-const {
-  OutboxEventType,
-  kycDecisionEvent,
-  managedMarketingPaymentConfirmedEvent,
-  propertyDecisionEvent,
-} = require('../src/domain/outbox/outbox-events');
+const { OutboxEventType, kycDecisionEvent } = require('../src/domain/outbox/outbox-events');
 const {
   notificationValidation,
 } = require('../src/validators/notifications/notification-validation.pipe');
@@ -35,8 +30,6 @@ const {
 } = require('../src/domain/notifications/notification.types');
 const EVENT = '64b000000000000000000001';
 const PROPERTY = '64b000000000000000000002';
-const PAYMENT = '64b000000000000000000003';
-const REQUEST = '64b000000000000000000004';
 const USER_A = '64b0000000000000000000a1';
 const USER_B = '64b0000000000000000000b2';
 const T0 = new Date('2026-09-26T10:00:00.000Z');
@@ -45,14 +38,7 @@ function delivery(draft, eventId = EVENT) {
 }
 function approved() {
   return delivery(
-    propertyDecisionEvent({
-      propertyId: PROPERTY,
-      revisionId: REQUEST,
-      occurredAt: T0,
-      decision: 'approved',
-      decisionVersion: 1,
-      advertiserAccountId: USER_A,
-    }),
+    kycDecisionEvent({ accountId: USER_A, occurredAt: T0, decision: 'verified', kycVersion: 1 }),
   );
 }
 function consumerHarness() {
@@ -128,15 +114,12 @@ describe('notification event mapping and outbox consumer (MAZAD-036)', () => {
     expect(ctx.registry.list()).toEqual([ctx.consumer]);
     expect(ctx.consumer.name).toBe('notifications');
     expect(ctx.consumer.subscribedTypes).toEqual([
-      OutboxEventType.MANAGED_MARKETING_PAYMENT_CONFIRMED,
       OutboxEventType.KYC_APPROVED,
       OutboxEventType.KYC_REJECTED,
-      OutboxEventType.PROPERTY_APPROVED,
-      OutboxEventType.PROPERTY_REJECTED,
     ]);
     expect(ctx.consumer.subscribedTypes).toEqual(NOTIFICATION_SUBSCRIBED_EVENT_TYPES);
   });
-  it('maps KYC and property decisions to their authoritative private subjects without exposing routing', () => {
+  it('maps KYC decisions to their authoritative private subjects without exposing routing', () => {
     const kycApproved = mapNotificationEvent(
       delivery(
         kycDecisionEvent({
@@ -157,30 +140,6 @@ describe('notification event mapping and outbox consumer (MAZAD-036)', () => {
         }),
       ),
     );
-    const propertyApproved = mapNotificationEvent(
-      delivery(
-        propertyDecisionEvent({
-          propertyId: PROPERTY,
-          revisionId: REQUEST,
-          occurredAt: T0,
-          decision: 'approved',
-          decisionVersion: 1,
-          advertiserAccountId: USER_B,
-        }),
-      ),
-    );
-    const propertyRejected = mapNotificationEvent(
-      delivery(
-        propertyDecisionEvent({
-          propertyId: PROPERTY,
-          revisionId: REQUEST,
-          occurredAt: T0,
-          decision: 'rejected',
-          decisionVersion: 2,
-          advertiserAccountId: USER_B,
-        }),
-      ),
-    );
     expect(kycApproved[0]).toMatchObject({
       recipientAccountId: USER_A,
       type: NotificationType.KYC_APPROVED,
@@ -189,35 +148,9 @@ describe('notification event mapping and outbox consumer (MAZAD-036)', () => {
       recipientAccountId: USER_A,
       type: NotificationType.KYC_REJECTED,
     });
-    expect(propertyApproved[0]).toMatchObject({
-      recipientAccountId: USER_B,
-      type: NotificationType.PROPERTY_APPROVED,
-    });
-    expect(propertyRejected[0]).toMatchObject({
-      recipientAccountId: USER_B,
-      type: NotificationType.PROPERTY_REJECTED,
-    });
-    expect(
-      JSON.stringify([...kycApproved, ...kycRejected, ...propertyApproved, ...propertyRejected]),
-    ).not.toMatch(/privateRouting|subjectAccountId|advertiserAccountId|rejectionReason/);
-  });
-  it('maps managed-marketing payment confirmations to their exact private recipients', () => {
-    const marketing = delivery(
-      managedMarketingPaymentConfirmedEvent({
-        requestId: REQUEST,
-        paymentId: PAYMENT,
-        occurredAt: T0,
-        amountMinor: 10000,
-        currency: 'EGP',
-        advertiserAccountId: USER_B,
-      }),
-      '64b000000000000000000005',
+    expect(JSON.stringify([...kycApproved, ...kycRejected])).not.toMatch(
+      /privateRouting|subjectAccountId|advertiserAccountId|rejectionReason/,
     );
-    expect(mapNotificationEvent(marketing)[0]).toMatchObject({
-      recipientAccountId: USER_B,
-      type: NotificationType.MANAGED_MARKETING_PAYMENT_CONFIRMED,
-      target: { type: NotificationTargetType.MANAGED_MARKETING_REQUEST, id: REQUEST },
-    });
   });
   it('permanently rejects missing private routing, unsupported versions and arbitrary target ids', () => {
     expect(() => mapNotificationEvent({ ...approved(), privateRouting: undefined })).toThrow(
@@ -230,10 +163,7 @@ describe('notification event mapping and outbox consumer (MAZAD-036)', () => {
       OutboxPermanentDeliveryError,
     );
     expect(() =>
-      mapNotificationEvent({
-        ...approved(),
-        payload: { ...approved().payload, propertyId: 'https://evil.invalid' },
-      }),
+      mapNotificationEvent({ ...approved(), aggregateId: 'https://evil.invalid' }),
     ).toThrow(OutboxPermanentDeliveryError);
   });
   it('duplicate and concurrent delivery converge on one inbox row and one IN_APP delivery row', async () => {
@@ -345,12 +275,12 @@ function inboxRow(recipient, createdAt, readAt) {
   return {
     _id: new Types.ObjectId(),
     recipientAccountId: new Types.ObjectId(recipient),
-    type: NotificationType.PROPERTY_APPROVED,
+    type: NotificationType.KYC_APPROVED,
     schemaVersion: 1,
     required: true,
     title: 'عنوان',
     message: 'رسالة',
-    target: { type: NotificationTargetType.PROPERTY, id: PROPERTY },
+    target: { type: NotificationTargetType.KYC, id: PROPERTY },
     createdAt,
     ...(readAt ? { readAt } : {}),
   };

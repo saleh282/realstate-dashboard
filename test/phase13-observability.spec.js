@@ -11,15 +11,10 @@ const {
 const { OperationalStatusService } = require('../src/services/operational-status.service');
 const { AdminOperationsController } = require('../src/controllers/admin-operations.controller');
 const { Capability } = require('../src/domain/authorization/capability');
-const { PropertyErrorCode } = require('../src/common/errors/property-error-codes');
-const { PaymentErrorCode } = require('../src/common/errors/payment-error-codes');
-const {
-  FormDefinitionErrorCode,
-} = require('../src/domain/property-form-definitions/property-form-definition.constants');
 function host(
   request = {
     method: 'POST',
-    originalUrl: '/api/v1/properties?token=secret',
+    originalUrl: '/api/v1/users/me?token=secret',
     headers: {},
     requestId: 'req-9',
   },
@@ -42,25 +37,17 @@ describe('Phase 13 domain-rejection observability', () => {
     jest.clearAllMocks();
     operationalMetrics.reset();
   });
-  it.each([
-    [PropertyErrorCode.FORM_VERSION_OUTDATED, 409],
-    [PropertyErrorCode.AMENITY_NOT_ALLOWED, 400],
-    [PropertyErrorCode.AMENITIES_NOT_ENABLED, 400],
-    [PropertyErrorCode.ATTRIBUTES_INVALID, 400],
-    [FormDefinitionErrorCode.PUBLISH_INVALID, 400],
-    [FormDefinitionErrorCode.VERSION_CONFLICT, 409],
-    [PaymentErrorCode.PROVIDER_UNAVAILABLE, 503],
-    [PaymentErrorCode.RECONCILIATION_REQUIRED, 409],
-  ])(
-    'counts and logs %s as a structured domain_rejection without changing the response',
-    (code, status) => {
+  it('counts and logs an observed code as a structured domain_rejection without changing the response', () => {
+    const code = 'TEST_OBSERVED_CODE';
+    OBSERVED_REJECTION_CODES.add(code);
+    try {
       const { host: h, response } = host();
       filter.handle(
-        new HttpException({ message: 'x', code }, status),
+        new HttpException({ message: 'x', code }, 409),
         h.switchToHttp().getRequest?.(),
         h.switchToHttp().getResponse(),
       );
-      expect(response.status).toHaveBeenCalledWith(status);
+      expect(response.status).toHaveBeenCalledWith(409);
       expect(response.json.mock.calls[0][0]).toMatchObject({
         success: false,
         code,
@@ -72,15 +59,17 @@ describe('Phase 13 domain-rejection observability', () => {
       expect(line).toEqual({
         event: 'domain_rejection',
         code,
-        status,
+        status: 409,
         requestId: 'req-9',
         method: 'POST',
-        path: '/api/v1/properties',
+        path: '/api/v1/users/me',
       });
       expect(JSON.stringify(line)).not.toContain('secret');
       expect(operationalMetrics.snapshot()[`domain_rejection{${code}}`]).toBe(1);
-    },
-  );
+    } finally {
+      OBSERVED_REJECTION_CODES.delete(code);
+    }
+  });
   it('counts rate limiting, without recording the caller', () => {
     const { host: h } = host();
     filter.handle(
@@ -109,14 +98,9 @@ describe('Phase 13 domain-rejection observability', () => {
     expect(operationalMetrics.snapshot()).toEqual({});
   });
   it('classification is explicit: only the listed stable codes and 429', () => {
-    expect(classifyRejection(409, 'PROPERTY_FORM_VERSION_OUTDATED')).toEqual({
-      event: 'domain_rejection',
-      label: 'PROPERTY_FORM_VERSION_OUTDATED',
-    });
     expect(classifyRejection(429, undefined)).toEqual({ event: 'rate_limited', label: 'http' });
     expect(classifyRejection(400, 'BID_TOO_LOW')).toBeUndefined();
     expect(classifyRejection(500, undefined)).toBeUndefined();
-    expect(OBSERVED_REJECTION_CODES.size).toBeGreaterThan(10);
   });
   it('emitOperationalEvent logs one JSON line and counts the event', () => {
     const sink = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
@@ -134,7 +118,6 @@ describe('Phase 13 domain-rejection observability', () => {
 });
 describe('Phase 13 operational status', () => {
   const now = new Date('2026-06-01T12:00:00Z');
-  const provider = { providerKey: 'unconfigured', configured: false };
   const config = (values = {}) => ({
     get: (key) => ({ NODE_ENV: 'production', DEPLOYMENT_ENV: 'production', ...values })[key],
   });
@@ -145,21 +128,6 @@ describe('Phase 13 operational status', () => {
         if (name === 'migration_ledger')
           return { find: () => ({ toArray: async () => data.ledger ?? [] }) };
         if (name === 'migration_locks') return { findOne: async () => data.lock ?? null };
-        if (name === 'auctions') return { countDocuments: async () => data.held ?? 0 };
-        if (name === 'auction_entry_payments' || name === 'managed_marketing_payments') {
-          return {
-            countDocuments: async (filter) =>
-              (data.payments?.[name] ?? []).filter((row) =>
-                Object.entries(filter).every(([key, expected]) => {
-                  if (expected && typeof expected === 'object' && '$exists' in expected)
-                    return (row[key] !== undefined) === expected.$exists;
-                  if (expected && typeof expected === 'object' && '$lte' in expected)
-                    return row[key] !== undefined && row[key].getTime() <= expected.$lte.getTime();
-                  return row[key] === expected;
-                }),
-              ).length,
-          };
-        }
         return {
           countDocuments: async () => (data.cleanup ?? []).length,
           find: () => ({
@@ -172,16 +140,14 @@ describe('Phase 13 operational status', () => {
     },
   });
   beforeEach(() => operationalMetrics.reset());
-  it('is quiet on a healthy system and reports the payment provider in use', async () => {
+  it('is quiet on a healthy system', async () => {
     const status = await new OperationalStatusService(
       connection({ ledger: [{ migrationId: 'a', status: 'complete' }] }),
       config(),
-      provider,
     ).status(now);
     expect(status).toMatchObject({
       deploymentEnv: 'production',
       database: 'up',
-      payment: { provider: 'unconfigured', configured: false },
       migrations: { failed: [], running: [], lockHeld: false, complete: 1 },
       attention: [],
     });
@@ -196,7 +162,6 @@ describe('Phase 13 operational status', () => {
         cleanup: [{ createdAt: new Date(now.getTime() - 2 * 3600_000) }],
       }),
       config({ CLEANUP_ALERT_AGE_SECONDS: '600' }),
-      provider,
     );
     const status = await service.status(now);
     expect(status.attention).toEqual([
@@ -211,7 +176,6 @@ describe('Phase 13 operational status', () => {
     const status = await new OperationalStatusService(
       connection({ ledger: [{ migrationId: '022', status: 'running' }], lock: { _id: 'global' } }),
       config(),
-      provider,
     ).status(now);
     expect(status.attention).toEqual([]);
   });
@@ -219,7 +183,6 @@ describe('Phase 13 operational status', () => {
     const status = await new OperationalStatusService(
       connection({ failing: true }),
       config(),
-      provider,
     ).status(now);
     expect(status).toMatchObject({ database: 'down', attention: ['database'] });
   });

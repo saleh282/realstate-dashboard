@@ -25,28 +25,12 @@ class OperationalMetrics {
 }
 const operationalMetrics = new OperationalMetrics();
 /**
- * Stable, expected-failure codes worth counting and logging as `domain_rejection`
- * because they signal a client/operator problem (stale forms, rejected
- * specifications or amenities, form lifecycle conflicts, payment trouble).
- * Deliberately explicit: ordinary validation noise are not here.
+ * Stable, expected-failure codes worth counting and logging as
+ * `domain_rejection` because they signal a client/operator problem.
+ * Deliberately explicit: ordinary validation noise is not listed. No domain
+ * registers one today.
  */
-const OBSERVED_REJECTION_CODES = new Set([
-  'PROPERTY_FORM_VERSION_OUTDATED',
-  'PROPERTY_ATTRIBUTES_INVALID',
-  'PROPERTY_AMENITY_NOT_ALLOWED',
-  'PROPERTY_AMENITIES_NOT_ENABLED',
-  'PROPERTY_FORM_DEFINITION_INVALID',
-  'PROPERTY_FORM_DEFINITION_NOT_PUBLISHED',
-  'PROPERTY_FORM_DEFINITION_ARCHIVED',
-  'FORM_DEFINITION_VERSION_CONFLICT',
-  'FORM_DEFINITION_PUBLISH_INVALID',
-  'FORM_DEFINITION_DRAFT_INVALID',
-  'FORM_DEFINITION_CURRENT_VERSION_INVALID',
-  'PAYMENT_PROVIDER_UNAVAILABLE',
-  'PAYMENT_RECONCILIATION_REQUIRED',
-  'PAYMENT_STATE_INCONSISTENT',
-  'PAYMENT_RETRY_EXHAUSTED',
-]);
+const OBSERVED_REJECTION_CODES = new Set();
 /** Classifies an HTTP failure; `undefined` means it is not an observed one. */
 function classifyRejection(status, code) {
   if (status === 429) return { event: 'rate_limited', label: 'http' };

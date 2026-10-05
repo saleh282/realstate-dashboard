@@ -1,6 +1,5 @@
 'use strict';
 
-const { indexKeyMatches } = require('./022-property-type-selection');
 const { LEGAL_DOCUMENT_SEED } = require('../domain/legal-documents/legal-document.seed');
 const {
   LEGAL_DOCUMENTS_COLLECTION,
@@ -20,6 +19,9 @@ const LEGAL_DOCUMENT_INDEXES = [
   },
   { key: { type: 1, status: 1, version: -1 }, options: { name: 'legal_document_current_lookup' } },
 ];
+function indexKeyMatches(existing, key) {
+  return Boolean(existing?.key) && JSON.stringify(existing.key) === JSON.stringify(key);
+}
 function legalDocumentSeedDocument(seed, now) {
   return {
     type: seed.type,

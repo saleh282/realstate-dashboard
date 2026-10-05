@@ -251,28 +251,12 @@ describe('Phase 13 every seeding / destructive / migration tool calls its enviro
   it.each([
     ['src/seeds/admin.seed.js', 'seed:dev-admin'],
     ['src/seeds/super-admin.seed.js', 'seed:super-admin'],
-    ['src/seeds/baseline-catalog.seed.js', 'seed:baseline'],
     ['src/migrations/cli.js', 'migration:apply'],
     ['src/migrations/cli.js', 'migration:dry-run'],
     ['src/migrations/integrity-cli.js', 'integrity:read'],
-    ['src/scripts/release-manifest.js', 'manifest:apply'],
-    ['src/scripts/release-manifest.js', 'manifest:verify'],
     ['src/scripts/env-init.js', 'env:init'],
-    ['src/scripts/phase12-rebuild-baseline.js', 'manifest:apply'],
-    ['src/scripts/phase13-scale-harness.js', 'destructive:reset'],
-    ['src/scripts/phase13-migration-rehearsal.js', 'destructive:reset'],
-    ['src/scripts/phase13-restore-drill.js', 'destructive:reset'],
   ])('%s guards %s', (file, action) => {
     expect(source(file)).toMatch(new RegExp(`guardAction\\(\\s*[^)]*'${action}'`));
-  });
-  it('the write-capable engineering tools also restrict their target to disposable localhost databases', () => {
-    for (const file of [
-      'src/scripts/phase13-scale-harness.js',
-      'src/scripts/phase13-migration-rehearsal.js',
-      'src/scripts/phase13-restore-drill.js',
-    ]) {
-      expect(source(file)).toContain('assertDisposableTarget(');
-    }
   });
   it('the application module wires the startup marker guard', () => {
     expect(source('src/config/database.js')).toContain('EnvironmentGuardService');

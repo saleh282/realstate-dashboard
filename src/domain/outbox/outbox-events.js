@@ -1,6 +1,5 @@
 'use strict';
 
-const { ManagedMarketingRequestStatus } = require('../managed-marketing/managed-marketing.types');
 const { OUTBOX_MAX_PAYLOAD_BYTES } = require('./outbox.constants');
 /**
  * MAZAD-031 — the explicit, versioned catalogue of domain events the
@@ -8,7 +7,7 @@ const { OUTBOX_MAX_PAYLOAD_BYTES } = require('./outbox.constants');
  *
  * NAMING. `SCREAMING_SNAKE_CASE`, `<SUBJECT>_<PAST_TENSE_FACT>`, stable
  * forever: consumers switch on the name. A name is never re-used for a
- * different fact. Managed-marketing payment confirmations belong to the request aggregate.
+ * different fact.
  *
  * VERSIONING. Every event type has an integer `schemaVersion` (all 1 today),
  * stored on the row. Adding an optional payload field does not bump it;
@@ -33,18 +32,13 @@ const { OUTBOX_MAX_PAYLOAD_BYTES } = require('./outbox.constants');
  */
 var OutboxEventType;
 (function (OutboxEventType) {
-  OutboxEventType['MANAGED_MARKETING_PAYMENT_CONFIRMED'] = 'MANAGED_MARKETING_PAYMENT_CONFIRMED';
   OutboxEventType['KYC_APPROVED'] = 'KYC_APPROVED';
   OutboxEventType['KYC_REJECTED'] = 'KYC_REJECTED';
-  OutboxEventType['PROPERTY_APPROVED'] = 'PROPERTY_APPROVED';
-  OutboxEventType['PROPERTY_REJECTED'] = 'PROPERTY_REJECTED';
 })(OutboxEventType || (OutboxEventType = {}));
 /** What the event is "about"; `(aggregateType, aggregateId)` is the ordering domain (see `aggregateVersion`). */
 var OutboxAggregateType;
 (function (OutboxAggregateType) {
-  OutboxAggregateType['MANAGED_MARKETING_REQUEST'] = 'MANAGED_MARKETING_REQUEST';
   OutboxAggregateType['KYC'] = 'KYC';
-  OutboxAggregateType['PROPERTY'] = 'PROPERTY';
 })(OutboxAggregateType || (OutboxAggregateType = {}));
 var OutboxAudience;
 (function (OutboxAudience) {
@@ -52,20 +46,13 @@ var OutboxAudience;
   OutboxAudience['PRIVATE'] = 'PRIVATE';
 })(OutboxAudience || (OutboxAudience = {}));
 const OUTBOX_SCHEMA_VERSIONS = {
-  [OutboxEventType.MANAGED_MARKETING_PAYMENT_CONFIRMED]: 1,
   [OutboxEventType.KYC_APPROVED]: 1,
   [OutboxEventType.KYC_REJECTED]: 1,
-  [OutboxEventType.PROPERTY_APPROVED]: 1,
-  [OutboxEventType.PROPERTY_REJECTED]: 1,
 };
 /** Which aggregate each event type belongs to (a producer cannot file an event under the wrong stream). */
 const OUTBOX_EVENT_AGGREGATES = {
-  [OutboxEventType.MANAGED_MARKETING_PAYMENT_CONFIRMED]:
-    OutboxAggregateType.MANAGED_MARKETING_REQUEST,
   [OutboxEventType.KYC_APPROVED]: OutboxAggregateType.KYC,
   [OutboxEventType.KYC_REJECTED]: OutboxAggregateType.KYC,
-  [OutboxEventType.PROPERTY_APPROVED]: OutboxAggregateType.PROPERTY,
-  [OutboxEventType.PROPERTY_REJECTED]: OutboxAggregateType.PROPERTY,
 };
 /** The only account ids an event may carry, and only in `privateRouting`. */
 const OUTBOX_PRIVATE_ROUTING_KEYS = ['advertiserAccountId', 'subjectAccountId'];
@@ -206,41 +193,6 @@ const kycDecisionEvent = (input) =>
     { kycStatus: input.decision, kycVersion: input.kycVersion, reviewedAt: iso(input.occurredAt) },
     { subjectAccountId: input.accountId },
   );
-/** Atomic property-revision moderation decision. Free-text review reasons stay private in audit/moderation data. */
-const propertyDecisionEvent = (input) =>
-  draft(
-    input.decision === 'approved'
-      ? OutboxEventType.PROPERTY_APPROVED
-      : OutboxEventType.PROPERTY_REJECTED,
-    input.propertyId,
-    input.occurredAt,
-    OutboxAudience.PRIVATE,
-    {
-      propertyId: input.propertyId,
-      revisionId: input.revisionId,
-      moderationStatus: input.decision,
-      decisionVersion: input.decisionVersion,
-      reviewedAt: iso(input.occurredAt),
-    },
-    { advertiserAccountId: input.advertiserAccountId },
-  );
-/** A server-verified MANAGED_MARKETING payment succeeded and the request is now PAID (PRIVATE). */
-const managedMarketingPaymentConfirmedEvent = (input) =>
-  draft(
-    OutboxEventType.MANAGED_MARKETING_PAYMENT_CONFIRMED,
-    input.requestId,
-    input.occurredAt,
-    OutboxAudience.PRIVATE,
-    {
-      requestId: input.requestId,
-      paymentId: input.paymentId,
-      amountMinor: input.amountMinor,
-      currency: input.currency,
-      paidAt: iso(input.occurredAt),
-      requestStatus: ManagedMarketingRequestStatus.PAID,
-    },
-    { advertiserAccountId: input.advertiserAccountId },
-  );
 
 Object.assign(exports, {
   OutboxEventType,
@@ -252,6 +204,4 @@ Object.assign(exports, {
   InvalidOutboxEventError,
   assertValidOutboxDraft,
   kycDecisionEvent,
-  propertyDecisionEvent,
-  managedMarketingPaymentConfirmedEvent,
 });

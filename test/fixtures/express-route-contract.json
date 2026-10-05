@@ -4,17 +4,9 @@
     "action": "list",
     "method": "GET",
     "path": "/api/v1/admin/audit-logs",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_AUDIT_READ"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_AUDIT_READ"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -22,17 +14,9 @@
     "action": "create",
     "method": "POST",
     "path": "/api/v1/admin/companies",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.COMPANY_CREATE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.COMPANY_CREATE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
   },
   {
@@ -40,17 +24,9 @@
     "action": "getMetrics",
     "method": "GET",
     "path": "/api/v1/admin/dashboard/metrics",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_DASHBOARD_READ"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_DASHBOARD_READ"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -58,17 +34,9 @@
     "action": "list",
     "method": "GET",
     "path": "/api/v1/admin/kyc",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_KYC_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_KYC_REVIEW"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -76,17 +44,9 @@
     "action": "getDetails",
     "method": "GET",
     "path": "/api/v1/admin/kyc/:userId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_KYC_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_KYC_REVIEW"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -94,17 +54,9 @@
     "action": "getDocument",
     "method": "GET",
     "path": "/api/v1/admin/kyc/:userId/documents/:document",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_KYC_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_KYC_REVIEW"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -112,17 +64,9 @@
     "action": "review",
     "method": "POST",
     "path": "/api/v1/admin/kyc/:userId/review",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_KYC_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_KYC_REVIEW"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
   },
   {
@@ -130,17 +74,9 @@
     "action": "status",
     "method": "GET",
     "path": "/api/v1/admin/operations/status",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_DASHBOARD_READ"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_DASHBOARD_READ"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -148,17 +84,9 @@
     "action": "list",
     "method": "GET",
     "path": "/api/v1/admin/users",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_ACCOUNT_READ"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_ACCOUNT_READ"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -166,17 +94,9 @@
     "action": "getDetails",
     "method": "GET",
     "path": "/api/v1/admin/users/:userId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_ACCOUNT_READ"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_ACCOUNT_READ"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -184,17 +104,9 @@
     "action": "updateStatus",
     "method": "PATCH",
     "path": "/api/v1/admin/users/:userId/status",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_ACCOUNT_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_ACCOUNT_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -202,17 +114,9 @@
     "action": "revokeSessions",
     "method": "POST",
     "path": "/api/v1/admin/users/:userId/revoke-sessions",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_ACCOUNT_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_ACCOUNT_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
   },
   {
@@ -220,17 +124,9 @@
     "action": "removePhoto",
     "method": "DELETE",
     "path": "/api/v1/admin/users/:userId/photo",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_ACCOUNT_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_ACCOUNT_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -238,17 +134,9 @@
     "action": "updateRole",
     "method": "PATCH",
     "path": "/api/v1/admin/users/:userId/role",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.SUPER_ADMIN_ROLE_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.SUPER_ADMIN_ROLE_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -256,17 +144,9 @@
     "action": "delete",
     "method": "DELETE",
     "path": "/api/v1/admin/users/:userId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_ACCOUNT_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_ACCOUNT_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -274,17 +154,9 @@
     "action": "getDeletionImpact",
     "method": "GET",
     "path": "/api/v1/admin/users/:userId/deletion",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_ACCOUNT_READ"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_ACCOUNT_READ"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -292,17 +164,9 @@
     "action": "placeLegalHold",
     "method": "POST",
     "path": "/api/v1/admin/users/:userId/deletion/legal-hold",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_ACCOUNT_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_ACCOUNT_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
   },
   {
@@ -310,17 +174,9 @@
     "action": "removeLegalHold",
     "method": "DELETE",
     "path": "/api/v1/admin/users/:userId/deletion/legal-hold",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_ACCOUNT_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_ACCOUNT_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -328,118 +184,10 @@
     "action": "anonymize",
     "method": "POST",
     "path": "/api/v1/admin/users/:userId/deletion/anonymize",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_ACCOUNT_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_ACCOUNT_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
-  },
-  {
-    "controller": "AdminAmenitiesController",
-    "action": "options",
-    "method": "GET",
-    "path": "/api/v1/admin/amenities/options",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminAmenitiesController",
-    "action": "list",
-    "method": "GET",
-    "path": "/api/v1/admin/amenities",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminAmenitiesController",
-    "action": "create",
-    "method": "POST",
-    "path": "/api/v1/admin/amenities",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "201"
-  },
-  {
-    "controller": "AdminAmenitiesController",
-    "action": "update",
-    "method": "PATCH",
-    "path": "/api/v1/admin/amenities/:amenityId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminAmenitiesController",
-    "action": "remove",
-    "method": "DELETE",
-    "path": "/api/v1/admin/amenities/:amenityId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AmenitiesController",
-    "action": "list",
-    "method": "GET",
-    "path": "/api/v1/amenities",
-    "guards": [],
-    "capabilities": [],
-    "roles": [],
-    "status": "200"
   },
   {
     "controller": "AuthController",
@@ -536,9 +284,7 @@
     "action": "logout",
     "method": "POST",
     "path": "/api/v1/auth/logout",
-    "guards": [
-      "JwtAuthGuard"
-    ],
+    "guards": ["JwtAuthGuard"],
     "capabilities": [],
     "roles": [],
     "status": "HttpStatus.OK"
@@ -548,9 +294,7 @@
     "action": "logoutAll",
     "method": "POST",
     "path": "/api/v1/auth/logout-all",
-    "guards": [
-      "JwtAuthGuard"
-    ],
+    "guards": ["JwtAuthGuard"],
     "capabilities": [],
     "roles": [],
     "status": "HttpStatus.OK"
@@ -560,17 +304,9 @@
     "action": "listApplications",
     "method": "GET",
     "path": "/api/v1/admin/broker/applications",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_BROKER_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_BROKER_REVIEW"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -578,17 +314,9 @@
     "action": "getApplication",
     "method": "GET",
     "path": "/api/v1/admin/broker/applications/:applicationId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_BROKER_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_BROKER_REVIEW"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -596,17 +324,9 @@
     "action": "getDocument",
     "method": "GET",
     "path": "/api/v1/admin/broker/applications/:applicationId/documents/:documentId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_BROKER_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_BROKER_REVIEW"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -614,17 +334,9 @@
     "action": "review",
     "method": "POST",
     "path": "/api/v1/admin/broker/applications/:applicationId/review",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_BROKER_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_BROKER_REVIEW"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
   },
   {
@@ -632,17 +344,9 @@
     "action": "suspend",
     "method": "POST",
     "path": "/api/v1/admin/brokers/:userId/suspend",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_BROKER_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_BROKER_REVIEW"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
   },
   {
@@ -650,17 +354,9 @@
     "action": "restore",
     "method": "POST",
     "path": "/api/v1/admin/brokers/:userId/restore",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_BROKER_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_BROKER_REVIEW"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
   },
   {
@@ -668,17 +364,9 @@
     "action": "revoke",
     "method": "POST",
     "path": "/api/v1/admin/brokers/:userId/revoke",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_BROKER_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_BROKER_REVIEW"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
   },
   {
@@ -686,13 +374,8 @@
     "action": "submit",
     "method": "POST",
     "path": "/api/v1/broker/applications",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.BROKER_APPLICATION_SUBMIT"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.BROKER_APPLICATION_SUBMIT"],
     "roles": [],
     "status": "201"
   },
@@ -701,13 +384,8 @@
     "action": "ownHistory",
     "method": "GET",
     "path": "/api/v1/broker/applications/me",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.BROKER_APPLICATION_READ_OWN"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.BROKER_APPLICATION_READ_OWN"],
     "roles": [],
     "status": "200"
   },
@@ -716,13 +394,8 @@
     "action": "getOwnDocument",
     "method": "GET",
     "path": "/api/v1/broker/applications/:applicationId/documents/:documentId",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.BROKER_APPLICATION_READ_OWN"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.BROKER_APPLICATION_READ_OWN"],
     "roles": [],
     "status": "200"
   },
@@ -731,13 +404,8 @@
     "action": "reverse",
     "method": "GET",
     "path": "/api/v1/geocoding/reverse",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.GEOCODING_USE"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.GEOCODING_USE"],
     "roles": [],
     "status": "200"
   },
@@ -746,13 +414,8 @@
     "action": "search",
     "method": "GET",
     "path": "/api/v1/geocoding/search",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.GEOCODING_USE"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.GEOCODING_USE"],
     "roles": [],
     "status": "200"
   },
@@ -761,17 +424,9 @@
     "action": "options",
     "method": "GET",
     "path": "/api/v1/admin/cities/options",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -779,17 +434,9 @@
     "action": "list",
     "method": "GET",
     "path": "/api/v1/admin/cities",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -797,17 +444,9 @@
     "action": "create",
     "method": "POST",
     "path": "/api/v1/admin/cities",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
   },
   {
@@ -815,17 +454,9 @@
     "action": "update",
     "method": "PATCH",
     "path": "/api/v1/admin/cities/:cityId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -833,17 +464,9 @@
     "action": "remove",
     "method": "DELETE",
     "path": "/api/v1/admin/cities/:cityId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -851,17 +474,9 @@
     "action": "options",
     "method": "GET",
     "path": "/api/v1/admin/governorates/options",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -869,17 +484,9 @@
     "action": "list",
     "method": "GET",
     "path": "/api/v1/admin/governorates",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -887,17 +494,9 @@
     "action": "create",
     "method": "POST",
     "path": "/api/v1/admin/governorates",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
   },
   {
@@ -905,17 +504,9 @@
     "action": "update",
     "method": "PATCH",
     "path": "/api/v1/admin/governorates/:governorateId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -923,17 +514,9 @@
     "action": "remove",
     "method": "DELETE",
     "path": "/api/v1/admin/governorates/:governorateId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -971,13 +554,8 @@
     "action": "submit",
     "method": "POST",
     "path": "/api/v1/kyc/submit",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.KYC_SELF_SUBMIT"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.KYC_SELF_SUBMIT"],
     "roles": [],
     "status": "201"
   },
@@ -986,13 +564,8 @@
     "action": "getStatus",
     "method": "GET",
     "path": "/api/v1/kyc/status",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.KYC_SELF_READ"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.KYC_SELF_READ"],
     "roles": [],
     "status": "200"
   },
@@ -1001,17 +574,9 @@
     "action": "list",
     "method": "GET",
     "path": "/api/v1/admin/legal-documents",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -1019,17 +584,9 @@
     "action": "get",
     "method": "GET",
     "path": "/api/v1/admin/legal-documents/:documentId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -1037,17 +594,9 @@
     "action": "create",
     "method": "POST",
     "path": "/api/v1/admin/legal-documents",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
   },
   {
@@ -1055,17 +604,9 @@
     "action": "update",
     "method": "PATCH",
     "path": "/api/v1/admin/legal-documents/:documentId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "200"
   },
   {
@@ -1073,17 +614,9 @@
     "action": "publish",
     "method": "POST",
     "path": "/api/v1/admin/legal-documents/:documentId/publish",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
+    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_CATALOG_MANAGE"],
+    "roles": ["SystemRole.ADMIN"],
     "status": "201"
   },
   {
@@ -1117,173 +650,11 @@
     "status": "200"
   },
   {
-    "controller": "AdminManagedMarketingController",
-    "action": "packages",
-    "method": "GET",
-    "path": "/api/v1/admin/managed-marketing/packages",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_MANAGED_MARKETING_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminManagedMarketingController",
-    "action": "createPackage",
-    "method": "POST",
-    "path": "/api/v1/admin/managed-marketing/packages",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_MANAGED_MARKETING_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "201"
-  },
-  {
-    "controller": "AdminManagedMarketingController",
-    "action": "updatePackage",
-    "method": "PATCH",
-    "path": "/api/v1/admin/managed-marketing/packages/:packageId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_MANAGED_MARKETING_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminManagedMarketingController",
-    "action": "requests",
-    "method": "GET",
-    "path": "/api/v1/admin/managed-marketing/requests",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_MANAGED_MARKETING_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminManagedMarketingController",
-    "action": "review",
-    "method": "PATCH",
-    "path": "/api/v1/admin/managed-marketing/requests/:requestId/review",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_MANAGED_MARKETING_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "ManagedMarketingController",
-    "action": "listPackages",
-    "method": "GET",
-    "path": "/api/v1/managed-marketing/packages",
-    "guards": [],
-    "capabilities": [],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "ManagedMarketingController",
-    "action": "mine",
-    "method": "GET",
-    "path": "/api/v1/managed-marketing/requests/mine",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.MANAGED_MARKETING_REQUEST"
-    ],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "ManagedMarketingController",
-    "action": "create",
-    "method": "POST",
-    "path": "/api/v1/managed-marketing/requests",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.MANAGED_MARKETING_REQUEST"
-    ],
-    "roles": [],
-    "status": "201"
-  },
-  {
-    "controller": "ManagedMarketingController",
-    "action": "cancel",
-    "method": "PATCH",
-    "path": "/api/v1/managed-marketing/requests/:requestId/cancel",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.MANAGED_MARKETING_REQUEST"
-    ],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "ManagedMarketingController",
-    "action": "pay",
-    "method": "POST",
-    "path": "/api/v1/managed-marketing/requests/:requestId/payment",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.MANAGED_MARKETING_REQUEST"
-    ],
-    "roles": [],
-    "status": "201"
-  },
-  {
     "controller": "NotificationsController",
     "action": "list",
     "method": "GET",
     "path": "/api/v1/notifications",
-    "guards": [
-      "JwtAuthGuard"
-    ],
+    "guards": ["JwtAuthGuard"],
     "capabilities": [],
     "roles": [],
     "status": "200"
@@ -1293,9 +664,7 @@
     "action": "unreadCount",
     "method": "GET",
     "path": "/api/v1/notifications/unread-count",
-    "guards": [
-      "JwtAuthGuard"
-    ],
+    "guards": ["JwtAuthGuard"],
     "capabilities": [],
     "roles": [],
     "status": "200"
@@ -1305,9 +674,7 @@
     "action": "preferences",
     "method": "GET",
     "path": "/api/v1/notifications/preferences",
-    "guards": [
-      "JwtAuthGuard"
-    ],
+    "guards": ["JwtAuthGuard"],
     "capabilities": [],
     "roles": [],
     "status": "200"
@@ -1317,9 +684,7 @@
     "action": "updatePreferences",
     "method": "PATCH",
     "path": "/api/v1/notifications/preferences",
-    "guards": [
-      "JwtAuthGuard"
-    ],
+    "guards": ["JwtAuthGuard"],
     "capabilities": [],
     "roles": [],
     "status": "200"
@@ -1329,9 +694,7 @@
     "action": "markAllRead",
     "method": "PATCH",
     "path": "/api/v1/notifications/read-all",
-    "guards": [
-      "JwtAuthGuard"
-    ],
+    "guards": ["JwtAuthGuard"],
     "capabilities": [],
     "roles": [],
     "status": "200"
@@ -1341,947 +704,7 @@
     "action": "markRead",
     "method": "PATCH",
     "path": "/api/v1/notifications/:notificationId/read",
-    "guards": [
-      "JwtAuthGuard"
-    ],
-    "capabilities": [],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "list",
-    "method": "GET",
-    "path": "/api/v1/admin/properties",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "createForAccount",
-    "method": "POST",
-    "path": "/api/v1/admin/properties/proxy",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_PROXY_CREATE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "201"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "createRevisionForAccount",
-    "method": "POST",
-    "path": "/api/v1/admin/properties/:propertyId/revisions/proxy",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_PROXY_CREATE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "201"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "get",
-    "method": "GET",
-    "path": "/api/v1/admin/properties/:propertyId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "addPlatformMedia",
-    "method": "POST",
-    "path": "/api/v1/admin/properties/:propertyId/revisions/:revisionId/media",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "201"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "replacePlatformMedia",
-    "method": "PUT",
-    "path": "/api/v1/admin/properties/:propertyId/revisions/:revisionId/media/:mediaId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "updatePlatformMedia",
-    "method": "PATCH",
-    "path": "/api/v1/admin/properties/:propertyId/revisions/:revisionId/media/:mediaId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "removePlatformMedia",
-    "method": "DELETE",
-    "path": "/api/v1/admin/properties/:propertyId/revisions/:revisionId/media/:mediaId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "getPlatformMedia",
-    "method": "GET",
-    "path": "/api/v1/admin/properties/:propertyId/revisions/:revisionId/media/:mediaId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "getTitleDeed",
-    "method": "GET",
-    "path": "/api/v1/admin/properties/:propertyId/evidence/title-deed",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "getPrivateEvidence",
-    "method": "GET",
-    "path": "/api/v1/admin/properties/:propertyId/revisions/:revisionId/evidence/:evidenceIndex",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "review",
-    "method": "PATCH",
-    "path": "/api/v1/admin/properties/:propertyId/status",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "reviewRevision",
-    "method": "PATCH",
-    "path": "/api/v1/admin/properties/:propertyId/revisions/:revisionId/review",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertiesController",
-    "action": "updateLifecycle",
-    "method": "PATCH",
-    "path": "/api/v1/admin/properties/:propertyId/lifecycle",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_PROPERTY_REVIEW"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "PropertiesController",
-    "action": "create",
-    "method": "POST",
-    "path": "/api/v1/properties",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.PROPERTY_CREATE"
-    ],
-    "roles": [],
-    "status": "201"
-  },
-  {
-    "controller": "PropertiesController",
-    "action": "createRevision",
-    "method": "POST",
-    "path": "/api/v1/properties/mine/:propertyId/revisions",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.PROPERTY_MANAGE_OWN"
-    ],
-    "roles": [],
-    "status": "201"
-  },
-  {
-    "controller": "PropertiesController",
-    "action": "listPublished",
-    "method": "GET",
-    "path": "/api/v1/properties",
-    "guards": [],
-    "capabilities": [],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "PropertiesController",
-    "action": "getFilterMetadata",
-    "method": "GET",
-    "path": "/api/v1/properties/filter-metadata",
-    "guards": [],
-    "capabilities": [],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "PropertiesController",
-    "action": "mine",
-    "method": "GET",
-    "path": "/api/v1/properties/mine",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.PROPERTY_READ_OWN"
-    ],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "PropertiesController",
-    "action": "getMine",
-    "method": "GET",
-    "path": "/api/v1/properties/mine/:propertyId",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.PROPERTY_READ_OWN"
-    ],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "PropertiesController",
-    "action": "updateVisibility",
-    "method": "PATCH",
-    "path": "/api/v1/properties/mine/:propertyId/visibility",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.PROPERTY_MANAGE_OWN"
-    ],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "PropertiesController",
-    "action": "submitRevision",
-    "method": "POST",
-    "path": "/api/v1/properties/mine/:propertyId/revisions/submit",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.PROPERTY_MANAGE_OWN"
-    ],
-    "roles": [],
-    "status": "201"
-  },
-  {
-    "controller": "PropertiesController",
-    "action": "getOwnTitleDeed",
-    "method": "GET",
-    "path": "/api/v1/properties/mine/:propertyId/evidence/title-deed",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.PROPERTY_READ_OWN"
-    ],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "PropertiesController",
-    "action": "getOwnPrivateEvidence",
-    "method": "GET",
-    "path": "/api/v1/properties/mine/:propertyId/revisions/:revisionId/evidence/:evidenceIndex",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.PROPERTY_READ_OWN"
-    ],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "PropertiesController",
-    "action": "getPublished",
-    "method": "GET",
-    "path": "/api/v1/properties/:propertyId",
-    "guards": [],
-    "capabilities": [],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyAttributesController",
-    "action": "list",
-    "method": "GET",
-    "path": "/api/v1/admin/property-attributes",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "options",
-    "method": "GET",
-    "path": "/api/v1/admin/property-form-definitions/options",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "list",
-    "method": "GET",
-    "path": "/api/v1/admin/property-form-definitions",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "create",
-    "method": "POST",
-    "path": "/api/v1/admin/property-form-definitions",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "201"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "get",
-    "method": "GET",
-    "path": "/api/v1/admin/property-form-definitions/:definitionId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "getVersion",
-    "method": "GET",
-    "path": "/api/v1/admin/property-form-definitions/:definitionId/versions/:versionId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "createDraft",
-    "method": "POST",
-    "path": "/api/v1/admin/property-form-definitions/:definitionId/draft",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "201"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "updateDraft",
-    "method": "PUT",
-    "path": "/api/v1/admin/property-form-definitions/:definitionId/draft",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "discardDraft",
-    "method": "POST",
-    "path": "/api/v1/admin/property-form-definitions/:definitionId/draft/discard",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "validateDraft",
-    "method": "POST",
-    "path": "/api/v1/admin/property-form-definitions/:definitionId/draft/validate",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "diffDraft",
-    "method": "GET",
-    "path": "/api/v1/admin/property-form-definitions/:definitionId/draft/diff",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "publish",
-    "method": "POST",
-    "path": "/api/v1/admin/property-form-definitions/:definitionId/publish",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_FORM_DEFINITION_PUBLISH"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "archive",
-    "method": "POST",
-    "path": "/api/v1/admin/property-form-definitions/:definitionId/archive",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_FORM_DEFINITION_PUBLISH"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyFormDefinitionsController",
-    "action": "restore",
-    "method": "POST",
-    "path": "/api/v1/admin/property-form-definitions/:definitionId/restore",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_FORM_DEFINITION_PUBLISH"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "PropertyFormDefinitionsController",
-    "action": "getVersion",
-    "method": "GET",
-    "path": "/api/v1/property-form-definitions/versions/:versionId",
-    "guards": [],
-    "capabilities": [],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "PropertyFormOptionsController",
-    "action": "list",
-    "method": "GET",
-    "path": "/api/v1/property-form-options",
-    "guards": [],
-    "capabilities": [],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyOptionsController",
-    "action": "options",
-    "method": "GET",
-    "path": "/api/v1/admin/property-options/options",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyOptionsController",
-    "action": "list",
-    "method": "GET",
-    "path": "/api/v1/admin/property-options",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyOptionsController",
-    "action": "create",
-    "method": "POST",
-    "path": "/api/v1/admin/property-options",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "201"
-  },
-  {
-    "controller": "AdminPropertyOptionsController",
-    "action": "update",
-    "method": "PATCH",
-    "path": "/api/v1/admin/property-options/:optionId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyOptionsController",
-    "action": "remove",
-    "method": "DELETE",
-    "path": "/api/v1/admin/property-options/:optionId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "PropertyOptionsController",
-    "action": "list",
-    "method": "GET",
-    "path": "/api/v1/property-options",
-    "guards": [],
-    "capabilities": [],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyPurposeCategoriesController",
-    "action": "list",
-    "method": "GET",
-    "path": "/api/v1/admin/property-purpose-categories",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyPurposeCategoriesController",
-    "action": "create",
-    "method": "POST",
-    "path": "/api/v1/admin/property-purpose-categories",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "201"
-  },
-  {
-    "controller": "AdminPropertyPurposeCategoriesController",
-    "action": "update",
-    "method": "PATCH",
-    "path": "/api/v1/admin/property-purpose-categories/:categoryId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "PropertyPurposeCategoriesController",
-    "action": "list",
-    "method": "GET",
-    "path": "/api/v1/property-purpose-categories",
-    "guards": [],
-    "capabilities": [],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyTypesController",
-    "action": "options",
-    "method": "GET",
-    "path": "/api/v1/admin/property-types/options",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyTypesController",
-    "action": "list",
-    "method": "GET",
-    "path": "/api/v1/admin/property-types",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyTypesController",
-    "action": "create",
-    "method": "POST",
-    "path": "/api/v1/admin/property-types",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "201"
-  },
-  {
-    "controller": "AdminPropertyTypesController",
-    "action": "update",
-    "method": "PATCH",
-    "path": "/api/v1/admin/property-types/:typeId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "AdminPropertyTypesController",
-    "action": "remove",
-    "method": "DELETE",
-    "path": "/api/v1/admin/property-types/:typeId",
-    "guards": [
-      "JwtAuthGuard",
-      "RolesGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ADMIN_CATALOG_MANAGE"
-    ],
-    "roles": [
-      "SystemRole.ADMIN"
-    ],
-    "status": "200"
-  },
-  {
-    "controller": "PropertyTypesController",
-    "action": "list",
-    "method": "GET",
-    "path": "/api/v1/property-types",
-    "guards": [],
+    "guards": ["JwtAuthGuard"],
     "capabilities": [],
     "roles": [],
     "status": "200"
@@ -2291,13 +714,8 @@
     "action": "getProfile",
     "method": "GET",
     "path": "/api/v1/users/me",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ACCOUNT_SELF_READ"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ACCOUNT_SELF_READ"],
     "roles": [],
     "status": "200"
   },
@@ -2306,13 +724,8 @@
     "action": "getProfileAlias",
     "method": "GET",
     "path": "/api/v1/users/profile",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ACCOUNT_SELF_READ"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ACCOUNT_SELF_READ"],
     "roles": [],
     "status": "200"
   },
@@ -2321,13 +734,8 @@
     "action": "capabilities",
     "method": "GET",
     "path": "/api/v1/users/me/capabilities",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ACCOUNT_SELF_READ"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ACCOUNT_SELF_READ"],
     "roles": [],
     "status": "200"
   },
@@ -2336,13 +744,8 @@
     "action": "updateProfile",
     "method": "PATCH",
     "path": "/api/v1/users/me",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ACCOUNT_SELF_MANAGE"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ACCOUNT_SELF_MANAGE"],
     "roles": [],
     "status": "200"
   },
@@ -2351,13 +754,8 @@
     "action": "updatePhoto",
     "method": "PUT",
     "path": "/api/v1/users/me/photo",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ACCOUNT_SELF_MANAGE"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ACCOUNT_SELF_MANAGE"],
     "roles": [],
     "status": "200"
   },
@@ -2366,13 +764,8 @@
     "action": "removePhoto",
     "method": "DELETE",
     "path": "/api/v1/users/me/photo",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ACCOUNT_SELF_MANAGE"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ACCOUNT_SELF_MANAGE"],
     "roles": [],
     "status": "200"
   },
@@ -2381,13 +774,8 @@
     "action": "changePassword",
     "method": "PATCH",
     "path": "/api/v1/users/me/password",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ACCOUNT_SELF_MANAGE"
-    ],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ACCOUNT_SELF_MANAGE"],
     "roles": [],
     "status": "200"
   },
@@ -2396,26 +784,8 @@
     "action": "deleteAccount",
     "method": "DELETE",
     "path": "/api/v1/users/me",
-    "guards": [
-      "JwtAuthGuard",
-      "CapabilityGuard"
-    ],
-    "capabilities": [
-      "Capability.ACCOUNT_SELF_MANAGE"
-    ],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "FakePaymentsDevController",
-    "action": "settle",
-    "method": "POST",
-    "path": "/api/v1/dev/fake-payments/:paymentId/settle",
-    "guards": [
-      "FakePaymentsDevGuard",
-      "JwtAuthGuard"
-    ],
-    "capabilities": [],
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ACCOUNT_SELF_MANAGE"],
     "roles": [],
     "status": "200"
   }

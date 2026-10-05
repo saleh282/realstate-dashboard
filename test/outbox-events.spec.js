@@ -13,8 +13,6 @@ const {
   OutboxAudience,
   OutboxEventType,
   assertValidOutboxDraft,
-  managedMarketingPaymentConfirmedEvent,
-  propertyDecisionEvent,
   kycDecisionEvent,
 } = require('../src/domain/outbox/outbox-events');
 const {
@@ -37,39 +35,15 @@ const { outboxDuplicateVersion } = require('./support/fake-outbox');
  */
 const oid = () => new Types.ObjectId().toString();
 const PROPERTY = '64b000000000000000000f01';
-const PAYMENT = '64b000000000000000000c01';
 const REQUEST = '64b000000000000000000c02';
 const ALICE = '64b000000000000000000a11';
 const T = new Date('2026-05-08T10:00:00Z');
+// KYC decisions are the events this catalogue carries today.
 const propertyEvent = () =>
-  propertyDecisionEvent({
-    propertyId: PROPERTY,
-    revisionId: REQUEST,
-    occurredAt: T,
-    decision: 'approved',
-    decisionVersion: 1,
-    advertiserAccountId: ALICE,
-  });
+  kycDecisionEvent({ accountId: PROPERTY, occurredAt: T, decision: 'verified', kycVersion: 1 });
 const samples = () => [
   propertyEvent(),
-  propertyDecisionEvent({
-    propertyId: PROPERTY,
-    revisionId: REQUEST,
-    occurredAt: T,
-    decision: 'rejected',
-    decisionVersion: 2,
-    advertiserAccountId: ALICE,
-  }),
-  kycDecisionEvent({ accountId: REQUEST, occurredAt: T, decision: 'verified', kycVersion: 1 }),
   kycDecisionEvent({ accountId: REQUEST, occurredAt: T, decision: 'rejected', kycVersion: 2 }),
-  managedMarketingPaymentConfirmedEvent({
-    requestId: REQUEST,
-    paymentId: PAYMENT,
-    occurredAt: T,
-    amountMinor: 90000,
-    currency: 'EGP',
-    advertiserAccountId: ALICE,
-  }),
 ];
 const codeOf = (fn) => {
   try {
@@ -82,15 +56,7 @@ const codeOf = (fn) => {
 const withPayload = (payload) => ({ ...propertyEvent(), payload: payload });
 describe('event catalogue: names, versions, aggregates (MAZAD-031)', () => {
   it('covers every roadmap event with a stable machine-readable SCREAMING_SNAKE name', () => {
-    expect(Object.values(OutboxEventType).sort()).toEqual(
-      [
-        'MANAGED_MARKETING_PAYMENT_CONFIRMED',
-        'KYC_APPROVED',
-        'KYC_REJECTED',
-        'PROPERTY_APPROVED',
-        'PROPERTY_REJECTED',
-      ].sort(),
-    );
+    expect(Object.values(OutboxEventType).sort()).toEqual(['KYC_APPROVED', 'KYC_REJECTED'].sort());
     for (const name of Object.values(OutboxEventType))
       expect(name).toMatch(/^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/);
   });
@@ -138,16 +104,6 @@ describe('privacy review of every event (MAZAD-031)', () => {
       for (const key of Object.keys(draft.privateRouting ?? {}))
         expect(OUTBOX_PRIVATE_ROUTING_KEYS).toContain(key);
     }
-  });
-  it('payment events are PRIVATE and carry no provider name, reference, event id or raw payload', () => {
-    const marketing = samples().find(
-      (d) => d.type === OutboxEventType.MANAGED_MARKETING_PAYMENT_CONFIRMED,
-    );
-    for (const draft of [marketing]) {
-      expect(draft.audience).toBe(OutboxAudience.PRIVATE);
-      expect(JSON.stringify(draft.payload)).not.toMatch(/provider|reference|webhook|raw/i);
-    }
-    expect(JSON.stringify(marketing.payload)).not.toMatch(/auction|entitlement|bid/i);
   });
 });
 describe('the payload guard rejects unsafe or malformed drafts (MAZAD-031)', () => {
@@ -214,7 +170,7 @@ describe('the payload guard rejects unsafe or malformed drafts (MAZAD-031)', () 
     const good = propertyEvent();
     const bad = [
       { schemaVersion: 2 },
-      { aggregateType: OutboxAggregateType.MANAGED_MARKETING_REQUEST },
+      { aggregateType: 'SOMETHING_ELSE' },
       { type: 'PROPERTY_EXPLODED' },
       { aggregateId: 'nope' },
       { aggregateId: PROPERTY.toUpperCase() },
@@ -252,9 +208,9 @@ describe('OutboxService.recordRequired — same-transaction insertion (MAZAD-031
     await inTx(mongo, (s) => mongo.outbox.service.recordRequired(draft(), s).then(() => undefined));
     expect(mongo.outbox.rows).toHaveLength(1);
     expect(mongo.outbox.rows[0]).toMatchObject({
-      type: OutboxEventType.PROPERTY_APPROVED,
+      type: OutboxEventType.KYC_APPROVED,
       schemaVersion: 1,
-      aggregateType: OutboxAggregateType.PROPERTY,
+      aggregateType: OutboxAggregateType.KYC,
       aggregateId: PROPERTY,
       aggregateVersion: 1,
       occurredAt: T,
@@ -323,7 +279,7 @@ describe('OutboxService.recordRequired — same-transaction insertion (MAZAD-031
     await inTx(mongo, async (s) => {
       const a = await mongo.outbox.service.recordRequired(draft(), s);
       const b = await mongo.outbox.service.recordRequired(
-        draft({ type: OutboxEventType.PROPERTY_REJECTED, payload: { propertyId: PROPERTY } }),
+        draft({ type: OutboxEventType.KYC_REJECTED, payload: { kycStatus: 'rejected' } }),
         s,
       );
       const c = await mongo.outbox.service.recordRequired(

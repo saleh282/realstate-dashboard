@@ -8,7 +8,7 @@ const {
 } = require('../src/domain/outbox/outbox-consumer.port');
 const { OutboxDispatcherService } = require('../src/services/outbox-dispatcher.service');
 const { OutboxDispatcherWorker } = require('../src/services/outbox-dispatcher.worker');
-const { OutboxEventType, propertyDecisionEvent } = require('../src/domain/outbox/outbox-events');
+const { OutboxEventType, kycDecisionEvent } = require('../src/domain/outbox/outbox-events');
 const {
   OutboxErrorClass,
   OutboxStatus,
@@ -30,23 +30,19 @@ const B = '64b0000000000000000aa002';
 const C = '64b0000000000000000aa003';
 const RECIPIENT = '64b000000000000000000a11';
 const ALL = Object.values(OutboxEventType);
-const revisionEvent = (property, sequence) =>
-  propertyDecisionEvent({
-    propertyId: property,
-    revisionId: property,
+const revisionEvent = (account, sequence) =>
+  kycDecisionEvent({
+    accountId: account,
     occurredAt: new Date(T0.getTime() + sequence),
-    decision: 'approved',
-    decisionVersion: sequence,
-    advertiserAccountId: RECIPIENT,
+    decision: 'verified',
+    kycVersion: sequence,
   });
-const rejected = (property) =>
-  propertyDecisionEvent({
-    propertyId: property,
-    revisionId: property,
+const rejected = (account) =>
+  kycDecisionEvent({
+    accountId: account,
     occurredAt: new Date(T0.getTime() + 500),
     decision: 'rejected',
-    decisionVersion: 4,
-    advertiserAccountId: RECIPIENT,
+    kycVersion: 4,
   });
 function build(specs = [{ name: 'secondary' }, { name: 'notifications' }], values = {}) {
   const mongo = new FakeMongo();
@@ -493,9 +489,9 @@ describe('subscriptions (MAZAD-031 closure)', () => {
     build([
       {
         name: 'secondary',
-        types: [OutboxEventType.PROPERTY_APPROVED, OutboxEventType.PROPERTY_REJECTED],
+        types: [OutboxEventType.KYC_APPROVED, OutboxEventType.KYC_REJECTED],
       },
-      { name: 'notifications', types: [OutboxEventType.PROPERTY_REJECTED] },
+      { name: 'notifications', types: [OutboxEventType.KYC_REJECTED] },
     ]);
   it('each consumer receives exactly the types it subscribes to, and never claims or marks the rest', async () => {
     const ctx = build2();
@@ -505,11 +501,11 @@ describe('subscriptions (MAZAD-031 closure)', () => {
     await ctx.dispatcher.dispatchConsumer('secondary');
     await ctx.dispatcher.dispatchConsumer('notifications');
     expect(ctx.seen.secondary.map((e) => e.type)).toEqual([
-      'PROPERTY_APPROVED',
-      'PROPERTY_APPROVED',
-      'PROPERTY_REJECTED',
+      'KYC_APPROVED',
+      'KYC_APPROVED',
+      'KYC_REJECTED',
     ]);
-    expect(ctx.seen.notifications.map((e) => e.type)).toEqual(['PROPERTY_REJECTED']);
+    expect(ctx.seen.notifications.map((e) => e.type)).toEqual(['KYC_REJECTED']);
     expect(ctx.d(A, 1, 'notifications')).toEqual({}); // an unsubscribed event carries no delivery state for that consumer at all
     expect(ctx.d(A, 2, 'notifications')).toEqual({});
   });
@@ -517,7 +513,7 @@ describe('subscriptions (MAZAD-031 closure)', () => {
     const ctx = build2();
     // secondary's bids are failing, but notifications only cares about the finalization, so it is not held behind them.
     ctx.handlers.secondary = async (e) => {
-      if (e.type === 'PROPERTY_APPROVED') throw new Error('bid fan-out down');
+      if (e.type === 'KYC_APPROVED') throw new Error('bid fan-out down');
     };
     await ctx.record(revisionEvent(A, 1));
     await ctx.record(revisionEvent(A, 2));
@@ -534,7 +530,7 @@ describe('subscriptions (MAZAD-031 closure)', () => {
     await ctx.record(revisionEvent(A, 1));
     await ctx.dispatcher.dispatchConsumer('notifications');
     for (const [filter] of find.mock.calls)
-      expect(filter.type).toEqual({ $in: [OutboxEventType.PROPERTY_REJECTED] });
+      expect(filter.type).toEqual({ $in: [OutboxEventType.KYC_REJECTED] });
     expect(find).toHaveBeenCalled();
     expect(ctx.consumers.notifications.deliver).not.toHaveBeenCalled();
   });

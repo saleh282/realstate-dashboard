@@ -18,12 +18,10 @@ async function createContext({ env = process.env, initialize = true, workers = f
     await services.EnvironmentGuardService.onApplicationBootstrap();
     if (initialize) {
       await services.GovernoratesService.onModuleInit();
-      await services.PropertyOptionsService.onModuleInit();
     }
     services.NotificationsOutboxConsumer.onModuleInit();
     if (workers) {
       services.EvidenceCleanupWorker.onApplicationBootstrap();
-      services.PaymentReconciliationWorker.onApplicationBootstrap();
       services.OutboxDispatcherWorker.onApplicationBootstrap();
     }
     return {
@@ -44,7 +42,6 @@ async function createContext({ env = process.env, initialize = true, workers = f
 async function stopWorkers(services) {
   await Promise.all([
     services.EvidenceCleanupWorker.onModuleDestroy(),
-    services.PaymentReconciliationWorker.onModuleDestroy(),
     services.OutboxDispatcherWorker.onModuleDestroy(),
   ]);
 }

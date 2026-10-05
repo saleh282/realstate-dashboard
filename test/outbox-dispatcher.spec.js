@@ -83,13 +83,13 @@ const setDelivery = (event, fields, name = NAME) => {
 function seedAggregate(store, aggregateId, n, base = 0) {
   return Array.from({ length: n }, (_, i) =>
     store.seed({
-      aggregateType: 'PROPERTY',
+      aggregateType: 'KYC',
       aggregateId,
       aggregateVersion: i + 1,
-      type: 'PROPERTY_APPROVED',
+      type: 'KYC_APPROVED',
       occurredAt: new Date(T0.getTime() + base + i),
       payload: { propertyId: aggregateId, sequence: i + 1 },
-      privateRouting: { advertiserAccountId: '64b000000000000000000a11' },
+      privateRouting: { subjectAccountId: '64b000000000000000000a11' },
     }),
   );
 }
@@ -211,7 +211,7 @@ describe('no consumer yet: fail safe, never discard (MAZAD-031)', () => {
 describe('consumer registry (MAZAD-031)', () => {
   const consumer = (over = {}) => ({
     name: 'secondary',
-    subscribedTypes: [OutboxEventType.PROPERTY_APPROVED],
+    subscribedTypes: [OutboxEventType.KYC_APPROVED],
     configured: true,
     deliver: async () => undefined,
     ...over,
@@ -254,7 +254,7 @@ describe('consumer registry (MAZAD-031)', () => {
     expect(() =>
       new OutboxConsumerRegistry().register(
         consumer({
-          subscribedTypes: [OutboxEventType.PROPERTY_APPROVED, OutboxEventType.PROPERTY_APPROVED],
+          subscribedTypes: [OutboxEventType.KYC_APPROVED, OutboxEventType.KYC_APPROVED],
         }),
       ),
     ).toThrow(/twice/);
@@ -270,7 +270,7 @@ describe('batching and deterministic order (MAZAD-031)', () => {
     const ids = Array.from({ length: 10 }, () => new Types.ObjectId().toString());
     ids.forEach((id, i) =>
       store.seed({
-        aggregateType: 'PROPERTY',
+        aggregateType: 'KYC',
         aggregateId: id,
         aggregateVersion: 1,
         occurredAt: new Date(T0.getTime() + Math.min(i, 8)),
@@ -301,7 +301,7 @@ describe('batching and deterministic order (MAZAD-031)', () => {
   });
   it('does not touch a delivery whose retry is not due yet, and clamps the batch size configuration', async () => {
     const { store, dispatcher, seen, values } = build();
-    const waiting = store.seed({ aggregateType: 'PROPERTY', aggregateId: A, aggregateVersion: 1 });
+    const waiting = store.seed({ aggregateType: 'KYC', aggregateId: A, aggregateVersion: 1 });
     setDelivery(waiting, {
       status: OutboxStatus.PENDING,
       attemptCount: 1,
@@ -345,15 +345,15 @@ describe('acknowledgement (MAZAD-031)', () => {
     await dispatcher.dispatchConsumer(NAME);
     expect(seen[0]).toEqual({
       eventId: event._id.toString(),
-      type: 'PROPERTY_APPROVED',
+      type: 'KYC_APPROVED',
       schemaVersion: 1,
-      aggregateType: 'PROPERTY',
+      aggregateType: 'KYC',
       aggregateId: A,
       aggregateVersion: 1,
       occurredAt: event.occurredAt,
       audience: 'PUBLIC',
       payload: { propertyId: A, sequence: 1 },
-      privateRouting: { advertiserAccountId: '64b000000000000000000a11' },
+      privateRouting: { subjectAccountId: '64b000000000000000000a11' },
       attempt: 1,
     });
     expect(Object.keys(seen[0])).not.toEqual(
@@ -527,7 +527,7 @@ describe('failure, backoff and dead-lettering (MAZAD-031)', () => {
     expect(logged).toContain('outbox_event_dead_lettered');
     expect(logged).toContain('CONSUMER_PERMANENT');
     expect(logged).not.toContain('secret detail');
-    expect(logged).not.toContain('advertiserAccountId');
+    expect(logged).not.toContain('subjectAccountId');
     expect(logged).not.toContain('sequence');
   });
 });
@@ -594,7 +594,7 @@ describe('claims, leases and abandoned work (MAZAD-031)', () => {
     const ids = Array.from({ length: 12 }, () => new Types.ObjectId().toString());
     ids.forEach((id, i) =>
       ctx.store.seed({
-        aggregateType: 'PROPERTY',
+        aggregateType: 'KYC',
         aggregateId: id,
         aggregateVersion: 1,
         occurredAt: new Date(T0.getTime() + i),
@@ -943,14 +943,14 @@ describe('Explicit service wiring (MAZAD-031)', () => {
     expect(registry.list()).toEqual([]);
     expect(worker.enabled).toBe(false); // NODE_ENV=test
     expect(worker.timer).toBeUndefined();
-    store.seed({ aggregateType: 'PROPERTY', aggregateId: A, aggregateVersion: 1 });
+    store.seed({ aggregateType: 'KYC', aggregateId: A, aggregateVersion: 1 });
     await expect(worker.runOnce()).resolves.toEqual({});
     expect(store.rows[0].delivery).toBeUndefined();
     // A future module (e.g. MAZAD-032) registers itself — no change to OutboxModule, producers or any other consumer.
     const received = [];
     registry.register({
       name: 'secondary',
-      subscribedTypes: [OutboxEventType.PROPERTY_APPROVED],
+      subscribedTypes: [OutboxEventType.KYC_APPROVED],
       configured: true,
       deliver: async (e) => {
         received.push(e.eventId);
@@ -1045,10 +1045,10 @@ describe('OutboxWakeup — after-commit dispatch hint (secondary hardening)', ()
     const worker = started(ctx, wakeup);
     for (let v = 1; v <= 5; v++) {
       ctx.store.seed({
-        aggregateType: 'PROPERTY',
+        aggregateType: 'KYC',
         aggregateId: A,
         aggregateVersion: v,
-        type: 'PROPERTY_APPROVED',
+        type: 'KYC_APPROVED',
         occurredAt: new Date(T0.getTime() + v),
         payload: { propertyId: A, sequence: v },
       });

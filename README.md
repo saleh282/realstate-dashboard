@@ -1,6 +1,6 @@
 # Real Estate Backend — Express MVC
 
-Plain JavaScript backend using Node.js, Express and MongoDB/Mongoose. The API includes authentication, accounts, KYC, property listings, catalog administration, managed marketing, payments and notifications.
+Plain JavaScript backend using Node.js, Express and MongoDB/Mongoose. The API includes authentication, accounts, KYC, broker applications, legal documents, geocoding and notifications.
 
 ## MVC structure
 
@@ -90,7 +90,7 @@ Every request gets an `X-Request-Id` (a client-supplied value is kept only if it
 
 Uploads are buffered in memory, so they are bounded three ways (all enforced while the body streams in, before any file is processed):
 
-- per-request ceiling on the combined file size (KYC 16 MiB, broker 21 MiB, owner property 64 MiB, admin property 100 MiB, admin single photo 11 MiB) on top of the existing per-file limits; a larger `Content-Length` is rejected with 413 `UPLOAD_REQUEST_TOO_LARGE` before reading the body;
+- per-request ceiling on the combined file size (KYC 16 MiB, profile photo 6 MiB, broker 21 MiB) on top of the existing per-file limits; a larger `Content-Length` is rejected with 413 `UPLOAD_REQUEST_TOO_LARGE` before reading the body;
 - `UPLOAD_MAX_CONCURRENT_PER_USER` (default 2) simultaneous uploads per account, otherwise 429 `UPLOAD_CONCURRENCY_LIMIT`;
 - `UPLOAD_MAX_INFLIGHT_BYTES` (default 256 MiB) buffered across the whole process, otherwise 503 `UPLOAD_CAPACITY_EXCEEDED` with `retryAfterSeconds`.
 
@@ -105,44 +105,6 @@ Observability (structured JSON log lines): `evidence_cleanup_run` (info/warn) af
 ## Geocoding
 
 `GET /api/v1/geocoding/reverse` and `/search` require authentication and the `GEOCODING_USE` capability (active users who may create listings, approved brokers, active staff). Per-IP throttling still applies. The endpoints call a provider behind the `GeocodingProvider` interface: `GEOCODING_PROVIDER=google` (Google Geocoding API for `/reverse`, Places API (New) Text Search for `/search`, both limited to Egypt; requires `GOOGLE_MAPS_SERVER_API_KEY`, a server key restricted to this server's IP and those two APIs), `nominatim` (the default: a Nominatim-compatible HTTP API, i.e. self-hosted Nominatim or a hosted service exposing `/search` and `/reverse`), or `disabled`. The Nominatim settings below do not apply to `google`. `/search` allows 30 requests per minute per IP because the app's map picker searches as the user types (debounced). Configuration: `GEOCODING_PROVIDER_BASE_URL`, `GEOCODING_USER_AGENT`, optional `GEOCODING_API_KEY` (sent as query parameter `GEOCODING_API_KEY_PARAM`, default `key`; never logged). **In production the public `nominatim.openstreetmap.org` service is refused at startup** (its usage policy forbids production-scale use); `GEOCODING_ALLOW_PUBLIC_PROVIDER=true` is an explicit, temporary override. Resource bounds, per process: an LRU cache of `GEOCODING_CACHE_MAX_ENTRIES` (2000), at most `GEOCODING_MAX_QUEUE` (25) requests waiting for a provider slot (further requests get 503 `GEOCODING_BUSY`), a wait limit of `GEOCODING_QUEUE_TIMEOUT_MS` (10 s), `GEOCODING_MAX_CONCURRENCY` and `GEOCODING_MIN_INTERVAL_MS` (defaults 1 and 1100 ms for the public service, 4 and 0 for a private endpoint).
-
-## Public property search (MAZAD-021)
-
-`GET /properties` is the public marketplace discovery endpoint. It only ever returns properties that are `approved`, owner-visible, not archived/admin-hidden, and have a published revision — draft, pending, rejected and private-evidence data are never reachable through it. All query parameters are optional:
-
-- `page` (default 1), `limit` (default 20, max 50).
-- `operationType`: `sale` or `rent`.
-- `purposeCategoryId`, `purposeSubcategoryId`: catalog `_id`s from `GET /property-purpose-categories` / `GET /property-types` (or the combined `GET /property-form-options`). Passing a subcategory that does not belong to the given category returns `400 PROPERTY_PURPOSE_HIERARCHY_MISMATCH`; an unknown id returns `400 PROPERTY_PURPOSE_CATEGORY_INVALID` / `PROPERTY_PURPOSE_SUBCATEGORY_INVALID`.
-- `governorateCode`, `city`: exact match (city is case-insensitive) against the property's address, sourced from the same catalogs used by the property-creation form (`GET /property-form-options`).
-- `minPriceMinor`, `maxPriceMinor`: inclusive bounds in EGP minor units. `minPriceMinor > maxPriceMinor` returns `400 PROPERTY_PRICE_RANGE_INVALID`.
-- `q`: free-text keyword matched against title/city/district (same case-insensitive pattern as the admin property search).
-- `sort`: `newest` (default), `price_asc` or `price_desc`.
-
-A filter combination that matches nothing returns a normal `200` with an empty `items` array and `pagination.total: 0` — that is a valid answer, not an error; only a malformed or catalog-inconsistent filter is rejected with `400`.
-
-Property documents carry a denormalized copy of their current public revision's `operationType`/`purposeCategoryId`/`purposeSubcategoryId`/`governorateCode`/`city`/`district`/`totalPriceMinor`/`currency` (kept in sync in `reviewForAdmin` whenever a revision is approved) so this query can filter and sort on the `properties` collection directly instead of joining `property_revisions` per request. The returned JSON itself is unaffected: it still projects from the populated current revision when one exists, exactly as before.
-
-## Favorites (MAZAD-022)
-
-All `/favorites` routes require authentication (`JwtAuthGuard` + `FAVORITE_MANAGE_OWN`, available to any active marketplace account — not gated by broker approval like the property-creation capabilities). Favorites are private to the authenticated user; there is no way to read another account's favorites.
-
-- `POST /favorites { propertyId }` — add a favorite. Idempotent: favoriting an already-favorited property is a no-op success, not a duplicate or an error. The target property must currently pass the same public-visibility gate as `GET /properties`/`GET /properties/:id` (approved, owner-visible, not archived/admin-hidden, has a published revision); otherwise this returns `404 FAVORITE_PROPERTY_NOT_AVAILABLE`. A malformed `propertyId` returns `400 FAVORITE_PROPERTY_INVALID`.
-- `DELETE /favorites/:propertyId` — remove a favorite. Idempotent: removing a favorite that is already gone (or never existed) is a safe no-op, not a `404`.
-- `GET /favorites/ids` — the full set of the current user's favorited property ids (`{ propertyIds: string[] }`), capped at 2000. Not paginated by design: it exists purely so a client can answer "is this property favorited?" for any card it renders without a request per card, by caching this set once.
-- `GET /favorites?page=&limit=` — the user's favorites with the same safe public property projection `GET /properties` uses, newest-favorited first (bounded pagination, default 20/max 50, same clamping as the search endpoint). `pagination.total` counts favorite records, not currently-visible properties: if a favorited property later becomes hidden/archived/unavailable, its favorite record is left untouched but it is silently omitted from `items` — a page can therefore legitimately contain fewer than `limit` items. A property is never exposed through this endpoint merely because it was once favorited.
-
-The `favorites` collection has a unique `(userId, propertyId)` index, so a genuine concurrent double-add is resolved by MongoDB (one write wins, the other's duplicate-key error is treated as the already-favorited case) rather than by application-level locking.
-
-## Idempotent property submissions
-
-`POST /properties`, `POST /properties/mine/:id/revisions` and `POST /properties/mine/:id/revisions/submit` accept an optional `Idempotency-Key` header (8-128 characters of `[A-Za-z0-9._:-]`). A mobile client that times out cannot know whether the server finished, so it retries with the same key and the server runs the operation once:
-
-- first attempt: the key is recorded (only its SHA-256) in `idempotency_records` and the operation runs; on success the response is stored for 24 hours, on failure the record is removed so the retry can run;
-- retry with the same key and identical content (form fields plus a digest of every uploaded file): the stored response is returned, no second property or revision is created;
-- same key with different content: `409 IDEMPOTENCY_KEY_REUSED`;
-- a duplicate that arrives while the first is still running: `409 IDEMPOTENCY_IN_PROGRESS` with `retryAfterSeconds`; an attempt that died mid-flight is taken over after a 5-minute lease.
-
-Keys are scoped per account and per operation, so one client key can safely cover create and submit. Without the header the endpoints behave as before. The collection has a unique index on `(accountId, scope, keyHash)` and a TTL index; both are declared on the schema and created by Mongoose at startup. **If `autoIndex` is disabled in production, create them explicitly before enabling clients that send the header**, otherwise two truly concurrent duplicates are not excluded. Known narrow gap: if the process dies after the operation commits but before its result is recorded, a retry after the lease runs the operation again.
 
 ## Token separation
 
@@ -212,9 +174,15 @@ SMS remains intentionally unimplemented. The stub never logs an OTP or phone num
 - Refresh tokens are single-use. Concurrent requests cannot consume the same stored token more than once.
 - Authentication failures expose stable machine-readable `code` values, including `ACCOUNT_NOT_VERIFIED`, `ACCOUNT_SUSPENDED`, `INVALID_CREDENTIALS`, and the OTP error codes.
 
-## Auction removal
+## Removed features
 
-Auction APIs, bidding, workers and the WebSocket channel have been removed. See [dependency audit](docs/auction-removal-audit.md) and [change report](docs/auction-removal-report.md) for the database retention decision and migration 038.
+Auctions, favourites, property listings (with their forms, catalogs and amenities), managed marketing and payments have been removed. The only database migration is `039-legal-documents`, which publishes version 1 of the terms and the privacy policy:
+
+```bash
+node src/migrations/cli.js --apply --migration=039-legal-documents
+```
+
+Documents under `docs/` describe the system before these removals.
 
 ## Commands
 

@@ -3,8 +3,6 @@
 const { isPublicOsmNominatim } = require('../domain/geocoding/geocoding.config');
 const { parseTrustProxy } = require('./trust-proxy.config');
 const { deploymentEnvironmentErrors } = require('./deployment-environment');
-const { paymentProviderErrors } = require('../domain/payments/payment-provider.config');
-const { paymentReconciliationErrors } = require('../domain/payments/payment-reconciliation.config');
 const {
   PASSWORD_POLICY_MESSAGE,
   isValidPassword,
@@ -46,8 +44,6 @@ function validateEnvironment(config) {
   }
   requireKeys(config, ['MONGO_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'], errors);
   errors.push(...deploymentEnvironmentErrors(config));
-  errors.push(...paymentProviderErrors(config));
-  errors.push(...paymentReconciliationErrors(config));
   for (const key of ['JWT_ACCESS_EXPIRES_IN', 'JWT_REFRESH_EXPIRES_IN']) {
     const value = valueOf(config, key);
     if (!value || !durationPattern.test(value)) {

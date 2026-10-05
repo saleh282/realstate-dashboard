@@ -8,14 +8,13 @@ jest.mock('../src/middleware/auth', () => {
     authenticate: () => guard('JwtAuthGuard'),
     requireRoles: (...v) => guard('RolesGuard', v),
     requireCapabilities: (...v) => guard('CapabilityGuard', v),
-    fakePaymentsOnly: () => guard('FakePaymentsDevGuard'),
   };
 });
 const express = require('express');
 const { registerRoutes } = require('../src/routes');
 const { Capability } = require('../src/domain/authorization/capability');
 const { SystemRole } = require('../src/domain/auth/roles.enum');
-it('preserves all 153 endpoints, guard ordering, roles and capabilities', () => {
+it('preserves every endpoint, guard ordering, roles and capabilities', () => {
   const app = express();
   const mounts = [];
   const mount = app.use.bind(app);
