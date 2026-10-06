@@ -223,6 +223,76 @@
   {
     "controller": "ListingsController",
     "method": "GET",
+    "path": "/api/v1/admin/kyc",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_KYC_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/admin/kyc/:userId",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_KYC_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/admin/kyc/:userId/documents/:document",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_KYC_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/admin/kyc/:userId/approve",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_KYC_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/admin/kyc/:userId/reject",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_KYC_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/admin/broker-applications",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_BROKER_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/admin/broker-applications/:id",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_BROKER_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/admin/broker-applications/:id/document",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_BROKER_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/admin/broker-applications/:id/approve",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_BROKER_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/admin/broker-applications/:id/reject",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_BROKER_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
     "path": "/api/v1/admin/listings",
     "guards": ["JwtAuthGuard", "CapabilityGuard"],
     "capabilities": ["Capability.ADMIN_LISTING_REVIEW"]

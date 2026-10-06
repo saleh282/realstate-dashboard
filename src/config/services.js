@@ -2,6 +2,7 @@
 const { ConfigService } = require('./config');
 const { JwtService } = require('../common/security/jwt');
 const { v2: cloudinary } = require('cloudinary');
+const { AccountReviewsService } = require('./../services/account-reviews.service');
 const { AuditLogService } = require('./../services/audit-log.service');
 const { RefreshTokenService } = require('./../services/refresh-token.service');
 const { OutboxService } = require('./../services/outbox.service');
@@ -116,6 +117,15 @@ function createServices(connection, models, env = process.env) {
     services.AuditLogService,
   );
   services.FavouritesService = new FavouritesService(models.Favourite, models.Listing);
+  services.AccountReviewsService = new AccountReviewsService(
+    models.User,
+    models.BrokerApplication,
+    models.BrokerVerificationDocument,
+    services.CloudinaryAssetService,
+    services.AuditLogService,
+    services.OutboxService,
+    connection,
+  );
   services.IdempotencyService = new IdempotencyService(models.IdempotencyRecord);
   services.JwtStrategy = new JwtStrategy(
     services.ConfigService,

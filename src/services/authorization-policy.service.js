@@ -62,7 +62,11 @@ class AuthorizationPolicyService {
           principal.brokerStatus === BrokerStatus.APPROVED)
       );
     }
-    if (capability === Capability.ADMIN_LISTING_REVIEW) {
+    if (
+      capability === Capability.ADMIN_LISTING_REVIEW ||
+      capability === Capability.ADMIN_KYC_REVIEW ||
+      capability === Capability.ADMIN_BROKER_REVIEW
+    ) {
       return staff && principal.accountStatus === AccountStatus.ACTIVE;
     }
     if (staff) return false;

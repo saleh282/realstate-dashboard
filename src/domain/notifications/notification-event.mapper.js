@@ -11,6 +11,8 @@ const {
 const NOTIFICATION_SUBSCRIBED_EVENT_TYPES = Object.freeze([
   OutboxEventType.KYC_APPROVED,
   OutboxEventType.KYC_REJECTED,
+  OutboxEventType.BROKER_APPLICATION_APPROVED,
+  OutboxEventType.BROKER_APPLICATION_REJECTED,
   OutboxEventType.LISTING_APPROVED,
   OutboxEventType.LISTING_REJECTED,
   OutboxEventType.LISTING_UNPUBLISHED,
@@ -70,6 +72,28 @@ function mapNotificationEvent(event) {
           title: 'تم رفض التحقق',
           message: 'تم رفض طلب التحقق من الهوية. راجع حالة الطلب لمزيد من التفاصيل.',
           target: target(NotificationTargetType.KYC, event.aggregateId),
+        },
+      ];
+    case OutboxEventType.BROKER_APPLICATION_APPROVED:
+      return [
+        {
+          ...common,
+          recipientAccountId: routing(event, 'subjectAccountId'),
+          type: NotificationType.BROKER_APPLICATION_APPROVED,
+          title: 'تم قبول طلب الوسيط',
+          message: 'حسابك الآن حساب وسيط معتمد، ويمكنك نشر إعلاناتك.',
+          target: target(NotificationTargetType.BROKER_APPLICATION, event.aggregateId),
+        },
+      ];
+    case OutboxEventType.BROKER_APPLICATION_REJECTED:
+      return [
+        {
+          ...common,
+          recipientAccountId: routing(event, 'subjectAccountId'),
+          type: NotificationType.BROKER_APPLICATION_REJECTED,
+          title: 'لم يُقبل طلب الوسيط',
+          message: 'افتح طلب الوسيط لمعرفة السبب، ويمكنك التقديم من جديد.',
+          target: target(NotificationTargetType.BROKER_APPLICATION, event.aggregateId),
         },
       ];
     case OutboxEventType.LISTING_APPROVED:

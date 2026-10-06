@@ -34,6 +34,8 @@ var OutboxEventType;
 (function (OutboxEventType) {
   OutboxEventType['KYC_APPROVED'] = 'KYC_APPROVED';
   OutboxEventType['KYC_REJECTED'] = 'KYC_REJECTED';
+  OutboxEventType['BROKER_APPLICATION_APPROVED'] = 'BROKER_APPLICATION_APPROVED';
+  OutboxEventType['BROKER_APPLICATION_REJECTED'] = 'BROKER_APPLICATION_REJECTED';
   OutboxEventType['LISTING_APPROVED'] = 'LISTING_APPROVED';
   OutboxEventType['LISTING_REJECTED'] = 'LISTING_REJECTED';
   OutboxEventType['LISTING_UNPUBLISHED'] = 'LISTING_UNPUBLISHED';
@@ -43,6 +45,7 @@ var OutboxAggregateType;
 (function (OutboxAggregateType) {
   OutboxAggregateType['KYC'] = 'KYC';
   OutboxAggregateType['LISTING'] = 'LISTING';
+  OutboxAggregateType['BROKER_APPLICATION'] = 'BROKER_APPLICATION';
 })(OutboxAggregateType || (OutboxAggregateType = {}));
 var OutboxAudience;
 (function (OutboxAudience) {
@@ -52,6 +55,8 @@ var OutboxAudience;
 const OUTBOX_SCHEMA_VERSIONS = {
   [OutboxEventType.KYC_APPROVED]: 1,
   [OutboxEventType.KYC_REJECTED]: 1,
+  [OutboxEventType.BROKER_APPLICATION_APPROVED]: 1,
+  [OutboxEventType.BROKER_APPLICATION_REJECTED]: 1,
   [OutboxEventType.LISTING_APPROVED]: 1,
   [OutboxEventType.LISTING_REJECTED]: 1,
   [OutboxEventType.LISTING_UNPUBLISHED]: 1,
@@ -60,6 +65,8 @@ const OUTBOX_SCHEMA_VERSIONS = {
 const OUTBOX_EVENT_AGGREGATES = {
   [OutboxEventType.KYC_APPROVED]: OutboxAggregateType.KYC,
   [OutboxEventType.KYC_REJECTED]: OutboxAggregateType.KYC,
+  [OutboxEventType.BROKER_APPLICATION_APPROVED]: OutboxAggregateType.BROKER_APPLICATION,
+  [OutboxEventType.BROKER_APPLICATION_REJECTED]: OutboxAggregateType.BROKER_APPLICATION,
   [OutboxEventType.LISTING_APPROVED]: OutboxAggregateType.LISTING,
   [OutboxEventType.LISTING_REJECTED]: OutboxAggregateType.LISTING,
   [OutboxEventType.LISTING_UNPUBLISHED]: OutboxAggregateType.LISTING,
@@ -203,6 +210,18 @@ const kycDecisionEvent = (input) =>
     { kycStatus: input.decision, kycVersion: input.kycVersion, reviewedAt: iso(input.occurredAt) },
     { subjectAccountId: input.accountId },
   );
+/** The review decision on a broker application. The rejection reason stays on the application. */
+const brokerDecisionEvent = (input) =>
+  draft(
+    input.approved
+      ? OutboxEventType.BROKER_APPLICATION_APPROVED
+      : OutboxEventType.BROKER_APPLICATION_REJECTED,
+    input.applicationId,
+    input.occurredAt,
+    OutboxAudience.PRIVATE,
+    { status: input.approved ? 'approved' : 'rejected', reviewedAt: iso(input.occurredAt) },
+    { subjectAccountId: input.accountId },
+  );
 /** The review decision on a listing. The rejection reason stays on the listing, never in the event. */
 const listingDecisionEvent = (input) =>
   draft(
@@ -233,4 +252,5 @@ Object.assign(exports, {
   assertValidOutboxDraft,
   kycDecisionEvent,
   listingDecisionEvent,
+  brokerDecisionEvent,
 });

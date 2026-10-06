@@ -1086,6 +1086,8 @@
           "enum": [
             "KYC_APPROVED",
             "KYC_REJECTED",
+            "BROKER_APPLICATION_APPROVED",
+            "BROKER_APPLICATION_REJECTED",
             "LISTING_APPROVED",
             "LISTING_REJECTED",
             "LISTING_UNPUBLISHED"
@@ -1271,6 +1273,8 @@
           "enum": [
             "KYC_APPROVED",
             "KYC_REJECTED",
+            "BROKER_APPLICATION_APPROVED",
+            "BROKER_APPLICATION_REJECTED",
             "LISTING_APPROVED",
             "LISTING_REJECTED",
             "LISTING_UNPUBLISHED"
@@ -1290,7 +1294,7 @@
         "constraints": {
           "required": true,
           "immutable": true,
-          "enum": ["KYC", "LISTING"]
+          "enum": ["KYC", "LISTING", "BROKER_APPLICATION"]
         }
       },
       "aggregateId": {

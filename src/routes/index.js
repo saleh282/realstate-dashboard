@@ -8,6 +8,11 @@ function registerRoutes(app, services) {
   app.use('/health', require('./health.routes').createRouter(services));
   app.use('/api/v1/kyc', require('./kyc.routes').createRouter(services));
   app.use('/api/v1/legal-documents', require('./legal-documents.routes').createRouter(services));
+  app.use('/api/v1/admin/kyc', require('./admin-reviews.routes').createKycRouter(services));
+  app.use(
+    '/api/v1/admin/broker-applications',
+    require('./admin-reviews.routes').createBrokerRouter(services),
+  );
   app.use('/api/v1/admin/listings', require('./admin-listings.routes').createRouter(services));
   app.use('/api/v1/admin/reports', require('./listing-reports.routes').createAdminRouter(services));
   app.use('/api/v1/listings', require('./listing-reports.routes').createRouter(services));

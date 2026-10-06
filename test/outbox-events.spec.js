@@ -63,6 +63,8 @@ describe('event catalogue: names, versions, aggregates (MAZAD-031)', () => {
         'LISTING_APPROVED',
         'LISTING_REJECTED',
         'LISTING_UNPUBLISHED',
+        'BROKER_APPLICATION_APPROVED',
+        'BROKER_APPLICATION_REJECTED',
       ].sort(),
     );
     for (const name of Object.values(OutboxEventType))

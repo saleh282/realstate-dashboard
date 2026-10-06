@@ -51,9 +51,9 @@ describe('authorization policy', () => {
       }
     },
   );
-  it('lets an active user do everything but review listings', () => {
+  it('lets an active user do everything but the staff reviews', () => {
     for (const capability of Object.values(Capability)) {
-      expect(can(principal(), capability)).toBe(capability !== Capability.ADMIN_LISTING_REVIEW);
+      expect(can(principal(), capability)).toBe(!capability.startsWith('ADMIN_'));
     }
   });
   it('lets a suspended account manage its listings but not post new ones', () => {
@@ -71,7 +71,12 @@ describe('authorization policy', () => {
     'lets an active %s review listings but not post any',
     (systemRole) => {
       const staff = principal({ userId: id.admin, systemRole });
-      expect(can(staff, Capability.ADMIN_LISTING_REVIEW)).toBe(true);
+      for (const review of ['ADMIN_LISTING_REVIEW', 'ADMIN_KYC_REVIEW', 'ADMIN_BROKER_REVIEW']) {
+        expect(can(staff, Capability[review])).toBe(true);
+        expect(can({ ...staff, accountStatus: AccountStatus.SUSPENDED }, Capability[review])).toBe(
+          false,
+        );
+      }
       expect(can(staff, Capability.LISTING_CREATE)).toBe(false);
       expect(can(staff, Capability.LISTING_MANAGE_OWN)).toBe(false);
       expect(

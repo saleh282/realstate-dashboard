@@ -130,7 +130,7 @@ Users default to role `user`. Admin accounts use role `admin`. JWT authenticatio
 
 - `POST /kyc/submit` and `GET /kyc/status`: authenticated users.
 
-The only admin endpoints are the review of listings (below). KYC and broker applications have no review path yet.
+The admin endpoints are the reviews: of listings and their reports, of identity checks, and of broker applications (all below). They are for staff accounts only.
 
 Suspended accounts are rejected on login, access-token validation, and token refresh. The refresh endpoint expects `{ "refreshToken": "..." }` in its JSON request body.
 
@@ -154,6 +154,32 @@ Only `published` listings are public. Any change to the data, photos or video of
 Each category has required photo shots (`src/domain/listings/photo-shots.js`); a listing cannot be submitted without them. Photos are uploaded one per request (at most two at a time per account, see Upload limits), up to 20 per listing, plus one video of at most a minute and 50 MB.
 
 The first staff account is made with `npm run seed:super-admin`, from `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD` and `SUPER_ADMIN_FULL_NAME`, and needs `SUPER_ADMIN_BOOTSTRAP_CONFIRM=CREATE_SUPER_ADMIN`. More are made with `npm run admin:grant -- <email>`, which promotes an account that already signed up. It never creates an account or handles a password, and needs `ADMIN_GRANT_CONFIRM=GRANT_ADMIN` in staging and production.
+
+## Reviewing identity checks and broker applications
+
+Staff decide what accounts ask for. Each decision writes an audit row and notifies the account, in one transaction; a request is decided once.
+
+**Identity checks** (`ADMIN_KYC_REVIEW`)
+
+| Request | What it does |
+|---|---|
+| `GET /admin/kyc?status=pending\|verified\|rejected&page=&limit=` | The queue. Pending is oldest first. Each item has the account (`id`, `name`, `email`, `phone`, `accountType`, `verified`), `kycStatus`, `kycVersion`, `submittedAt`, `reviewedAt`, `rejectionReason` and `documents`: which of `id-front`, `id-back`, `selfie` exist. |
+| `GET /admin/kyc/:userId` | One request, same shape. |
+| `GET /admin/kyc/:userId/documents/:document` | The photo itself (`id-front`, `id-back` or `selfie`), as an image with `Cache-Control: no-store`. Every look is audited. |
+| `POST /admin/kyc/:userId/approve` | Verifies the account. |
+| `POST /admin/kyc/:userId/reject` with `{ "reason": "..." }` | Refuses it; the reason (3 to 500 characters) is shown to the account. |
+
+**Broker applications** (`ADMIN_BROKER_REVIEW`)
+
+| Request | What it does |
+|---|---|
+| `GET /admin/broker-applications?status=PENDING\|APPROVED\|REJECTED&page=&limit=` | The queue. Each item has `id`, `status`, `submittedAt`, `reviewedAt`, `rejectionReason`, `hasDocument` and the `applicant`. |
+| `GET /admin/broker-applications/:id` | One application. |
+| `GET /admin/broker-applications/:id/document` | The document sent with it, as a private file. Every look is audited. |
+| `POST /admin/broker-applications/:id/approve` | The account becomes an approved broker and may post listings. |
+| `POST /admin/broker-applications/:id/reject` with `{ "reason": "..." }` | The account stays an ordinary one and may apply again. |
+
+Documents are never given as links: a client shows them by fetching these endpoints with the reviewer's token. Errors carry a `code`: `REVIEW_NOT_FOUND`, `REVIEW_DOCUMENT_NOT_FOUND`, `REVIEW_ALREADY_DECIDED` (409), `REVIEW_REASON_REQUIRED`, `REVIEW_ID_INVALID`, `REVIEW_QUERY_INVALID`.
 
 ## Throttling and HTTP hardening
 
