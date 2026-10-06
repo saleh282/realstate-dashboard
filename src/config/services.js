@@ -11,7 +11,6 @@ const { RefreshTokenService } = require('./../services/refresh-token.service');
 const { OutboxService } = require('./../services/outbox.service');
 const { CloudinaryAssetService } = require('./../services/cloudinary-asset.service');
 const { UsersService } = require('./../services/users.service');
-const { OperationalStatusService } = require('./../services/operational-status.service');
 const { AccountDeletionService } = require('./../services/account-deletion.service');
 const { OtpVerificationService } = require('./../services/otp-verification.service');
 const { MailService } = require('./../services/mail.service');
@@ -19,7 +18,6 @@ const { LegalDocumentsService } = require('./../services/legal-documents.service
 const { AuthService } = require('./../services/auth.service');
 const { BrokerApplicationsService } = require('./../services/broker-applications.service');
 const { GeocodingService } = require('./../services/geocoding.service');
-const { GovernoratesService } = require('./../services/governorates.service');
 const { HealthService } = require('./../services/health.service');
 const { KycService } = require('./../services/kyc.service');
 const { ClockService } = require('./../services/clock.service');
@@ -59,10 +57,6 @@ function createServices(connection, models, env = process.env) {
     services.OutboxService,
     services.CloudinaryAssetService,
   );
-  services.OperationalStatusService = new OperationalStatusService(
-    connection,
-    services.ConfigService,
-  );
   services.AccountDeletionService = new AccountDeletionService(
     models.User,
     models.AccountDeletionRequest,
@@ -101,11 +95,6 @@ function createServices(connection, models, env = process.env) {
     services.AuditLogService,
   );
   services.GeocodingService = geocoding.service;
-  services.GovernoratesService = new GovernoratesService(
-    models.Governorate,
-    models.City,
-    services.AuditLogService,
-  );
   services.HealthService = new HealthService(connection, services.ConfigService);
   services.KycService = new KycService(services.UsersService, services.CloudinaryAssetService);
   services.ClockService = new ClockService();

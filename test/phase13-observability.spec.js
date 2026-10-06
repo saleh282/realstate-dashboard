@@ -8,9 +8,6 @@ const {
   emitOperationalEvent,
   operationalMetrics,
 } = require('../src/common/observability/operational-metrics');
-const { OperationalStatusService } = require('../src/services/operational-status.service');
-const { AdminOperationsController } = require('../src/controllers/admin-operations.controller');
-const { Capability } = require('../src/domain/authorization/capability');
 function host(
   request = {
     method: 'POST',
@@ -114,85 +111,5 @@ describe('Phase 13 domain-rejection observability', () => {
       version: 3,
     });
     expect(operationalMetrics.snapshot()['events{form_definition_published}']).toBe(1);
-  });
-});
-describe('Phase 13 operational status', () => {
-  const now = new Date('2026-06-01T12:00:00Z');
-  const config = (values = {}) => ({
-    get: (key) => ({ NODE_ENV: 'production', DEPLOYMENT_ENV: 'production', ...values })[key],
-  });
-  const connection = (data) => ({
-    db: {
-      collection: (name) => {
-        if (data.failing) throw new Error('down');
-        if (name === 'migration_ledger')
-          return { find: () => ({ toArray: async () => data.ledger ?? [] }) };
-        if (name === 'migration_locks') return { findOne: async () => data.lock ?? null };
-        return {
-          countDocuments: async () => (data.cleanup ?? []).length,
-          find: () => ({
-            sort: () => ({
-              limit: () => ({ toArray: async () => (data.cleanup ?? []).slice(0, 1) }),
-            }),
-          }),
-        };
-      },
-    },
-  });
-  beforeEach(() => operationalMetrics.reset());
-  it('is quiet on a healthy system', async () => {
-    const status = await new OperationalStatusService(
-      connection({ ledger: [{ migrationId: 'a', status: 'complete' }] }),
-      config(),
-    ).status(now);
-    expect(status).toMatchObject({
-      deploymentEnv: 'production',
-      database: 'up',
-      migrations: { failed: [], running: [], lockHeld: false, complete: 1 },
-      attention: [],
-    });
-  });
-  it('flags a failed migration, an interrupted one (running without a held lock) and a stalled cleanup queue', async () => {
-    const service = new OperationalStatusService(
-      connection({
-        ledger: [
-          { migrationId: '022', status: 'failed' },
-          { migrationId: '023', status: 'running' },
-        ],
-        cleanup: [{ createdAt: new Date(now.getTime() - 2 * 3600_000) }],
-      }),
-      config({ CLEANUP_ALERT_AGE_SECONDS: '600' }),
-    );
-    const status = await service.status(now);
-    expect(status.attention).toEqual([
-      'migrations_failed',
-      'migrations_interrupted',
-      'evidence_cleanup_stalled',
-    ]);
-    expect(status.migrations).toMatchObject({ failed: ['022'], running: ['023'] });
-    expect(status.evidenceCleanup).toEqual({ pending: 1, oldestPendingAgeSeconds: 7200 });
-  });
-  it('a running migration WITH a live lock is normal progress, not an alert', async () => {
-    const status = await new OperationalStatusService(
-      connection({ ledger: [{ migrationId: '022', status: 'running' }], lock: { _id: 'global' } }),
-      config(),
-    ).status(now);
-    expect(status.attention).toEqual([]);
-  });
-  it('reports a database failure instead of throwing', async () => {
-    const status = await new OperationalStatusService(
-      connection({ failing: true }),
-      config(),
-    ).status(now);
-    expect(status).toMatchObject({ database: 'down', attention: ['database'] });
-  });
-  it('is served only to staff with the dashboard capability', () => {
-    const next = jest.fn();
-    require('../src/middleware/auth').requireCapabilities(Capability.ADMIN_DASHBOARD_READ)(
-      { user: {} },
-      {},
-      next,
-    );
-    expect(next.mock.calls[0][0].status).toBe(403);
   });
 });

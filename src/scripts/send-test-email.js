@@ -5,7 +5,7 @@ const { Logger } = require('../common/logging/logger');
 const { ConfigService } = require('../config/config');
 const { MailService } = require('../services/mail.service');
 async function sendTestEmail() {
-  const app = await createContext({ initialize: false });
+  const app = await createContext();
   try {
     const config = app.services.ConfigService;
     const recipient = config.get('TEST_EMAIL_TO')?.trim();

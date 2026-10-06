@@ -3,7 +3,6 @@ const { httpApp } = require('./support/http-app');
 require('reflect-metadata');
 const { BadRequestException, NotFoundException } = require('../src/common/http/errors');
 const { Types } = require('mongoose');
-const { AdminUsersController } = require('../src/controllers/admin-users.controller');
 const { AuditAction } = require('../src/models/audit-log.model');
 const { Capability } = require('../src/domain/authorization/capability');
 const { EvidenceErrorCode } = require('../src/common/errors/evidence-error-codes');
@@ -173,7 +172,7 @@ describe('profile photo', () => {
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
-  it('guards the endpoints with self-manage and admin-manage capabilities', () => {
+  it('guards the endpoints with the self-manage capability', () => {
     const policy = require('../src/middleware/auth');
     const next = jest.fn();
     policy.requireCapabilities(Capability.ACCOUNT_SELF_MANAGE)({ user: {} }, {}, next);

@@ -15,7 +15,7 @@ const { hashPassword } = require('../common/security/password-hashing');
 const { UsersService } = require('../services/users.service');
 const { guardAction } = require('../config/deployment-environment');
 async function seedAdmin() {
-  const app = await createContext({ initialize: false });
+  const app = await createContext();
   const config = app.services.ConfigService;
   const users = app.services.UsersService;
   try {

@@ -5,8 +5,6 @@ const { BrokerApplicationSchema } = require('./broker-application.model');
 const { BrokerVerificationDocumentSchema } = require('./broker-verification-document.model');
 const { IdempotencyRecordSchema } = require('./idempotency-record.model');
 const { EvidenceCleanupTaskSchema } = require('./evidence-cleanup-task.model');
-const { CitySchema } = require('./city.model');
-const { GovernorateSchema } = require('./governorate.model');
 const { LegalDocumentSchema } = require('./legal-document.model');
 const { NotificationDeliverySchema } = require('./notification-delivery.model');
 const { NotificationPreferenceSchema } = require('./notification-preference.model');
@@ -34,9 +32,6 @@ function createModels(connection) {
     EvidenceCleanupTask:
       connection.models.EvidenceCleanupTask ||
       connection.model('EvidenceCleanupTask', EvidenceCleanupTaskSchema),
-    City: connection.models.City || connection.model('City', CitySchema),
-    Governorate:
-      connection.models.Governorate || connection.model('Governorate', GovernorateSchema),
     LegalDocument:
       connection.models.LegalDocument || connection.model('LegalDocument', LegalDocumentSchema),
     NotificationDelivery:

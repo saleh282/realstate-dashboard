@@ -48,9 +48,7 @@ describe('V1 broker verification document contract', () => {
   });
   it('exposes only the fixed multipart field and no requirement routes', () => {
     const applicantController = readFileSync('src/routes/broker-applications.routes.js', 'utf8');
-    const adminController = readFileSync('src/routes/admin-broker-applications.routes.js', 'utf8');
     expect(applicantController).toContain("name: 'verificationDocument'");
     expect(applicantController).not.toContain("router.get('requirements')");
-    expect(adminController).not.toContain('broker-requirements');
   });
 });

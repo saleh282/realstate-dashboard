@@ -5,7 +5,7 @@ const { validateEnvironment } = require('./environment.validation');
 const { createModels } = require('../models');
 const { createServices } = require('./services');
 
-async function createContext({ env = process.env, initialize = true, workers = false } = {}) {
+async function createContext({ env = process.env, workers = false } = {}) {
   const config = validateEnvironment({ ...env });
   const connection = await mongoose
     .createConnection(config.MONGO_URI, { serverSelectionTimeoutMS: 10000 })
@@ -14,11 +14,8 @@ async function createContext({ env = process.env, initialize = true, workers = f
   try {
     const models = createModels(connection);
     services = createServices(connection, models, config);
-    // Validate the database environment BEFORE initializers can write catalog data.
+    // Validate the database environment before anything can write to it.
     await services.EnvironmentGuardService.onApplicationBootstrap();
-    if (initialize) {
-      await services.GovernoratesService.onModuleInit();
-    }
     services.NotificationsOutboxConsumer.onModuleInit();
     if (workers) {
       services.EvidenceCleanupWorker.onApplicationBootstrap();

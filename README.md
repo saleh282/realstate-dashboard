@@ -68,7 +68,7 @@ Cloudinary variables:
 - `CLOUDINARY_API_KEY`
 - `CLOUDINARY_API_SECRET`
 
-KYC images are checked for JPEG/PNG/WebP MIME and magic bytes, retain the 5 MB limit, and upload with Cloudinary authenticated delivery. New uploads store their `public_id` metadata so account deletion can remove them. The admin dashboard retrieves documents through an admin-protected streaming endpoint; direct Cloudinary URLs are not returned by the admin details response. Old records that contain only URLs cannot be streamed or automatically cleaned up until their asset metadata is migrated.
+KYC images are checked for JPEG/PNG/WebP MIME and magic bytes, retain the 5 MB limit, and upload with Cloudinary authenticated delivery. New uploads store their `public_id` metadata so account deletion can remove them. Old records that contain only URLs cannot be streamed or automatically cleaned up until their asset metadata is migrated.
 
 ## Reverse proxy and client IP (`TRUST_PROXY`)
 
@@ -148,10 +148,8 @@ This command sends a message without an OTP and does not expose a public test en
 Users default to role `user`. Admin accounts use role `admin`. JWT authentication attaches the current database role; `RolesGuard` performs authorization separately.
 
 - `POST /kyc/submit` and `GET /kyc/status`: authenticated users.
-- `POST /kyc/review/:userId`: authenticated admins only (`401` unauthenticated, `403` normal user).
-- `/admin/users`: admin-only listing, details, status, session revocation, role management, and protected deletion.
-- `/admin/kyc`: admin-only listing, review, and authenticated document streaming.
-- `/admin/audit-logs` and `/admin/dashboard/metrics`: admin-only audit and metrics APIs.
+
+There are no admin endpoints. The review logic (KYC, broker applications, account status, legal documents) stays in the services with nothing calling it over HTTP, until an admin tool is built.
 
 Suspended accounts are rejected on login, access-token validation, and token refresh. The refresh endpoint expects `{ "refreshToken": "..." }` in its JSON request body.
 
