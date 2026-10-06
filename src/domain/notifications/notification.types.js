@@ -4,10 +4,13 @@ var NotificationType;
 (function (NotificationType) {
   NotificationType['KYC_APPROVED'] = 'KYC_APPROVED';
   NotificationType['KYC_REJECTED'] = 'KYC_REJECTED';
+  NotificationType['LISTING_APPROVED'] = 'LISTING_APPROVED';
+  NotificationType['LISTING_REJECTED'] = 'LISTING_REJECTED';
 })(NotificationType || (NotificationType = {}));
 var NotificationTargetType;
 (function (NotificationTargetType) {
   NotificationTargetType['KYC'] = 'KYC';
+  NotificationTargetType['LISTING'] = 'LISTING';
 })(NotificationTargetType || (NotificationTargetType = {}));
 var NotificationPreferenceMode;
 (function (NotificationPreferenceMode) {

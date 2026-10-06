@@ -7,6 +7,8 @@ function registerRoutes(app, services) {
   app.use('/health', require('./health.routes').createRouter(services));
   app.use('/api/v1/kyc', require('./kyc.routes').createRouter(services));
   app.use('/api/v1/legal-documents', require('./legal-documents.routes').createRouter(services));
+  app.use('/api/v1/admin/listings', require('./admin-listings.routes').createRouter(services));
+  app.use('/api/v1/listings', require('./listings.routes').createRouter(services));
   app.use('/api/v1/notifications', require('./notifications.routes').createRouter(services));
   app.use('/api/v1/users', require('./users.routes').createRouter(services));
 }

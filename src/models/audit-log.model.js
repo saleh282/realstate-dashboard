@@ -4,6 +4,8 @@ const { Schema: mongooseSchema } = require('mongoose');
 const { Types } = require('mongoose');
 var AuditAction;
 (function (AuditAction) {
+  AuditAction['LISTING_APPROVED'] = 'listing_approved';
+  AuditAction['LISTING_REJECTED'] = 'listing_rejected';
   AuditAction['LOGIN_SUCCESS'] = 'login_success';
   AuditAction['LOGIN_FAILED'] = 'login_failed';
   AuditAction['REGISTER'] = 'register';

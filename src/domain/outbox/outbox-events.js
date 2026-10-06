@@ -34,11 +34,14 @@ var OutboxEventType;
 (function (OutboxEventType) {
   OutboxEventType['KYC_APPROVED'] = 'KYC_APPROVED';
   OutboxEventType['KYC_REJECTED'] = 'KYC_REJECTED';
+  OutboxEventType['LISTING_APPROVED'] = 'LISTING_APPROVED';
+  OutboxEventType['LISTING_REJECTED'] = 'LISTING_REJECTED';
 })(OutboxEventType || (OutboxEventType = {}));
 /** What the event is "about"; `(aggregateType, aggregateId)` is the ordering domain (see `aggregateVersion`). */
 var OutboxAggregateType;
 (function (OutboxAggregateType) {
   OutboxAggregateType['KYC'] = 'KYC';
+  OutboxAggregateType['LISTING'] = 'LISTING';
 })(OutboxAggregateType || (OutboxAggregateType = {}));
 var OutboxAudience;
 (function (OutboxAudience) {
@@ -48,11 +51,15 @@ var OutboxAudience;
 const OUTBOX_SCHEMA_VERSIONS = {
   [OutboxEventType.KYC_APPROVED]: 1,
   [OutboxEventType.KYC_REJECTED]: 1,
+  [OutboxEventType.LISTING_APPROVED]: 1,
+  [OutboxEventType.LISTING_REJECTED]: 1,
 };
 /** Which aggregate each event type belongs to (a producer cannot file an event under the wrong stream). */
 const OUTBOX_EVENT_AGGREGATES = {
   [OutboxEventType.KYC_APPROVED]: OutboxAggregateType.KYC,
   [OutboxEventType.KYC_REJECTED]: OutboxAggregateType.KYC,
+  [OutboxEventType.LISTING_APPROVED]: OutboxAggregateType.LISTING,
+  [OutboxEventType.LISTING_REJECTED]: OutboxAggregateType.LISTING,
 };
 /** The only account ids an event may carry, and only in `privateRouting`. */
 const OUTBOX_PRIVATE_ROUTING_KEYS = ['advertiserAccountId', 'subjectAccountId'];
@@ -193,6 +200,20 @@ const kycDecisionEvent = (input) =>
     { kycStatus: input.decision, kycVersion: input.kycVersion, reviewedAt: iso(input.occurredAt) },
     { subjectAccountId: input.accountId },
   );
+/** The review decision on a listing. The rejection reason stays on the listing, never in the event. */
+const listingDecisionEvent = (input) =>
+  draft(
+    input.approved ? OutboxEventType.LISTING_APPROVED : OutboxEventType.LISTING_REJECTED,
+    input.listingId,
+    input.occurredAt,
+    OutboxAudience.PRIVATE,
+    {
+      status: input.approved ? 'published' : 'rejected',
+      listingVersion: input.listingVersion,
+      reviewedAt: iso(input.occurredAt),
+    },
+    { advertiserAccountId: input.ownerId },
+  );
 
 Object.assign(exports, {
   OutboxEventType,
@@ -204,4 +225,5 @@ Object.assign(exports, {
   InvalidOutboxEventError,
   assertValidOutboxDraft,
   kycDecisionEvent,
+  listingDecisionEvent,
 });

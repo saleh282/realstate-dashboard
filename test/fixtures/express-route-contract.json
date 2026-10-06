@@ -200,6 +200,143 @@
     "status": "200"
   },
   {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/admin/listings",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_LISTING_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/admin/listings/:id",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_LISTING_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/admin/listings/:id/approve",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_LISTING_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/admin/listings/:id/reject",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_LISTING_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/listings",
+    "guards": []
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/listings/map",
+    "guards": []
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/listings/mine",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_MANAGE_OWN"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/listings/mine/:id",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_MANAGE_OWN"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/listings",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_CREATE"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "PUT",
+    "path": "/api/v1/listings/:id",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_CREATE"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "DELETE",
+    "path": "/api/v1/listings/:id",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_MANAGE_OWN"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/listings/:id/submit",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_CREATE"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/listings/:id/close",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_MANAGE_OWN"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "PUT",
+    "path": "/api/v1/listings/:id/photos/order",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_CREATE"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "PUT",
+    "path": "/api/v1/listings/:id/photos/:shot",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_CREATE"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/listings/:id/photos",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_CREATE"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "DELETE",
+    "path": "/api/v1/listings/:id/photos/:photoId",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_CREATE"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "PUT",
+    "path": "/api/v1/listings/:id/video",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_CREATE"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "DELETE",
+    "path": "/api/v1/listings/:id/video",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_CREATE"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/listings/:id",
+    "guards": []
+  },
+  {
     "controller": "NotificationsController",
     "action": "list",
     "method": "GET",

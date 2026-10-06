@@ -130,9 +130,28 @@ Users default to role `user`. Admin accounts use role `admin`. JWT authenticatio
 
 - `POST /kyc/submit` and `GET /kyc/status`: authenticated users.
 
-There are no admin endpoints. The review logic (KYC, broker applications, account status, legal documents) stays in the services with nothing calling it over HTTP, until an admin tool is built.
+The only admin endpoints are the review of listings (below). KYC and broker applications have no review path yet.
 
 Suspended accounts are rejected on login, access-token validation, and token refresh. The refresh endpoint expects `{ "refreshToken": "..." }` in its JSON request body.
+
+## Listings
+
+A listing is a property offered for sale, for rent or for transfer of its instalment contract.
+
+```
+draft --submit--> pending_review --approve--> published --close--> closed
+                        \--reject(reason)--> rejected
+```
+
+Only `published` listings are public. Any change to the data, photos or video of a listing that the review has seen sends it back to `pending_review`.
+
+- **Browsing (no sign-in):** `GET /listings` (filters, sort, pages), `GET /listings/map?bbox=south,west,north,east`, `GET /listings/:id`.
+- **The advertiser:** `POST /listings` creates a draft; `PUT /listings/:id` replaces its data and needs the `version` it started from; `PUT /listings/:id/photos/:shot` fills a required shot; `POST /listings/:id/photos` adds an extra photo; `PUT /listings/:id/video`; `POST /listings/:id/submit`; `POST /listings/:id/close`; `DELETE /listings/:id`; `GET /listings/mine`.
+- **The review (staff):** `GET /admin/listings`, `GET /admin/listings/:id`, `POST /admin/listings/:id/approve`, `POST /admin/listings/:id/reject` with a `reason`. Each decision writes an audit row and notifies the advertiser.
+
+Each category has required photo shots (`src/domain/listings/photo-shots.js`); a listing cannot be submitted without them. Photos are uploaded one per request (at most two at a time per account, see Upload limits), up to 20 per listing, plus one video of at most a minute and 50 MB.
+
+Staff accounts are made with `npm run admin:grant -- <email>`, which promotes an account that already signed up. It never creates an account or handles a password, and needs `ADMIN_GRANT_CONFIRM=GRANT_ADMIN` in staging and production.
 
 ## Throttling and HTTP hardening
 
@@ -169,6 +188,7 @@ Some documents under `docs/` still mention those features (the outbox and notifi
 npm run check
 npm test
 npm run build
+npm run admin:grant -- someone@example.com
 npm run mail:test
 ```
 

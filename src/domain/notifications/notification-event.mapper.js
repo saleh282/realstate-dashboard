@@ -11,6 +11,8 @@ const {
 const NOTIFICATION_SUBSCRIBED_EVENT_TYPES = Object.freeze([
   OutboxEventType.KYC_APPROVED,
   OutboxEventType.KYC_REJECTED,
+  OutboxEventType.LISTING_APPROVED,
+  OutboxEventType.LISTING_REJECTED,
 ]);
 function objectId(value, field) {
   if (
@@ -67,6 +69,28 @@ function mapNotificationEvent(event) {
           title: 'تم رفض التحقق',
           message: 'تم رفض طلب التحقق من الهوية. راجع حالة الطلب لمزيد من التفاصيل.',
           target: target(NotificationTargetType.KYC, event.aggregateId),
+        },
+      ];
+    case OutboxEventType.LISTING_APPROVED:
+      return [
+        {
+          ...common,
+          recipientAccountId: routing(event, 'advertiserAccountId'),
+          type: NotificationType.LISTING_APPROVED,
+          title: 'تم نشر إعلانك',
+          message: 'تمت مراجعة إعلانك والموافقة عليه، وهو الآن ظاهر للجميع.',
+          target: target(NotificationTargetType.LISTING, event.aggregateId),
+        },
+      ];
+    case OutboxEventType.LISTING_REJECTED:
+      return [
+        {
+          ...common,
+          recipientAccountId: routing(event, 'advertiserAccountId'),
+          type: NotificationType.LISTING_REJECTED,
+          title: 'لم تتم الموافقة على إعلانك',
+          message: 'افتح الإعلان من «إعلاناتي» لمعرفة السبب وتعديله ثم إرساله من جديد.',
+          target: target(NotificationTargetType.LISTING, event.aggregateId),
         },
       ];
     default:

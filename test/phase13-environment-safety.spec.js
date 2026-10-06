@@ -120,6 +120,7 @@ describe('Phase 13 action decision table', () => {
     MIGRATION_BACKUP_CONFIRM: 'snap-2026-01-01',
     MANIFEST_APPLY_CONFIRM: 'APPLY_MANIFEST',
     DESTRUCTIVE_CONFIRM: 'RESET_DISPOSABLE_DATABASE',
+    ADMIN_GRANT_CONFIRM: 'GRANT_ADMIN',
   };
   const allowed = {
     'migration:dry-run': [...DEPLOYMENT_ENVS],
@@ -130,6 +131,7 @@ describe('Phase 13 action decision table', () => {
     'destructive:reset': ['local'],
     'e2e:local': ['local', 'development'],
     'env:init': [...DEPLOYMENT_ENVS],
+    'admin:grant': [...DEPLOYMENT_ENVS],
   };
   it('covers every declared action', () =>
     expect(Object.keys(ACTION_RULES).sort()).toEqual(Object.keys(allowed).sort()));
@@ -158,6 +160,8 @@ describe('Phase 13 action decision table', () => {
     ['migration:apply', 'staging', 'MIGRATION_BACKUP_CONFIRM'],
     ['manifest:apply', 'production', 'MANIFEST_APPLY_CONFIRM'],
     ['destructive:reset', 'local', 'DESTRUCTIVE_CONFIRM'],
+    ['admin:grant', 'production', 'ADMIN_GRANT_CONFIRM'],
+    ['admin:grant', 'staging', 'ADMIN_GRANT_CONFIRM'],
   ])('%s in %s needs an explicit %s', (action, env, variable) => {
     expect(() => assertActionAllowed(action, env, {})).toThrow(variable);
     // Token confirmations must match exactly; the backup confirmation only needs a recorded snapshot id.
@@ -245,6 +249,7 @@ describe('Phase 13 every seeding / destructive / migration tool calls its enviro
     ['src/migrations/cli.js', 'migration:dry-run'],
     ['src/migrations/integrity-cli.js', 'integrity:read'],
     ['src/scripts/env-init.js', 'env:init'],
+    ['src/scripts/admin-grant.js', 'admin:grant'],
   ])('%s guards %s', (file, action) => {
     expect(source(file)).toMatch(new RegExp(`guardAction\\(\\s*[^)]*'${action}'`));
   });

@@ -151,6 +151,21 @@ const ACTION_RULES = {
   },
   'e2e:local': { allowed: NON_PROTECTED },
   'env:init': { allowed: ALL },
+  'admin:grant': {
+    allowed: ALL,
+    confirm: {
+      staging: {
+        variable: 'ADMIN_GRANT_CONFIRM',
+        value: 'GRANT_ADMIN',
+        hint: 'granting staff access',
+      },
+      production: {
+        variable: 'ADMIN_GRANT_CONFIRM',
+        value: 'GRANT_ADMIN',
+        hint: 'granting staff access',
+      },
+    },
+  },
 };
 /** Throws unless `action` may run in `deployment` with the given environment variables. */
 function assertActionAllowed(action, deployment, env) {

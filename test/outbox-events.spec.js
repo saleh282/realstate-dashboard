@@ -56,7 +56,9 @@ const codeOf = (fn) => {
 const withPayload = (payload) => ({ ...propertyEvent(), payload: payload });
 describe('event catalogue: names, versions, aggregates (MAZAD-031)', () => {
   it('covers every roadmap event with a stable machine-readable SCREAMING_SNAKE name', () => {
-    expect(Object.values(OutboxEventType).sort()).toEqual(['KYC_APPROVED', 'KYC_REJECTED'].sort());
+    expect(Object.values(OutboxEventType).sort()).toEqual(
+      ['KYC_APPROVED', 'KYC_REJECTED', 'LISTING_APPROVED', 'LISTING_REJECTED'].sort(),
+    );
     for (const name of Object.values(OutboxEventType))
       expect(name).toMatch(/^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/);
   });

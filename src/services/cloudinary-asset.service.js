@@ -57,6 +57,68 @@ class CloudinaryAssetService {
       });
     }
   }
+  /**
+   * Stores a photo of a listing for public delivery, scaled down to what a
+   * phone screen can show.
+   */
+  async uploadListingPhoto(file, detected) {
+    const result = await this.uploadPublicMedia(file, {
+      folder: 'real-estate/public/listings/photos',
+      resource_type: 'image',
+      transformation: [{ width: 1600, height: 1600, crop: 'limit', quality: 'auto' }],
+    });
+    return {
+      publicId: result.public_id,
+      secureUrl: result.secure_url,
+      resourceType: 'image',
+      deliveryType: 'upload',
+      classification: AssetClassification.PUBLIC_PROPERTY_MEDIA,
+      format: detected.format,
+      bytes: file.buffer.length,
+    };
+  }
+  /** Stores the video of a listing for public delivery. `duration` is in seconds. */
+  async uploadListingVideo(file) {
+    const result = await this.uploadPublicMedia(file, {
+      folder: 'real-estate/public/listings/videos',
+      resource_type: 'video',
+    });
+    return {
+      publicId: result.public_id,
+      secureUrl: result.secure_url,
+      resourceType: 'video',
+      deliveryType: 'upload',
+      classification: AssetClassification.PUBLIC_PROPERTY_MEDIA,
+      bytes: file.buffer.length,
+      duration: typeof result.duration === 'number' ? result.duration : undefined,
+    };
+  }
+  async uploadPublicMedia(file, options) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const stream = this.cloudinary.uploader.upload_stream(
+          {
+            type: 'upload',
+            use_filename: false,
+            unique_filename: true,
+            overwrite: false,
+            ...options,
+          },
+          (error, uploadResult) =>
+            error || !uploadResult
+              ? reject(error ?? new Error('Missing upload result'))
+              : resolve(uploadResult),
+        );
+        streamifier.createReadStream(file.buffer).pipe(stream);
+      });
+    } catch {
+      this.logger.error(`Listing ${options.resource_type} upload failed`);
+      throw new ServiceUnavailableException({
+        message: 'تعذر رفع الملف، حاول مرة أخرى لاحقاً',
+        code: EvidenceErrorCode.UPLOAD_FAILED,
+      });
+    }
+  }
   async uploadPrivateEvidence(file, folder, classification, detected) {
     const resourceType = detected.mime === 'application/pdf' ? 'raw' : 'image';
     try {

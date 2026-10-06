@@ -116,6 +116,8 @@ describe('notification event mapping and outbox consumer (MAZAD-036)', () => {
     expect(ctx.consumer.subscribedTypes).toEqual([
       OutboxEventType.KYC_APPROVED,
       OutboxEventType.KYC_REJECTED,
+      OutboxEventType.LISTING_APPROVED,
+      OutboxEventType.LISTING_REJECTED,
     ]);
     expect(ctx.consumer.subscribedTypes).toEqual(NOTIFICATION_SUBSCRIBED_EVENT_TYPES);
   });

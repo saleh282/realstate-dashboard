@@ -19,6 +19,8 @@ const MARKETPLACE_CAPABILITIES = new Set([
   Capability.KYC_SELF_SUBMIT,
   Capability.BROKER_APPLICATION_READ_OWN,
   Capability.BROKER_APPLICATION_SUBMIT,
+  Capability.LISTING_CREATE,
+  Capability.LISTING_MANAGE_OWN,
 ]);
 class AuthorizationPolicyService {
   static principal(identity) {
@@ -58,6 +60,9 @@ class AuthorizationPolicyService {
           principal.brokerStatus === BrokerStatus.APPROVED)
       );
     }
+    if (capability === Capability.ADMIN_LISTING_REVIEW) {
+      return staff && principal.accountStatus === AccountStatus.ACTIVE;
+    }
     if (staff) return false;
     const marketplace = principal.systemRole === SystemRole.USER;
     if (!marketplace) return false;
@@ -67,6 +72,17 @@ class AuthorizationPolicyService {
       capability === Capability.BROKER_APPLICATION_READ_OWN
     ) {
       return true;
+    }
+    if (capability === Capability.LISTING_MANAGE_OWN) {
+      // A suspended account may still read, close and delete what it posted.
+      return true;
+    }
+    if (capability === Capability.LISTING_CREATE) {
+      return (
+        principal.accountStatus === AccountStatus.ACTIVE &&
+        (principal.accountType !== AccountType.BROKER ||
+          principal.brokerStatus === BrokerStatus.APPROVED)
+      );
     }
     if (capability === Capability.BROKER_APPLICATION_SUBMIT) {
       return (

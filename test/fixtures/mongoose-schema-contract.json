@@ -258,41 +258,43 @@
       "action": {
         "instance": "String",
         "constraints": {
+          "required": true,
           "enum": {
-            "ACCOUNT_ANONYMIZATION_COMPLETED": "account_anonymization_completed",
-            "ACCOUNT_ANONYMIZATION_STARTED": "account_anonymization_started",
+            "LISTING_APPROVED": "listing_approved",
+            "LISTING_REJECTED": "listing_rejected",
+            "LOGIN_SUCCESS": "login_success",
+            "LOGIN_FAILED": "login_failed",
+            "REGISTER": "register",
+            "OTP_FAILED": "otp_failed",
+            "PASSWORD_RESET": "password_reset",
+            "PASSWORD_CHANGED": "password_changed",
+            "PROFILE_UPDATED": "profile_updated",
+            "LOGOUT": "logout",
             "ACCOUNT_DELETED": "account_deleted",
+            "ADMIN_USER_DELETED": "admin_user_deleted",
             "ACCOUNT_DELETION_REQUESTED": "account_deletion_requested",
             "ACCOUNT_DELETION_RESTORED": "account_deletion_restored",
             "ACCOUNT_LEGAL_HOLD_PLACED": "account_legal_hold_placed",
             "ACCOUNT_LEGAL_HOLD_REMOVED": "account_legal_hold_removed",
+            "ACCOUNT_ANONYMIZATION_STARTED": "account_anonymization_started",
+            "ACCOUNT_ANONYMIZATION_COMPLETED": "account_anonymization_completed",
             "ACCOUNT_PURGE_ELIGIBILITY_REVIEWED": "account_purge_eligibility_reviewed",
-            "ADMIN_BROKER_APPLICATION_REVIEWED": "admin_broker_application_reviewed",
-            "ADMIN_BROKER_RESTORED": "admin_broker_restored",
-            "ADMIN_BROKER_REVOKED": "admin_broker_revoked",
-            "ADMIN_BROKER_SUSPENDED": "admin_broker_suspended",
+            "ADMIN_USER_STATUS_UPDATED": "admin_user_status_updated",
+            "ADMIN_USER_SESSIONS_REVOKED": "admin_user_sessions_revoked",
+            "ADMIN_USER_ROLE_UPDATED": "admin_user_role_updated",
+            "ADMIN_USER_PHOTO_REMOVED": "admin_user_photo_removed",
             "ADMIN_KYC_REVIEWED": "admin_kyc_reviewed",
             "ADMIN_LEGAL_DOCUMENT_DRAFT_CREATED": "admin_legal_document_draft_created",
             "ADMIN_LEGAL_DOCUMENT_DRAFT_UPDATED": "admin_legal_document_draft_updated",
             "ADMIN_LEGAL_DOCUMENT_PUBLISHED": "admin_legal_document_published",
-            "ADMIN_USER_DELETED": "admin_user_deleted",
-            "ADMIN_USER_PHOTO_REMOVED": "admin_user_photo_removed",
-            "ADMIN_USER_ROLE_UPDATED": "admin_user_role_updated",
-            "ADMIN_USER_SESSIONS_REVOKED": "admin_user_sessions_revoked",
-            "ADMIN_USER_STATUS_UPDATED": "admin_user_status_updated",
-            "BROKER_APPLICATION_SUBMITTED": "broker_application_submitted",
-            "LOGIN_FAILED": "login_failed",
-            "LOGIN_SUCCESS": "login_success",
-            "LOGOUT": "logout",
-            "OTP_FAILED": "otp_failed",
-            "PASSWORD_CHANGED": "password_changed",
-            "PASSWORD_RESET": "password_reset",
-            "PRIVATE_EVIDENCE_ACCESSED": "private_evidence_accessed",
             "PRIVATE_EVIDENCE_UPLOADED": "private_evidence_uploaded",
-            "PROFILE_UPDATED": "profile_updated",
-            "REGISTER": "register"
-          },
-          "required": true
+            "PRIVATE_EVIDENCE_ACCESSED": "private_evidence_accessed",
+            "BROKER_APPLICATION_SUBMITTED": "broker_application_submitted",
+            "ADMIN_BROKER_APPLICATION_REVIEWED": "admin_broker_application_reviewed",
+            "ADMIN_BROKER_SUSPENDED": "admin_broker_suspended",
+            "ADMIN_BROKER_RESTORED": "admin_broker_restored",
+            "ADMIN_BROKER_REVOKED": "admin_broker_revoked"
+          }
         }
       },
       "ip": {
@@ -330,9 +332,9 @@
       "requestId": {
         "instance": "String",
         "constraints": {
-          "index": true,
+          "required": true,
           "maxlength": 100,
-          "required": true
+          "index": true
         }
       },
       "_id": {
@@ -1032,36 +1034,36 @@
     "indexes": [
       [
         {
-          "recipientAccountId": 1,
           "sourceEventId": 1,
+          "recipientAccountId": 1,
           "type": 1
         },
         {
-          "background": true,
+          "unique": true,
           "name": "notification_source_recipient_type_unique",
-          "unique": true
+          "background": true
         }
       ],
       [
         {
-          "_id": -1,
+          "recipientAccountId": 1,
           "createdAt": -1,
-          "recipientAccountId": 1
+          "_id": -1
         },
         {
-          "background": true,
-          "name": "notification_recipient_created"
+          "name": "notification_recipient_created",
+          "background": true
         }
       ],
       [
         {
-          "createdAt": -1,
+          "recipientAccountId": 1,
           "readAt": 1,
-          "recipientAccountId": 1
+          "createdAt": -1
         },
         {
-          "background": true,
-          "name": "notification_recipient_read_created"
+          "name": "notification_recipient_read_created",
+          "background": true
         }
       ]
     ],
@@ -1069,85 +1071,85 @@
       "recipientAccountId": {
         "instance": "Mixed",
         "constraints": {
-          "immutable": true,
           "ref": "User",
-          "required": true
+          "required": true,
+          "immutable": true
         }
       },
       "type": {
         "instance": "String",
         "constraints": {
-          "enum": ["KYC_APPROVED", "KYC_REJECTED"],
+          "required": true,
           "immutable": true,
-          "required": true
+          "enum": ["KYC_APPROVED", "KYC_REJECTED", "LISTING_APPROVED", "LISTING_REJECTED"]
         }
       },
       "schemaVersion": {
         "instance": "Number",
         "constraints": {
+          "required": true,
           "immutable": true,
-          "min": 1,
-          "required": true
+          "min": 1
         }
       },
       "sourceEventId": {
         "instance": "String",
         "constraints": {
+          "required": true,
           "immutable": true,
-          "match": "/^[a-f0-9]{24}$/",
-          "required": true
+          "match": "/^[a-f0-9]{24}$/"
         }
       },
       "aggregateType": {
         "instance": "String",
         "constraints": {
-          "immutable": true,
-          "required": true
+          "required": true,
+          "immutable": true
         }
       },
       "aggregateId": {
         "instance": "String",
         "constraints": {
+          "required": true,
           "immutable": true,
-          "match": "/^[a-f0-9]{24}$/",
-          "required": true
+          "match": "/^[a-f0-9]{24}$/"
         }
       },
       "required": {
         "instance": "Boolean",
         "constraints": {
-          "immutable": true,
-          "required": true
+          "required": true,
+          "immutable": true
         }
       },
       "title": {
         "instance": "String",
         "constraints": {
+          "required": true,
           "immutable": true,
-          "maxlength": 120,
-          "required": true
+          "maxlength": 120
         }
       },
       "message": {
         "instance": "String",
         "constraints": {
+          "required": true,
           "immutable": true,
-          "maxlength": 500,
-          "required": true
+          "maxlength": 500
         }
       },
       "target": {
         "instance": "Embedded",
         "constraints": {
-          "immutable": true,
-          "required": true
+          "required": true,
+          "immutable": true
         }
       },
       "createdAt": {
         "instance": "Date",
         "constraints": {
-          "immutable": true,
-          "required": true
+          "required": true,
+          "immutable": true
         }
       },
       "readAt": {
@@ -1241,14 +1243,14 @@
     "indexes": [
       [
         {
-          "aggregateId": 1,
           "aggregateType": 1,
+          "aggregateId": 1,
           "aggregateVersion": 1
         },
         {
-          "background": true,
+          "unique": true,
           "name": "outbox_aggregate_version",
-          "unique": true
+          "background": true
         }
       ]
     ],
@@ -1256,63 +1258,63 @@
       "type": {
         "instance": "String",
         "constraints": {
-          "enum": ["KYC_APPROVED", "KYC_REJECTED"],
+          "required": true,
           "immutable": true,
-          "required": true
+          "enum": ["KYC_APPROVED", "KYC_REJECTED", "LISTING_APPROVED", "LISTING_REJECTED"]
         }
       },
       "schemaVersion": {
         "instance": "Number",
         "constraints": {
+          "required": true,
           "immutable": true,
-          "min": 1,
-          "required": true
+          "min": 1
         }
       },
       "aggregateType": {
         "instance": "String",
         "constraints": {
-          "enum": ["KYC"],
+          "required": true,
           "immutable": true,
-          "required": true
+          "enum": ["KYC", "LISTING"]
         }
       },
       "aggregateId": {
         "instance": "String",
         "constraints": {
+          "required": true,
           "immutable": true,
-          "match": "/^[a-f0-9]{24}$/",
-          "required": true
+          "match": "/^[a-f0-9]{24}$/"
         }
       },
       "aggregateVersion": {
         "instance": "Number",
         "constraints": {
+          "required": true,
           "immutable": true,
-          "min": 1,
-          "required": true
+          "min": 1
         }
       },
       "occurredAt": {
         "instance": "Date",
         "constraints": {
-          "immutable": true,
-          "required": true
+          "required": true,
+          "immutable": true
         }
       },
       "audience": {
         "instance": "String",
         "constraints": {
-          "enum": ["PUBLIC", "PRIVATE"],
+          "required": true,
           "immutable": true,
-          "required": true
+          "enum": ["PUBLIC", "PRIVATE"]
         }
       },
       "payload": {
         "instance": "Mixed",
         "constraints": {
-          "immutable": true,
-          "required": true
+          "required": true,
+          "immutable": true
         }
       },
       "privateRouting": {
@@ -1837,6 +1839,356 @@
         "constraints": {
           "min": 0
         }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "ListingSchema": {
+    "collection": "listings",
+    "indexes": [
+      [
+        {
+          "status": 1,
+          "category": 1,
+          "purpose": 1,
+          "publishedAt": -1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "ownerId": 1,
+          "status": 1,
+          "updatedAt": -1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "status": 1,
+          "submittedAt": 1
+        },
+        {
+          "background": true
+        }
+      ],
+      [
+        {
+          "location": "2dsphere"
+        },
+        {
+          "background": true
+        }
+      ]
+    ],
+    "paths": {
+      "ownerId": {
+        "instance": "ObjectId",
+        "constraints": {
+          "ref": "User",
+          "required": true,
+          "immutable": true
+        }
+      },
+      "status": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "enum": ["draft", "pending_review", "published", "rejected", "closed"]
+        }
+      },
+      "version": {
+        "instance": "Number",
+        "constraints": {
+          "required": true
+        }
+      },
+      "category": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "enum": ["residential", "commercial", "industrial", "land"]
+        }
+      },
+      "purpose": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "enum": ["sale", "rent", "transfer"]
+        }
+      },
+      "subtype": {
+        "instance": "String",
+        "constraints": {
+          "required": true
+        }
+      },
+      "titleAr": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "maxlength": 150
+        }
+      },
+      "titleEn": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 150
+        }
+      },
+      "descriptionAr": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "maxlength": 3000
+        }
+      },
+      "descriptionEn": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 3000
+        }
+      },
+      "area": {
+        "instance": "Number",
+        "constraints": {
+          "required": true
+        }
+      },
+      "areaUnit": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "enum": ["sqm", "feddan"]
+        }
+      },
+      "areaSqm": {
+        "instance": "Number",
+        "constraints": {
+          "required": true
+        }
+      },
+      "bedrooms": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "bathrooms": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "floor": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "totalFloors": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "buildingYear": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "finishing": {
+        "instance": "String",
+        "constraints": {
+          "enum": ["core_and_shell", "semi_finished", "finished", "super_lux"]
+        }
+      },
+      "frontage": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "builtArea": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "ceilingHeight": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "powerKw": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "hasOperatingLicence": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "streets": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "waterSource": {
+        "instance": "String",
+        "constraints": {
+          "enum": ["well", "canal", "none"]
+        }
+      },
+      "legalStatus": {
+        "instance": "String",
+        "constraints": {
+          "enum": ["registered", "preliminary_contract", "power_of_attorney"]
+        }
+      },
+      "amenities": {
+        "instance": "Array",
+        "constraints": {}
+      },
+      "location.type": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "enum": ["Point"]
+        }
+      },
+      "location.coordinates": {
+        "instance": "Array",
+        "constraints": {
+          "required": true
+        }
+      },
+      "governorate": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "maxlength": 80
+        }
+      },
+      "city": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 80
+        }
+      },
+      "district": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "maxlength": 120
+        }
+      },
+      "street": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 160
+        }
+      },
+      "addressDetails": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 300
+        }
+      },
+      "price": {
+        "instance": "Number",
+        "constraints": {
+          "required": true
+        }
+      },
+      "negotiable": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "paymentMethod": {
+        "instance": "String",
+        "constraints": {
+          "enum": ["cash", "installments", "both"]
+        }
+      },
+      "downPayment": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "rentPeriod": {
+        "instance": "String",
+        "constraints": {
+          "enum": ["monthly", "yearly"]
+        }
+      },
+      "furnished": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "deposit": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "minContractMonths": {
+        "instance": "Number",
+        "constraints": {}
+      },
+      "transfer": {
+        "instance": "Embedded",
+        "constraints": {}
+      },
+      "photos": {
+        "instance": "Array",
+        "constraints": {}
+      },
+      "video": {
+        "instance": "Embedded",
+        "constraints": {}
+      },
+      "contactPhone": {
+        "instance": "String",
+        "constraints": {
+          "required": true
+        }
+      },
+      "showPhone": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "allowWhatsapp": {
+        "instance": "Boolean",
+        "constraints": {}
+      },
+      "rejectionReason": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500
+        }
+      },
+      "reviewedBy": {
+        "instance": "ObjectId",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "reviewedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "submittedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "publishedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "closedAt": {
+        "instance": "Date",
+        "constraints": {}
       },
       "_id": {
         "instance": "ObjectId",

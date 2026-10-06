@@ -9,6 +9,9 @@ var Capability;
   Capability['GEOCODING_USE'] = 'GEOCODING_USE';
   Capability['BROKER_APPLICATION_READ_OWN'] = 'BROKER_APPLICATION_READ_OWN';
   Capability['BROKER_APPLICATION_SUBMIT'] = 'BROKER_APPLICATION_SUBMIT';
+  Capability['LISTING_CREATE'] = 'LISTING_CREATE';
+  Capability['LISTING_MANAGE_OWN'] = 'LISTING_MANAGE_OWN';
+  Capability['ADMIN_LISTING_REVIEW'] = 'ADMIN_LISTING_REVIEW';
 })(Capability || (Capability = {}));
 
 Object.assign(exports, { Capability });

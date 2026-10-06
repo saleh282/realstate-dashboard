@@ -7,6 +7,8 @@ const UPLOAD_REQUEST_LIMITS = {
   kyc: 16 * MIB,
   profilePhoto: 6 * MIB,
   broker: 21 * MIB,
+  listingPhoto: 9 * MIB,
+  listingVideo: 51 * MIB,
 };
 
 Object.assign(exports, { UPLOAD_REQUEST_LIMITS });

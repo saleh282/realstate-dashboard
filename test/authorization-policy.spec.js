@@ -51,11 +51,34 @@ describe('authorization policy', () => {
       }
     },
   );
-  it('lets an active user manage the account, submit KYC, apply as a broker and look up addresses', () => {
+  it('lets an active user do everything but review listings', () => {
     for (const capability of Object.values(Capability)) {
-      expect(can(principal(), capability)).toBe(true);
+      expect(can(principal(), capability)).toBe(capability !== Capability.ADMIN_LISTING_REVIEW);
     }
   });
+  it('lets a suspended account manage its listings but not post new ones', () => {
+    const suspended = principal({ accountStatus: AccountStatus.SUSPENDED });
+    expect(can(suspended, Capability.LISTING_MANAGE_OWN)).toBe(true);
+    expect(can(suspended, Capability.LISTING_CREATE)).toBe(false);
+  });
+  it('lets a broker post listings only once approved', () => {
+    const broker = (brokerStatus) => principal({ accountType: AccountType.BROKER, brokerStatus });
+    expect(can(broker(BrokerStatus.APPROVED), Capability.LISTING_CREATE)).toBe(true);
+    expect(can(broker(BrokerStatus.PENDING), Capability.LISTING_CREATE)).toBe(false);
+    expect(can(broker(BrokerStatus.SUSPENDED), Capability.LISTING_CREATE)).toBe(false);
+  });
+  it.each([SystemRole.ADMIN, SystemRole.SUPER_ADMIN])(
+    'lets an active %s review listings but not post any',
+    (systemRole) => {
+      const staff = principal({ userId: id.admin, systemRole });
+      expect(can(staff, Capability.ADMIN_LISTING_REVIEW)).toBe(true);
+      expect(can(staff, Capability.LISTING_CREATE)).toBe(false);
+      expect(can(staff, Capability.LISTING_MANAGE_OWN)).toBe(false);
+      expect(
+        can({ ...staff, accountStatus: AccountStatus.SUSPENDED }, Capability.ADMIN_LISTING_REVIEW),
+      ).toBe(false);
+    },
+  );
   it('keeps suspended accounts read-capable and returns a stable mutation error', () => {
     const suspended = principal({ accountStatus: AccountStatus.SUSPENDED });
     expect(can(suspended, Capability.ACCOUNT_SELF_READ)).toBe(true);
