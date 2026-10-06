@@ -1,12 +1,19 @@
 'use strict';
 require('reflect-metadata');
 const mongoose = require('mongoose');
+const dns = require('node:dns');
 const { validateEnvironment } = require('./environment.validation');
 const { createModels } = require('../models');
 const { createServices } = require('./services');
 
 async function createContext({ env = process.env, workers = false } = {}) {
   const config = validateEnvironment({ ...env });
+  // Optional resolver override for networks that refuse Node's SRV lookups.
+  const dnsServers = String(env.DNS_SERVERS ?? '')
+    .split(',')
+    .map((server) => server.trim())
+    .filter(Boolean);
+  if (dnsServers.length) dns.setServers(dnsServers);
   const connection = await mongoose
     .createConnection(config.MONGO_URI, { serverSelectionTimeoutMS: 10000 })
     .asPromise();
