@@ -3,6 +3,7 @@
 function registerRoutes(app, services) {
   app.use('/api/v1/auth', require('./auth.routes').createRouter(services));
   app.use('/api/v1/broker', require('./broker-applications.routes').createRouter(services));
+  app.use('/api/v1/favourites', require('./favourites.routes').createRouter(services));
   app.use('/api/v1/geocoding', require('./geocoding.routes').createRouter(services));
   app.use('/health', require('./health.routes').createRouter(services));
   app.use('/api/v1/kyc', require('./kyc.routes').createRouter(services));

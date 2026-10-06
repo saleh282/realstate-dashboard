@@ -11,6 +11,7 @@ var Capability;
   Capability['BROKER_APPLICATION_SUBMIT'] = 'BROKER_APPLICATION_SUBMIT';
   Capability['LISTING_CREATE'] = 'LISTING_CREATE';
   Capability['LISTING_MANAGE_OWN'] = 'LISTING_MANAGE_OWN';
+  Capability['FAVOURITE_MANAGE_OWN'] = 'FAVOURITE_MANAGE_OWN';
   Capability['LISTING_REPORT'] = 'LISTING_REPORT';
   Capability['ADMIN_LISTING_REVIEW'] = 'ADMIN_LISTING_REVIEW';
 })(Capability || (Capability = {}));

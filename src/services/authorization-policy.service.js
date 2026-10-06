@@ -22,6 +22,7 @@ const MARKETPLACE_CAPABILITIES = new Set([
   Capability.LISTING_CREATE,
   Capability.LISTING_MANAGE_OWN,
   Capability.LISTING_REPORT,
+  Capability.FAVOURITE_MANAGE_OWN,
 ]);
 class AuthorizationPolicyService {
   static principal(identity) {
@@ -72,6 +73,10 @@ class AuthorizationPolicyService {
       capability === Capability.KYC_SELF_SUBMIT ||
       capability === Capability.BROKER_APPLICATION_READ_OWN
     ) {
+      return true;
+    }
+    if (capability === Capability.FAVOURITE_MANAGE_OWN) {
+      // A suspended account still sees and tidies what it saved.
       return true;
     }
     if (capability === Capability.LISTING_MANAGE_OWN) {

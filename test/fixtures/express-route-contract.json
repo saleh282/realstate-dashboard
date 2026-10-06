@@ -120,6 +120,27 @@
     "status": "200"
   },
   {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/favourites",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.FAVOURITE_MANAGE_OWN"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "PUT",
+    "path": "/api/v1/favourites/:listingId",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.FAVOURITE_MANAGE_OWN"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "DELETE",
+    "path": "/api/v1/favourites/:listingId",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.FAVOURITE_MANAGE_OWN"]
+  },
+  {
     "controller": "GeocodingController",
     "action": "reverse",
     "method": "GET",

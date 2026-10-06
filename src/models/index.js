@@ -3,6 +3,7 @@ const { AccountDeletionRequestSchema } = require('./account-deletion-request.mod
 const { AuditLogSchema } = require('./audit-log.model');
 const { BrokerApplicationSchema } = require('./broker-application.model');
 const { BrokerVerificationDocumentSchema } = require('./broker-verification-document.model');
+const { FavouriteSchema } = require('./favourite.model');
 const { IdempotencyRecordSchema } = require('./idempotency-record.model');
 const { EvidenceCleanupTaskSchema } = require('./evidence-cleanup-task.model');
 const { LegalDocumentSchema } = require('./legal-document.model');
@@ -28,6 +29,7 @@ function createModels(connection) {
     BrokerVerificationDocument:
       connection.models.BrokerVerificationDocument ||
       connection.model('BrokerVerificationDocument', BrokerVerificationDocumentSchema),
+    Favourite: connection.models.Favourite || connection.model('Favourite', FavouriteSchema),
     IdempotencyRecord:
       connection.models.IdempotencyRecord ||
       connection.model('IdempotencyRecord', IdempotencyRecordSchema),
