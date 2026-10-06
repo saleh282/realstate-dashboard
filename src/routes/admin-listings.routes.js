@@ -23,6 +23,7 @@ function createRouter(services) {
   router.get('/:id', ...staff, handle('reviewOne'));
   router.post('/:id/approve', ...staff, handle('approve'));
   router.post('/:id/reject', ...staff, handle('reject'));
+  router.post('/:id/unpublish', ...staff, handle('unpublish'));
   return router;
 }
 

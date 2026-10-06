@@ -13,6 +13,7 @@ const NOTIFICATION_SUBSCRIBED_EVENT_TYPES = Object.freeze([
   OutboxEventType.KYC_REJECTED,
   OutboxEventType.LISTING_APPROVED,
   OutboxEventType.LISTING_REJECTED,
+  OutboxEventType.LISTING_UNPUBLISHED,
 ]);
 function objectId(value, field) {
   if (
@@ -89,6 +90,17 @@ function mapNotificationEvent(event) {
           recipientAccountId: routing(event, 'advertiserAccountId'),
           type: NotificationType.LISTING_REJECTED,
           title: 'لم تتم الموافقة على إعلانك',
+          message: 'افتح الإعلان من «إعلاناتي» لمعرفة السبب وتعديله ثم إرساله من جديد.',
+          target: target(NotificationTargetType.LISTING, event.aggregateId),
+        },
+      ];
+    case OutboxEventType.LISTING_UNPUBLISHED:
+      return [
+        {
+          ...common,
+          recipientAccountId: routing(event, 'advertiserAccountId'),
+          type: NotificationType.LISTING_UNPUBLISHED,
+          title: 'تم إيقاف نشر إعلانك',
           message: 'افتح الإعلان من «إعلاناتي» لمعرفة السبب وتعديله ثم إرساله من جديد.',
           target: target(NotificationTargetType.LISTING, event.aggregateId),
         },

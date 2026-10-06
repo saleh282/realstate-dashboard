@@ -36,6 +36,7 @@ var OutboxEventType;
   OutboxEventType['KYC_REJECTED'] = 'KYC_REJECTED';
   OutboxEventType['LISTING_APPROVED'] = 'LISTING_APPROVED';
   OutboxEventType['LISTING_REJECTED'] = 'LISTING_REJECTED';
+  OutboxEventType['LISTING_UNPUBLISHED'] = 'LISTING_UNPUBLISHED';
 })(OutboxEventType || (OutboxEventType = {}));
 /** What the event is "about"; `(aggregateType, aggregateId)` is the ordering domain (see `aggregateVersion`). */
 var OutboxAggregateType;
@@ -53,6 +54,7 @@ const OUTBOX_SCHEMA_VERSIONS = {
   [OutboxEventType.KYC_REJECTED]: 1,
   [OutboxEventType.LISTING_APPROVED]: 1,
   [OutboxEventType.LISTING_REJECTED]: 1,
+  [OutboxEventType.LISTING_UNPUBLISHED]: 1,
 };
 /** Which aggregate each event type belongs to (a producer cannot file an event under the wrong stream). */
 const OUTBOX_EVENT_AGGREGATES = {
@@ -60,6 +62,7 @@ const OUTBOX_EVENT_AGGREGATES = {
   [OutboxEventType.KYC_REJECTED]: OutboxAggregateType.KYC,
   [OutboxEventType.LISTING_APPROVED]: OutboxAggregateType.LISTING,
   [OutboxEventType.LISTING_REJECTED]: OutboxAggregateType.LISTING,
+  [OutboxEventType.LISTING_UNPUBLISHED]: OutboxAggregateType.LISTING,
 };
 /** The only account ids an event may carry, and only in `privateRouting`. */
 const OUTBOX_PRIVATE_ROUTING_KEYS = ['advertiserAccountId', 'subjectAccountId'];
@@ -203,7 +206,11 @@ const kycDecisionEvent = (input) =>
 /** The review decision on a listing. The rejection reason stays on the listing, never in the event. */
 const listingDecisionEvent = (input) =>
   draft(
-    input.approved ? OutboxEventType.LISTING_APPROVED : OutboxEventType.LISTING_REJECTED,
+    input.approved
+      ? OutboxEventType.LISTING_APPROVED
+      : input.withdrawn
+        ? OutboxEventType.LISTING_UNPUBLISHED
+        : OutboxEventType.LISTING_REJECTED,
     input.listingId,
     input.occurredAt,
     OutboxAudience.PRIVATE,

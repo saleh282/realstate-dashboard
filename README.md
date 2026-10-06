@@ -147,7 +147,8 @@ Only `published` listings are public. Any change to the data, photos or video of
 
 - **Browsing (no sign-in):** `GET /listings` (filters, sort, pages), `GET /listings/map?bbox=south,west,north,east`, `GET /listings/:id`.
 - **The advertiser:** `POST /listings` creates a draft; `PUT /listings/:id` replaces its data and needs the `version` it started from; `PUT /listings/:id/photos/:shot` fills a required shot; `POST /listings/:id/photos` adds an extra photo; `PUT /listings/:id/video`; `POST /listings/:id/submit`; `POST /listings/:id/close`; `POST /listings/:id/reopen`; `DELETE /listings/:id`; `GET /listings/mine`.
-- **The review (staff):** `GET /admin/listings`, `GET /admin/listings/:id`, `POST /admin/listings/:id/approve`, `POST /admin/listings/:id/reject` with a `reason`. Each decision writes an audit row and notifies the advertiser.
+- **The review (staff):** `GET /admin/listings`, `GET /admin/listings/:id`, `POST /admin/listings/:id/approve`, `POST /admin/listings/:id/reject` with a `reason`, and `POST /admin/listings/:id/unpublish` with a `reason`, which takes a published listing down and hands it back to its advertiser as refused. Each decision writes an audit row and notifies the advertiser.
+- **Reports:** `POST /listings/:id/reports` with a `reason` (and optional `details`) from a signed-in account, once per listing; staff read them at `GET /admin/reports` and mark one as looked at with `POST /admin/reports/:id/review`.
 
 Each category has required photo shots (`src/domain/listings/photo-shots.js`); a listing cannot be submitted without them. Photos are uploaded one per request (at most two at a time per account, see Upload limits), up to 20 per listing, plus one video of at most a minute and 50 MB.
 

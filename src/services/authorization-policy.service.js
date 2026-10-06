@@ -21,6 +21,7 @@ const MARKETPLACE_CAPABILITIES = new Set([
   Capability.BROKER_APPLICATION_SUBMIT,
   Capability.LISTING_CREATE,
   Capability.LISTING_MANAGE_OWN,
+  Capability.LISTING_REPORT,
 ]);
 class AuthorizationPolicyService {
   static principal(identity) {
@@ -76,6 +77,9 @@ class AuthorizationPolicyService {
     if (capability === Capability.LISTING_MANAGE_OWN) {
       // A suspended account may still read, close and delete what it posted.
       return true;
+    }
+    if (capability === Capability.LISTING_REPORT) {
+      return principal.accountStatus === AccountStatus.ACTIVE;
     }
     if (capability === Capability.LISTING_CREATE) {
       return (

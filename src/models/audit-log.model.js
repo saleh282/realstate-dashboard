@@ -6,6 +6,8 @@ var AuditAction;
 (function (AuditAction) {
   AuditAction['LISTING_APPROVED'] = 'listing_approved';
   AuditAction['LISTING_REJECTED'] = 'listing_rejected';
+  AuditAction['LISTING_UNPUBLISHED'] = 'listing_unpublished';
+  AuditAction['LISTING_REPORT_REVIEWED'] = 'listing_report_reviewed';
   AuditAction['LOGIN_SUCCESS'] = 'login_success';
   AuditAction['LOGIN_FAILED'] = 'login_failed';
   AuditAction['REGISTER'] = 'register';

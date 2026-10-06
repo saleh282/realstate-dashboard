@@ -121,9 +121,17 @@ class FakeModel {
   countDocuments(filter = {}) {
     return query(() => this.docs.filter((doc) => matches(doc, filter)).length);
   }
-  findOneAndUpdate(filter, update) {
+  findOneAndUpdate(filter, update, options = {}) {
     return query(() => {
-      const doc = this.docs.find((item) => matches(item, filter));
+      let doc = this.docs.find((item) => matches(item, filter));
+      if (!doc && options.upsert) {
+        doc = {
+          _id: new Types.ObjectId(),
+          createdAt: new Date(),
+          ...clone(update.$setOnInsert ?? {}),
+        };
+        this.docs.push(doc);
+      }
       if (!doc) return null;
       for (const [field, value] of Object.entries(update.$set ?? {})) doc[field] = clone(value);
       for (const field of Object.keys(update.$unset ?? {})) delete doc[field];

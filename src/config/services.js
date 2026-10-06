@@ -9,6 +9,7 @@ const { CloudinaryAssetService } = require('./../services/cloudinary-asset.servi
 const { UsersService } = require('./../services/users.service');
 const { AccountDeletionService } = require('./../services/account-deletion.service');
 const { OtpVerificationService } = require('./../services/otp-verification.service');
+const { ListingReportsService } = require('./../services/listing-reports.service');
 const { ListingsService } = require('./../services/listings.service');
 const { MailService } = require('./../services/mail.service');
 const { LegalDocumentsService } = require('./../services/legal-documents.service');
@@ -106,6 +107,12 @@ function createServices(connection, models, env = process.env) {
     services.AuditLogService,
     services.OutboxService,
     connection,
+  );
+  services.ListingReportsService = new ListingReportsService(
+    models.ListingReport,
+    models.Listing,
+    models.User,
+    services.AuditLogService,
   );
   services.IdempotencyService = new IdempotencyService(models.IdempotencyRecord);
   services.JwtStrategy = new JwtStrategy(

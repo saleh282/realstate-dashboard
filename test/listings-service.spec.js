@@ -539,6 +539,35 @@ describe('the review', () => {
     expect(event.type).toBe('LISTING_REJECTED');
     expect(JSON.stringify(event)).not.toContain('الصور');
   });
+  it('a published listing is taken down with a reason and goes back to its advertiser', async () => {
+    const { service, posted, admin, auditLog, outbox, ownerId } = setup();
+    const waiting = await posted('pending_review');
+    // Only what is published can be taken down.
+    expect(await rejection(service.unpublish(admin, waiting.id, 'مخالف للشروط'))).toMatchObject({
+      status: 409,
+      code: ListingErrorCode.STATE_INVALID,
+    });
+    await service.approve(admin, waiting.id);
+    expect((await rejection(service.unpublish(admin, waiting.id, ' '))).code).toBe(
+      ListingErrorCode.REASON_REQUIRED,
+    );
+
+    const { listing } = await service.unpublish(admin, waiting.id, 'مخالف للشروط');
+    expect(listing).toMatchObject({ status: 'rejected', rejectionReason: 'مخالف للشروط' });
+    expect((await rejection(service.publicOne(waiting.id))).status).toBe(404);
+    expect(auditLog.logRequired.mock.calls.at(-1)[0]).toMatchObject({
+      action: 'listing_unpublished',
+      reason: 'مخالف للشروط',
+    });
+    expect(outbox.recordRequired.mock.calls.at(-1)[0].type).toBe('LISTING_UNPUBLISHED');
+    // Its advertiser corrects it and sends it again.
+    const mine = await service.mineOne(ownerId, waiting.id);
+    const { listing: edited } = await service.update(ownerId, waiting.id, {
+      ...apartmentForSale({ price: 2400000 }),
+      version: mine.version,
+    });
+    expect(edited.status).toBe('pending_review');
+  });
   it('a listing is decided once', async () => {
     const { service, posted, admin, auditLog } = setup();
     const waiting = await posted('pending_review');

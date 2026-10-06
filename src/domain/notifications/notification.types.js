@@ -6,6 +6,7 @@ var NotificationType;
   NotificationType['KYC_REJECTED'] = 'KYC_REJECTED';
   NotificationType['LISTING_APPROVED'] = 'LISTING_APPROVED';
   NotificationType['LISTING_REJECTED'] = 'LISTING_REJECTED';
+  NotificationType['LISTING_UNPUBLISHED'] = 'LISTING_UNPUBLISHED';
 })(NotificationType || (NotificationType = {}));
 var NotificationTargetType;
 (function (NotificationTargetType) {

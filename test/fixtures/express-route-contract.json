@@ -229,6 +229,34 @@
   },
   {
     "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/admin/listings/:id/unpublish",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_LISTING_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "GET",
+    "path": "/api/v1/admin/reports",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_LISTING_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/admin/reports/:id/review",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.ADMIN_LISTING_REVIEW"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/listings/:id/reports",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_REPORT"]
+  },
+  {
+    "controller": "ListingsController",
     "method": "GET",
     "path": "/api/v1/listings",
     "guards": []

@@ -262,6 +262,8 @@
           "enum": {
             "LISTING_APPROVED": "listing_approved",
             "LISTING_REJECTED": "listing_rejected",
+            "LISTING_UNPUBLISHED": "listing_unpublished",
+            "LISTING_REPORT_REVIEWED": "listing_report_reviewed",
             "LOGIN_SUCCESS": "login_success",
             "LOGIN_FAILED": "login_failed",
             "REGISTER": "register",
@@ -1081,7 +1083,13 @@
         "constraints": {
           "required": true,
           "immutable": true,
-          "enum": ["KYC_APPROVED", "KYC_REJECTED", "LISTING_APPROVED", "LISTING_REJECTED"]
+          "enum": [
+            "KYC_APPROVED",
+            "KYC_REJECTED",
+            "LISTING_APPROVED",
+            "LISTING_REJECTED",
+            "LISTING_UNPUBLISHED"
+          ]
         }
       },
       "schemaVersion": {
@@ -1260,7 +1268,13 @@
         "constraints": {
           "required": true,
           "immutable": true,
-          "enum": ["KYC_APPROVED", "KYC_REJECTED", "LISTING_APPROVED", "LISTING_REJECTED"]
+          "enum": [
+            "KYC_APPROVED",
+            "KYC_REJECTED",
+            "LISTING_APPROVED",
+            "LISTING_REJECTED",
+            "LISTING_UNPUBLISHED"
+          ]
         }
       },
       "schemaVersion": {
@@ -2187,6 +2201,102 @@
         "constraints": {}
       },
       "closedAt": {
+        "instance": "Date",
+        "constraints": {}
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
+  },
+  "ListingReportSchema": {
+    "collection": "listing_reports",
+    "indexes": [
+      [
+        {
+          "listingId": 1,
+          "reporterId": 1
+        },
+        {
+          "unique": true,
+          "background": true
+        }
+      ],
+      [
+        {
+          "status": 1,
+          "createdAt": -1
+        },
+        {
+          "background": true
+        }
+      ]
+    ],
+    "paths": {
+      "listingId": {
+        "instance": "ObjectId",
+        "constraints": {
+          "ref": "Listing",
+          "required": true,
+          "immutable": true
+        }
+      },
+      "reporterId": {
+        "instance": "ObjectId",
+        "constraints": {
+          "ref": "User",
+          "required": true,
+          "immutable": true
+        }
+      },
+      "reason": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "enum": [
+            "misleading",
+            "unavailable",
+            "wrong_price",
+            "duplicate",
+            "fraud",
+            "inappropriate",
+            "other"
+          ]
+        }
+      },
+      "details": {
+        "instance": "String",
+        "constraints": {
+          "maxlength": 500
+        }
+      },
+      "status": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "enum": ["open", "reviewed"]
+        }
+      },
+      "reviewedBy": {
+        "instance": "ObjectId",
+        "constraints": {
+          "ref": "User"
+        }
+      },
+      "reviewedAt": {
         "instance": "Date",
         "constraints": {}
       },

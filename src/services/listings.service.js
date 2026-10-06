@@ -510,19 +510,37 @@ class ListingsService {
   }
 
   /**
+   * Takes a published listing down. It goes back to its advertiser as
+   * refused, with the reason, to be corrected and sent again.
+   */
+  async unpublish(actor, id, reason) {
+    const text = typeof reason === 'string' ? reason.trim() : '';
+    if (text.length < 3 || text.length > 500) {
+      throw new BadRequestException({
+        message: 'اكتب سبب إيقاف الإعلان (من 3 إلى 500 حرف)',
+        code: ListingErrorCode.REASON_REQUIRED,
+      });
+    }
+    return this.decide(actor, id, { approved: false, reason: text, withdrawn: true });
+  }
+
+  /**
    * Records the review decision with its audit row and the advertiser's
    * notification in one transaction: all of them happen or none does.
    */
-  async decide(actor, id, { approved, reason }) {
+  async decide(actor, id, { approved, reason, withdrawn = false }) {
     const listingId = objectId(id);
     const now = this.clock();
     const updated = await runTransactionWithRetry(
       this.connection,
       async (session) => {
-        // Only a listing still waiting can be decided, so of two reviewers one wins.
+        // Only a listing still in the expected state can be decided, so of two reviewers one wins.
         const decided = await this.listings
           .findOneAndUpdate(
-            { _id: listingId, status: ListingStatus.PENDING_REVIEW },
+            {
+              _id: listingId,
+              status: withdrawn ? ListingStatus.PUBLISHED : ListingStatus.PENDING_REVIEW,
+            },
             {
               $set: {
                 status: approved ? ListingStatus.PUBLISHED : ListingStatus.REJECTED,
@@ -540,7 +558,11 @@ class ListingsService {
         if (!decided) return null;
         await this.auditLog.logRequired(
           {
-            action: approved ? AuditAction.LISTING_APPROVED : AuditAction.LISTING_REJECTED,
+            action: approved
+              ? AuditAction.LISTING_APPROVED
+              : withdrawn
+                ? AuditAction.LISTING_UNPUBLISHED
+                : AuditAction.LISTING_REJECTED,
             actorUserId: actor.userId,
             targetUserId: String(decided.ownerId),
             targetResourceId: String(decided._id),
@@ -552,6 +574,7 @@ class ListingsService {
         await this.outbox.recordRequired(
           listingDecisionEvent({
             approved,
+            withdrawn,
             listingId: String(decided._id),
             ownerId: String(decided.ownerId),
             listingVersion: decided.version,
@@ -566,10 +589,10 @@ class ListingsService {
     if (!updated) {
       const exists = await this.listings.findOne({ _id: listingId }).select('status').lean().exec();
       if (!exists || exists.status === ListingStatus.DRAFT) throw notFound();
-      throw stateInvalid('تمت مراجعة هذا الإعلان بالفعل');
+      throw stateInvalid(withdrawn ? 'الإعلان غير منشور' : 'تمت مراجعة هذا الإعلان بالفعل');
     }
     return {
-      message: approved ? 'تم نشر الإعلان' : 'تم رفض الإعلان',
+      message: approved ? 'تم نشر الإعلان' : withdrawn ? 'تم إيقاف نشر الإعلان' : 'تم رفض الإعلان',
       listing: reviewListing(updated, await this.ownerOf(updated)),
     };
   }

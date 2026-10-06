@@ -65,6 +65,13 @@ class ListingsController {
   approve(req) {
     return this.listings.approve({ userId: req.user.userId, ip: req.ip }, req.params.id);
   }
+  unpublish(req) {
+    return this.listings.unpublish(
+      { userId: req.user.userId, ip: req.ip },
+      req.params.id,
+      req.body?.reason,
+    );
+  }
   reject(req) {
     return this.listings.reject(
       { userId: req.user.userId, ip: req.ip },
