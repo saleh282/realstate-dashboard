@@ -151,6 +151,21 @@ const ACTION_RULES = {
   },
   'e2e:local': { allowed: NON_PROTECTED },
   'env:init': { allowed: ALL },
+  'seed:super-admin': {
+    allowed: ALL,
+    confirm: {
+      staging: {
+        variable: 'SUPER_ADMIN_BOOTSTRAP_CONFIRM',
+        value: 'CREATE_SUPER_ADMIN',
+        hint: 'staging bootstrap',
+      },
+      production: {
+        variable: 'PRODUCTION_BOOTSTRAP_CONFIRM',
+        value: 'CREATE_PRODUCTION_SUPER_ADMIN',
+        hint: 'break-glass production bootstrap',
+      },
+    },
+  },
   'admin:grant': {
     allowed: ALL,
     confirm: {

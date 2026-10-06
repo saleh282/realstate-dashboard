@@ -146,12 +146,12 @@ draft --submit--> pending_review --approve--> published --close--> closed
 Only `published` listings are public. Any change to the data, photos or video of a listing that the review has seen sends it back to `pending_review`.
 
 - **Browsing (no sign-in):** `GET /listings` (filters, sort, pages), `GET /listings/map?bbox=south,west,north,east`, `GET /listings/:id`.
-- **The advertiser:** `POST /listings` creates a draft; `PUT /listings/:id` replaces its data and needs the `version` it started from; `PUT /listings/:id/photos/:shot` fills a required shot; `POST /listings/:id/photos` adds an extra photo; `PUT /listings/:id/video`; `POST /listings/:id/submit`; `POST /listings/:id/close`; `DELETE /listings/:id`; `GET /listings/mine`.
+- **The advertiser:** `POST /listings` creates a draft; `PUT /listings/:id` replaces its data and needs the `version` it started from; `PUT /listings/:id/photos/:shot` fills a required shot; `POST /listings/:id/photos` adds an extra photo; `PUT /listings/:id/video`; `POST /listings/:id/submit`; `POST /listings/:id/close`; `POST /listings/:id/reopen`; `DELETE /listings/:id`; `GET /listings/mine`.
 - **The review (staff):** `GET /admin/listings`, `GET /admin/listings/:id`, `POST /admin/listings/:id/approve`, `POST /admin/listings/:id/reject` with a `reason`. Each decision writes an audit row and notifies the advertiser.
 
 Each category has required photo shots (`src/domain/listings/photo-shots.js`); a listing cannot be submitted without them. Photos are uploaded one per request (at most two at a time per account, see Upload limits), up to 20 per listing, plus one video of at most a minute and 50 MB.
 
-Staff accounts are made with `npm run admin:grant -- <email>`, which promotes an account that already signed up. It never creates an account or handles a password, and needs `ADMIN_GRANT_CONFIRM=GRANT_ADMIN` in staging and production.
+The first staff account is made with `npm run seed:super-admin`, from `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD` and `SUPER_ADMIN_FULL_NAME`, and needs `SUPER_ADMIN_BOOTSTRAP_CONFIRM=CREATE_SUPER_ADMIN`. More are made with `npm run admin:grant -- <email>`, which promotes an account that already signed up. It never creates an account or handles a password, and needs `ADMIN_GRANT_CONFIRM=GRANT_ADMIN` in staging and production.
 
 ## Throttling and HTTP hardening
 

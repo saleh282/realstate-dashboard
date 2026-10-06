@@ -377,6 +377,15 @@ describe('the life of a listing', () => {
     const draft = await posted();
     expect((await rejection(service.close(ownerId, draft.id))).status).toBe(409);
   });
+  it('a closed listing can be offered again, through the review', async () => {
+    const { service, ownerId, posted } = setup();
+    const listing = await posted('published');
+    expect((await rejection(service.reopen(ownerId, listing.id))).status).toBe(409);
+    await service.close(ownerId, listing.id);
+    const { listing: reopened } = await service.reopen(ownerId, listing.id);
+    expect(reopened).toMatchObject({ status: 'pending_review', closedAt: null });
+    expect((await rejection(service.publicOne(listing.id))).status).toBe(404);
+  });
   it('is deleted with its photos and video', async () => {
     const { service, ownerId, posted, assets, listings } = setup();
     const listing = await posted();

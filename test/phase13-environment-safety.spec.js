@@ -132,6 +132,7 @@ describe('Phase 13 action decision table', () => {
     'e2e:local': ['local', 'development'],
     'env:init': [...DEPLOYMENT_ENVS],
     'admin:grant': [...DEPLOYMENT_ENVS],
+    'seed:super-admin': [...DEPLOYMENT_ENVS],
   };
   it('covers every declared action', () =>
     expect(Object.keys(ACTION_RULES).sort()).toEqual(Object.keys(allowed).sort()));
@@ -161,6 +162,8 @@ describe('Phase 13 action decision table', () => {
     ['manifest:apply', 'production', 'MANIFEST_APPLY_CONFIRM'],
     ['destructive:reset', 'local', 'DESTRUCTIVE_CONFIRM'],
     ['admin:grant', 'production', 'ADMIN_GRANT_CONFIRM'],
+    ['seed:super-admin', 'production', 'PRODUCTION_BOOTSTRAP_CONFIRM'],
+    ['seed:super-admin', 'staging', 'SUPER_ADMIN_BOOTSTRAP_CONFIRM'],
     ['admin:grant', 'staging', 'ADMIN_GRANT_CONFIRM'],
   ])('%s in %s needs an explicit %s', (action, env, variable) => {
     expect(() => assertActionAllowed(action, env, {})).toThrow(variable);
@@ -250,6 +253,7 @@ describe('Phase 13 every seeding / destructive / migration tool calls its enviro
     ['src/migrations/integrity-cli.js', 'integrity:read'],
     ['src/scripts/env-init.js', 'env:init'],
     ['src/scripts/admin-grant.js', 'admin:grant'],
+    ['src/seeds/super-admin.seed.js', 'seed:super-admin'],
   ])('%s guards %s', (file, action) => {
     expect(source(file)).toMatch(new RegExp(`guardAction\\(\\s*[^)]*'${action}'`));
   });

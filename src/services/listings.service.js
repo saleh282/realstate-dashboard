@@ -206,6 +206,18 @@ class ListingsService {
     return { message: 'تم إغلاق الإعلان', listing: ownerListing(updated) };
   }
 
+  /** Offers a closed listing again; it is reviewed first. */
+  async reopen(ownerId, id) {
+    const listing = await this.own(ownerId, id);
+    if (listing.status !== ListingStatus.CLOSED) throw stateInvalid('الإعلان ليس مغلقاً');
+    const updated = await this.change(listing, {
+      $set: this.statusFields(listing, ListingStatus.PENDING_REVIEW),
+      $unset: { closedAt: '' },
+    });
+    if (!updated) throw versionConflict();
+    return { message: 'تم إرسال إعلانك وهو قيد المراجعة', listing: ownerListing(updated) };
+  }
+
   async remove(ownerId, id) {
     const listing = await this.own(ownerId, id);
     const deleted = await this.listings

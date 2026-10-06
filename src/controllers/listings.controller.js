@@ -17,6 +17,9 @@ class ListingsController {
   close(req) {
     return this.listings.close(req.user.userId, req.params.id);
   }
+  reopen(req) {
+    return this.listings.reopen(req.user.userId, req.params.id);
+  }
   remove(req) {
     return this.listings.remove(req.user.userId, req.params.id);
   }

@@ -71,6 +71,7 @@ function createRouter(services) {
   router.delete('/:id', writes, ...own, handle('remove'));
   router.post('/:id/submit', writes, ...edit, handle('submit'));
   router.post('/:id/close', writes, ...own, handle('close'));
+  router.post('/:id/reopen', writes, ...edit, handle('reopen'));
 
   router.put('/:id/photos/order', writes, ...edit, handle('orderPhotos'));
   router.put('/:id/photos/:shot', uploads, ...edit, photo, handle('putShot'));

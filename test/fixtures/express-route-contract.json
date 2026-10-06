@@ -290,6 +290,13 @@
   },
   {
     "controller": "ListingsController",
+    "method": "POST",
+    "path": "/api/v1/listings/:id/reopen",
+    "guards": ["JwtAuthGuard", "CapabilityGuard"],
+    "capabilities": ["Capability.LISTING_CREATE"]
+  },
+  {
+    "controller": "ListingsController",
     "method": "PUT",
     "path": "/api/v1/listings/:id/photos/order",
     "guards": ["JwtAuthGuard", "CapabilityGuard"],
