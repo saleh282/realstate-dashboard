@@ -6,6 +6,7 @@ var NotificationErrorCode;
   NotificationErrorCode['NOT_FOUND'] = 'NOTIFICATION_NOT_FOUND';
   NotificationErrorCode['QUERY_INVALID'] = 'NOTIFICATION_QUERY_INVALID';
   NotificationErrorCode['PREFERENCE_INVALID'] = 'NOTIFICATION_PREFERENCE_INVALID';
+  NotificationErrorCode['DEVICE_INVALID'] = 'NOTIFICATION_DEVICE_INVALID';
 })(NotificationErrorCode || (NotificationErrorCode = {}));
 
 Object.assign(exports, { NotificationErrorCode });

@@ -5,6 +5,7 @@ const { BrokerApplicationSchema } = require('./broker-application.model');
 const { BrokerVerificationDocumentSchema } = require('./broker-verification-document.model');
 const { FavouriteSchema } = require('./favourite.model');
 const { IdempotencyRecordSchema } = require('./idempotency-record.model');
+const { DeviceTokenSchema } = require('./device-token.model');
 const { EvidenceCleanupTaskSchema } = require('./evidence-cleanup-task.model');
 const { LegalDocumentSchema } = require('./legal-document.model');
 const { ListingSchema } = require('./listing.model');
@@ -33,6 +34,8 @@ function createModels(connection) {
     IdempotencyRecord:
       connection.models.IdempotencyRecord ||
       connection.model('IdempotencyRecord', IdempotencyRecordSchema),
+    DeviceToken:
+      connection.models.DeviceToken || connection.model('DeviceToken', DeviceTokenSchema),
     EvidenceCleanupTask:
       connection.models.EvidenceCleanupTask ||
       connection.model('EvidenceCleanupTask', EvidenceCleanupTaskSchema),

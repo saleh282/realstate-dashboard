@@ -78,6 +78,23 @@ function createRouter(services) {
       sendResponse(res, await controller.markRead(req, req.params['notificationId']), 200),
     ),
   );
+  // The phone this account is signed in on, for push notifications.
+  router.put(
+    '/devices',
+    rateLimit({ default: { limit: 20, ttl: 60000 } }),
+    authenticate(services.JwtStrategy),
+    asyncHandler(async (req, res) =>
+      sendResponse(res, await services.PushService.register(req.user.userId, req.body), 200),
+    ),
+  );
+  // No sign-in: it is called while signing out, and the token itself is what proves the phone.
+  router.delete(
+    '/devices',
+    rateLimit({ default: { limit: 20, ttl: 60000 } }),
+    asyncHandler(async (req, res) =>
+      sendResponse(res, await services.PushService.unregister(req.body), 200),
+    ),
+  );
   return router;
 }
 

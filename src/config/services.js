@@ -11,6 +11,9 @@ const { UsersService } = require('./../services/users.service');
 const { AccountDeletionService } = require('./../services/account-deletion.service');
 const { OtpVerificationService } = require('./../services/otp-verification.service');
 const { FavouritesService } = require('./../services/favourites.service');
+const { FcmPushSender } = require('./../services/fcm-push.sender');
+const { PushService } = require('./../services/push.service');
+const { PushOutboxConsumer } = require('./../services/push-outbox.consumer');
 const { ListingReportsService } = require('./../services/listing-reports.service');
 const { ListingsService } = require('./../services/listings.service');
 const { MailService } = require('./../services/mail.service');
@@ -146,6 +149,14 @@ function createServices(connection, models, env = process.env) {
     connection,
     models.Notification,
     models.NotificationDelivery,
+  );
+  services.PushService = new PushService(
+    models.DeviceToken,
+    FcmPushSender.fromEnvironment(services.ConfigService),
+  );
+  services.PushOutboxConsumer = new PushOutboxConsumer(
+    services.OutboxConsumerRegistry,
+    services.PushService,
   );
   services.OutboxDispatcherService = new OutboxDispatcherService(
     models.OutboxEvent,

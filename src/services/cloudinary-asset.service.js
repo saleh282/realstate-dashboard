@@ -272,8 +272,8 @@ class CloudinaryAssetService {
     const legacyPublic = !asset.deliveryType || asset.deliveryType === 'upload';
     const shouldAppendFormat = Boolean(
       asset.resourceType !== 'raw' &&
-      format &&
-      !asset.publicId.toLowerCase().endsWith(`.${format.toLowerCase()}`),
+        format &&
+        !asset.publicId.toLowerCase().endsWith(`.${format.toLowerCase()}`),
     );
     const deliveryUrl =
       legacyPublic && asset.secureUrl

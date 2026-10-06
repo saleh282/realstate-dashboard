@@ -2375,5 +2375,67 @@
         }
       }
     }
+  },
+  "DeviceTokenSchema": {
+    "collection": "device_tokens",
+    "indexes": [
+      [
+        {
+          "token": 1
+        },
+        {
+          "unique": true,
+          "background": true
+        }
+      ],
+      [
+        {
+          "userId": 1,
+          "updatedAt": -1
+        },
+        {
+          "background": true
+        }
+      ]
+    ],
+    "paths": {
+      "token": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "maxlength": 4096
+        }
+      },
+      "userId": {
+        "instance": "ObjectId",
+        "constraints": {
+          "ref": "User",
+          "required": true
+        }
+      },
+      "platform": {
+        "instance": "String",
+        "constraints": {
+          "required": true,
+          "enum": ["android", "ios"]
+        }
+      },
+      "_id": {
+        "instance": "ObjectId",
+        "constraints": {
+          "auto": true
+        }
+      },
+      "createdAt": {
+        "instance": "Date",
+        "constraints": {
+          "immutable": true
+        }
+      },
+      "updatedAt": {
+        "instance": "Date",
+        "constraints": {}
+      }
+    }
   }
 }

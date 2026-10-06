@@ -740,17 +740,21 @@ describe('scope: which consumers exist (MAZAD-031 closure; updated deliberately 
   const files = walk(path.join(__dirname, '..', 'src')).filter((f) => f.endsWith('.js'));
   const text = (f) => fs.readFileSync(f, 'utf8');
   const inRealtime = (f) => f.includes(`${path.sep}src${path.sep}secondary${path.sep}`);
-  it('the registered consumer is notifications; no SSE or external push provider exists', () => {
+  it('the registered consumers are notifications and push; no SSE exists, and Firebase is used by the push sender only', () => {
     for (const file of files) {
       const source = text(file);
       const consumerFile =
         file.endsWith(`${path.sep}secondary-outbox.consumer.js`) ||
-        file.endsWith(`${path.sep}notifications-outbox.consumer.js`);
+        file.endsWith(`${path.sep}notifications-outbox.consumer.js`) ||
+        file.endsWith(`${path.sep}push-outbox.consumer.js`);
       if (!file.endsWith(`${path.sep}outbox-consumer.port.js`) && !consumerFile)
         expect(source).not.toMatch(/\.register\(\s*\{[^}]*name:|registry\.register\(/);
       // The WebSocket stack belongs to the secondary module (and only the adapter line in app.setup); nothing else may use it.
       if (!inRealtime(file)) expect(source).not.toMatch(/@WebSocketGateway|@nestjs\/websockets/);
-      expect(source).not.toMatch(/socket\.io|@Sse\(|firebase-admin|web-push|nodemailer.*outbox/i);
+      expect(source).not.toMatch(/socket\.io|@Sse\(|web-push|nodemailer.*outbox/i);
+      // The one place that talks to the push provider.
+      if (!file.endsWith(`${path.sep}fcm-push.sender.js`))
+        expect(source).not.toMatch(/firebase-admin/i);
       if (!inRealtime(file))
         expect(source).not.toMatch(
           /class\s+\w*Realtime\w*Consumer|name\s*[:=]\s*['"]secondary['"]/,
@@ -762,6 +766,7 @@ describe('scope: which consumers exist (MAZAD-031 closure; updated deliberately 
     );
     expect(registrations.map((f) => path.basename(f)).sort()).toEqual([
       'notifications-outbox.consumer.js',
+      'push-outbox.consumer.js',
     ]);
   });
   it('the immutable event stays written exactly once by the producer: OutboxService is the only writer and never mentions a consumer', () => {

@@ -523,6 +523,18 @@
     "status": "200"
   },
   {
+    "controller": "ListingsController",
+    "method": "PUT",
+    "path": "/api/v1/notifications/devices",
+    "guards": ["JwtAuthGuard"]
+  },
+  {
+    "controller": "ListingsController",
+    "method": "DELETE",
+    "path": "/api/v1/notifications/devices",
+    "guards": []
+  },
+  {
     "controller": "UsersController",
     "action": "getProfile",
     "method": "GET",

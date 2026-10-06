@@ -17,6 +17,7 @@ async function createContext({ env = process.env, workers = false } = {}) {
     // Validate the database environment before anything can write to it.
     await services.EnvironmentGuardService.onApplicationBootstrap();
     services.NotificationsOutboxConsumer.onModuleInit();
+    services.PushOutboxConsumer.onModuleInit();
     if (workers) {
       services.EvidenceCleanupWorker.onApplicationBootstrap();
       services.OutboxDispatcherWorker.onApplicationBootstrap();

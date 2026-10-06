@@ -155,6 +155,15 @@ Each category has required photo shots (`src/domain/listings/photo-shots.js`); a
 
 The first staff account is made with `npm run seed:super-admin`, from `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD` and `SUPER_ADMIN_FULL_NAME`, and needs `SUPER_ADMIN_BOOTSTRAP_CONFIRM=CREATE_SUPER_ADMIN`. More are made with `npm run admin:grant -- <email>`, which promotes an account that already signed up. It never creates an account or handles a password, and needs `ADMIN_GRANT_CONFIRM=GRANT_ADMIN` in staging and production.
 
+## Push notifications
+
+Every notification written to an account's inbox is also pushed to its phones through Firebase Cloud Messaging, by a second outbox consumer (`push`) beside the inbox one, so a push that fails is tried again on its own.
+
+- `FIREBASE_SERVICE_ACCOUNT_FILE` is the path of the Firebase service account key file. Keep the file outside the repository. Without it the backend runs as before and sends no pushes, and the `push` consumer is not registered.
+- `PUT /notifications/devices` with `{ "token": "...", "platform": "android" | "ios" }` registers the phone for the signed-in account. A phone belongs to one account at a time: it moves to whoever signs in on it. An account keeps its ten most recent phones.
+- `DELETE /notifications/devices` with `{ "token": "..." }` forgets the phone. It needs no sign-in, because the app calls it while signing out; knowing the token is what allows it.
+- A push carries `type`, `targetType` and `targetId` as data, for the app to open the right screen. Phones that Firebase reports as gone are forgotten. An event older than an hour is not pushed.
+
 ## Reviewing identity checks and broker applications
 
 Staff decide what accounts ask for. Each decision writes an audit row and notifies the account, in one transaction; a request is decided once.
