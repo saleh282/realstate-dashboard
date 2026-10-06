@@ -182,7 +182,7 @@ Auctions, favourites, property listings (with their forms, catalogs and amenitie
 node src/migrations/cli.js --apply --migration=039-legal-documents
 ```
 
-Documents under `docs/` describe the system before these removals.
+Some documents under `docs/` still mention those features (the outbox and notification rollouts in particular); the code is the reference.
 
 ## Commands
 

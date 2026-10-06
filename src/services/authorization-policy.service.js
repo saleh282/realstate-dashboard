@@ -25,14 +25,11 @@ const ADMIN_CAPABILITIES = new Set([
   Capability.ADMIN_PROPERTY_PROXY_CREATE,
   Capability.ADMIN_BROKER_REVIEW,
   Capability.ADMIN_CATALOG_MANAGE,
-  Capability.ADMIN_MANAGED_MARKETING_MANAGE,
 ]);
 const MARKETPLACE_MUTATIONS = new Set([
   Capability.PROPERTY_CREATE,
   Capability.PROPERTY_MANAGE_OWN,
-  Capability.MANAGED_MARKETING_REQUEST,
   Capability.BROKER_APPLICATION_SUBMIT,
-  Capability.BROKER_INTEREST_MANAGE,
 ]);
 const MARKETPLACE_CAPABILITIES = new Set([
   Capability.KYC_SELF_READ,
@@ -41,10 +38,8 @@ const MARKETPLACE_CAPABILITIES = new Set([
   Capability.PROPERTY_READ_OWN,
   Capability.PROPERTY_MANAGE_OWN,
   Capability.FAVORITE_MANAGE_OWN,
-  Capability.MANAGED_MARKETING_REQUEST,
   Capability.BROKER_APPLICATION_READ_OWN,
   Capability.BROKER_APPLICATION_SUBMIT,
-  Capability.BROKER_INTEREST_MANAGE,
 ]);
 class AuthorizationPolicyService {
   static principal(identity) {
@@ -78,13 +73,7 @@ class AuthorizationPolicyService {
     ) {
       return true;
     }
-    if (
-      capability === Capability.SUPER_ADMIN_ROLE_MANAGE ||
-      capability === Capability.ADMIN_FORM_DEFINITION_PUBLISH
-    ) {
-      // Publishing, archiving or restoring a property form changes what every
-      // client may write, so it is SUPER_ADMIN governance (DPF-030); Admins
-      // read and prepare drafts through ADMIN_CATALOG_MANAGE.
+    if (capability === Capability.SUPER_ADMIN_ROLE_MANAGE) {
       return (
         principal.systemRole === SystemRole.SUPER_ADMIN &&
         principal.accountStatus === AccountStatus.ACTIVE
@@ -127,18 +116,6 @@ class AuthorizationPolicyService {
         )
       );
     }
-    if (capability === Capability.BROKER_INTEREST_MANAGE) {
-      return (
-        principal.accountType === AccountType.BROKER &&
-        principal.brokerStatus === BrokerStatus.APPROVED
-      );
-    }
-    if (capability === Capability.MANAGED_MARKETING_REQUEST) {
-      // A managed-marketing request is an own-property platform service, not a
-      // broker activity. Property commands retain their broker eligibility
-      // rules, while the service enforces ownership and revision eligibility.
-      return true;
-    }
     if (
       capability === Capability.PROPERTY_CREATE ||
       capability === Capability.PROPERTY_MANAGE_OWN
@@ -170,9 +147,8 @@ class AuthorizationPolicyService {
       );
     }
     if (
-      capability === Capability.BROKER_INTEREST_MANAGE ||
-      (principal.accountType === AccountType.BROKER &&
-        principal.brokerStatus !== BrokerStatus.APPROVED)
+      principal.accountType === AccountType.BROKER &&
+      principal.brokerStatus !== BrokerStatus.APPROVED
     ) {
       throw this.denied(
         'هذه العملية تتطلب حساب وسيط معتمداً ونشطاً',

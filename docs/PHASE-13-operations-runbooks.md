@@ -74,7 +74,7 @@ has **no automatic rollback** it says so. Structured events are single-line JSON
   calling `verify` again (a callback is only a trigger). `PAYMENT_RECONCILIATION_REQUIRED` means the server flagged a mismatch
   (amount/currency/reference, success after failure): an operator must reconcile before another attempt can be opened.
 
-* **MAZAD-028 lifecycle** (see `docs/MAZAD-028-payment-lifecycle.md`): the reconciliation worker verifies INITIATED attempts of both
+* **MAZAD-028 lifecycle**: the reconciliation worker verifies INITIATED attempts of both
   purposes with a database lease and backoff, and expires them (`EXPIRED`, kept forever) only after a final verification still says
   pending. `PAYMENT_ATTEMPT_TTL_SECONDS` has **no production default**; a protected deployment must set it before enabling the worker.
   The operations status reports `payments.{pending,due,stale,expired,flagged,confirmedAfterExpiry}`.

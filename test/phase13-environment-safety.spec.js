@@ -132,7 +132,6 @@ describe('Phase 13 action decision table', () => {
     'manifest:apply': [...DEPLOYMENT_ENVS],
     'destructive:reset': ['local'],
     'e2e:local': ['local', 'development'],
-    'fake-payments': ['local', 'development'],
     'env:init': [...DEPLOYMENT_ENVS],
   };
   it('covers every declared action', () =>
@@ -147,8 +146,8 @@ describe('Phase 13 action decision table', () => {
       }
     },
   );
-  it('never lets production reset, seed the dev admin, run the local E2E or use fake payments', () => {
-    for (const action of ['destructive:reset', 'seed:dev-admin', 'e2e:local', 'fake-payments']) {
+  it('never lets production reset, seed the dev admin or run the local E2E', () => {
+    for (const action of ['destructive:reset', 'seed:dev-admin', 'e2e:local']) {
       expect(() => assertActionAllowed(action, 'production', confirmations)).toThrow(
         EnvironmentSafetyError,
       );

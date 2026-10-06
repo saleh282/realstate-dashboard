@@ -11,10 +11,6 @@ This inventory freezes the V1 authorization classification. Capability responses
 | `PATCH /users/me`, password, delete | Authenticated self management | `ACCOUNT_SELF_MANAGE` |
 | `GET /kyc/status` | Marketplace-account self read | `KYC_SELF_READ`; trust state is not a marketplace gate |
 | `POST /kyc/submit` | Marketplace-account trust submission | `KYC_SELF_SUBMIT`; trust state is not a marketplace gate |
-| Public catalog/property lists | Public | Active catalog or approved/public property filter |
-| `POST /properties` | Marketplace mutation | `PROPERTY_CREATE`, ACTIVE account, staff forbidden, approved BROKER state when advertising as BROKER |
-| `GET /properties/mine*` | Owner/resource-scoped read | `PROPERTY_READ_OWN` plus advertiser-account predicate; unknown/foreign IDs return not found |
-| `PATCH /properties/mine/:id/visibility` | Owner/resource-scoped mutation | `PROPERTY_MANAGE_OWN`, ACTIVE account, advertiser-account predicate |
 | `GET /broker/requirements`, own applications/documents | Authenticated professional self read | `BROKER_APPLICATION_READ_OWN` plus applicant predicate for private evidence |
 | `POST /broker/applications` | Professional mutation | `BROKER_APPLICATION_SUBMIT`: ACTIVE USER with eligible broker state |
 | `/admin/companies` | Admin-only | `COMPANY_CREATE`; service creates only USER-role COMPANY principals |
@@ -22,15 +18,9 @@ This inventory freezes the V1 authorization classification. Capability responses
 | Admin user status/session/delete | Admin-only target-scoped mutation | `ADMIN_ACCOUNT_MANAGE` plus target-governance rules |
 | Admin role update | SUPER_ADMIN-only | `SUPER_ADMIN_ROLE_MANAGE`; product cannot create/promote SUPER_ADMIN |
 | `/admin/kyc*` | Admin review | `ADMIN_KYC_REVIEW` plus private-evidence delivery checks |
-| `/admin/properties*` | Admin review/proxy | `ADMIN_PROPERTY_REVIEW`; proxy creation overrides with `ADMIN_PROPERTY_PROXY_CREATE` and validates target account |
 | `/admin/broker*`, broker requirements | Admin review | `ADMIN_BROKER_REVIEW`; optimistic state/version transitions remain authoritative |
 | Admin catalog endpoints | Admin-only | `ADMIN_CATALOG_MANAGE` |
-| `/admin/property-attributes` (read), `/admin/property-form-definitions` reads, definition creation, draft open/save/validate/diff/discard | Admin-only | `ADMIN_CATALOG_MANAGE`; draft commands carry `expectedVersion` / `expectedDraftRevision` |
-| `/admin/property-form-definitions/:id/publish`, `/archive`, `/restore` | SUPER_ADMIN-only | `ADMIN_FORM_DEFINITION_PUBLISH` (DPF-030); optimistic tokens and one audited transaction |
 | `/admin/audit-logs` | Admin-only read | `ADMIN_AUDIT_READ` |
 | `/admin/dashboard/metrics` | Admin-only read | `ADMIN_DASHBOARD_READ` |
 | `/admin/operations/status` | Admin-only read (Phase 13 operator diagnostics) | `ADMIN_DASHBOARD_READ` |
 
-
-
-MAZAD-028 adds `POST /managed-marketing/requests/:requestId/payment` (`MANAGED_MARKETING_REQUEST`, the request's own advertiser only, empty body) and the development-only `POST /dev/fake-payments/:paymentId/settle` (404 unless the fake payment provider runs in local/development; then authenticated and payment-owner scoped). Neither confirms a payment: no route does.

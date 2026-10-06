@@ -181,7 +181,6 @@ const ACTION_RULES = {
     },
   },
   'e2e:local': { allowed: NON_PROTECTED },
-  'fake-payments': { allowed: NON_PROTECTED },
   'env:init': { allowed: ALL },
 };
 /** Throws unless `action` may run in `deployment` with the given environment variables. */

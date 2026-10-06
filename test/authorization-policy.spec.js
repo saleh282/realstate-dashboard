@@ -79,52 +79,13 @@ describe('MAZAD-016 authorization policy matrix', () => {
     expect(AuthorizationPolicyService.can(unverified, Capability.PROPERTY_CREATE)).toBe(true);
     expect(AuthorizationPolicyService.can(verified, Capability.PROPERTY_CREATE)).toBe(true);
   });
-  it.each([
-    [AccountType.USER, BrokerStatus.NOT_APPLIED],
-    [AccountType.BROKER, BrokerStatus.APPROVED],
-    [AccountType.COMPANY, BrokerStatus.NOT_APPLIED],
-  ])(
-    'allows active %s accounts to request managed marketing without a KYC gate',
-    (accountType, brokerStatus) => {
-      const identity = principal({
-        accountType,
-        brokerStatus,
-        verificationTrustState: VerificationTrustState.UNVERIFIED,
-      });
-      expect(AuthorizationPolicyService.can(identity, Capability.MANAGED_MARKETING_REQUEST)).toBe(
-        true,
-      );
-    },
-  );
-  it('does not turn managed marketing into a broker-only capability', () => {
-    expect(() =>
-      AuthorizationPolicyService.assert(
-        principal({ accountType: AccountType.USER, brokerStatus: BrokerStatus.NOT_APPLIED }),
-        Capability.MANAGED_MARKETING_REQUEST,
-      ),
-    ).not.toThrow();
-  });
-  it('keeps broker approval scoped to broker/property commands, not the platform service request', () => {
+  it('keeps property commands closed to a broker who is not approved yet', () => {
     const pendingBroker = principal({
       accountType: AccountType.BROKER,
       brokerStatus: BrokerStatus.PENDING,
     });
-    expect(
-      AuthorizationPolicyService.can(pendingBroker, Capability.MANAGED_MARKETING_REQUEST),
-    ).toBe(true);
     expect(AuthorizationPolicyService.can(pendingBroker, Capability.PROPERTY_CREATE)).toBe(false);
   });
-  it.each([AccountStatus.SUSPENDED, AccountStatus.BLOCKED, AccountStatus.PERMANENTLY_BANNED])(
-    'keeps managed-marketing mutations blocked for %s accounts',
-    (accountStatus) => {
-      expect(
-        AuthorizationPolicyService.can(
-          principal({ accountStatus }),
-          Capability.MANAGED_MARKETING_REQUEST,
-        ),
-      ).toBe(false);
-    },
-  );
   it('requires an approved active broker for broker-only capabilities', () => {
     const approved = principal({
       accountType: AccountType.BROKER,
@@ -134,12 +95,10 @@ describe('MAZAD-016 authorization policy matrix', () => {
       accountType: AccountType.BROKER,
       brokerStatus: BrokerStatus.SUSPENDED,
     });
-    expect(AuthorizationPolicyService.can(approved, Capability.BROKER_INTEREST_MANAGE)).toBe(true);
-    expect(AuthorizationPolicyService.can(suspended, Capability.BROKER_INTEREST_MANAGE)).toBe(
-      false,
-    );
+    expect(AuthorizationPolicyService.can(approved, Capability.PROPERTY_CREATE)).toBe(true);
+    expect(AuthorizationPolicyService.can(suspended, Capability.PROPERTY_CREATE)).toBe(false);
     expect(
-      codeOf(() => AuthorizationPolicyService.assert(suspended, Capability.BROKER_INTEREST_MANAGE)),
+      codeOf(() => AuthorizationPolicyService.assert(suspended, Capability.PROPERTY_CREATE)),
     ).toMatchObject({ code: AuthorizationErrorCode.BROKER_CAPABILITY_REQUIRED });
   });
   it.each([BrokerStatus.NOT_APPLIED, BrokerStatus.REJECTED, BrokerStatus.REVOKED])(
@@ -166,60 +125,18 @@ describe('MAZAD-016 authorization policy matrix', () => {
       codeOf(() => AuthorizationPolicyService.assert(admin, Capability.PROPERTY_CREATE)),
     ).toMatchObject({ code: AuthorizationErrorCode.ADMIN_MARKETPLACE_FORBIDDEN });
   });
-  it('grants form-definition publishing (publish, archive, restore) to an ACTIVE SUPER_ADMIN only (DPF-030)', () => {
+  it('keeps catalog management to staff', () => {
     const admin = principal({ userId: id.admin, systemRole: SystemRole.ADMIN });
-    const superAdmin = principal({ userId: id.admin, systemRole: SystemRole.SUPER_ADMIN });
-    expect(
-      AuthorizationPolicyService.can(superAdmin, Capability.ADMIN_FORM_DEFINITION_PUBLISH),
-    ).toBe(true);
-    expect(AuthorizationPolicyService.can(admin, Capability.ADMIN_FORM_DEFINITION_PUBLISH)).toBe(
-      false,
-    );
-    // Admins read and prepare drafts through the existing catalog capability.
     expect(AuthorizationPolicyService.can(admin, Capability.ADMIN_CATALOG_MANAGE)).toBe(true);
-    expect(
-      codeOf(() =>
-        AuthorizationPolicyService.assert(admin, Capability.ADMIN_FORM_DEFINITION_PUBLISH),
-      ),
-    ).toMatchObject({ code: AuthorizationErrorCode.FORBIDDEN });
-    for (const accountStatus of [
-      AccountStatus.SUSPENDED,
-      AccountStatus.BLOCKED,
-      AccountStatus.PERMANENTLY_BANNED,
-    ]) {
-      expect(
-        AuthorizationPolicyService.can(
-          { ...superAdmin, accountStatus },
-          Capability.ADMIN_FORM_DEFINITION_PUBLISH,
-        ),
-      ).toBe(false);
-    }
-    expect(
-      codeOf(() =>
-        AuthorizationPolicyService.assert(
-          { ...superAdmin, accountStatus: AccountStatus.SUSPENDED },
-          Capability.ADMIN_FORM_DEFINITION_PUBLISH,
-        ),
-      ),
-    ).toMatchObject({ code: AuthorizationErrorCode.ACCOUNT_SUSPENDED });
     for (const marketplace of [
       principal(),
       principal({ accountType: AccountType.COMPANY }),
       principal({ accountType: AccountType.BROKER, brokerStatus: BrokerStatus.APPROVED }),
     ]) {
-      expect(
-        AuthorizationPolicyService.can(marketplace, Capability.ADMIN_FORM_DEFINITION_PUBLISH),
-      ).toBe(false);
       expect(AuthorizationPolicyService.can(marketplace, Capability.ADMIN_CATALOG_MANAGE)).toBe(
         false,
       );
     }
-    expect(AuthorizationPolicyService.capabilitiesFor(superAdmin)).toContain(
-      Capability.ADMIN_FORM_DEFINITION_PUBLISH,
-    );
-    expect(AuthorizationPolicyService.capabilitiesFor(admin)).not.toContain(
-      Capability.ADMIN_FORM_DEFINITION_PUBLISH,
-    );
   });
   it('default-denies privileged operations for a suspended staff account', () => {
     const suspendedAdmin = principal({

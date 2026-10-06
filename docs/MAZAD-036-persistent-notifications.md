@@ -1,6 +1,6 @@
 # MAZAD-036 — Persistent notifications backend foundation
 
-> Historical implementation/qualification record. Auction functionality and related contracts described here were removed on 2026-10-03. For current scope and migration guidance, see [auction removal report](auction-removal-report.md). Only the retained managed-marketing, KYC, property, notification and outbox behavior applies.
+> Historical implementation record. Auctions, property listings, managed marketing and payments described here have since been removed; only the KYC, notification and outbox behavior still applies.
 
 ## Scope
 

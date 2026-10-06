@@ -152,8 +152,8 @@ describe('authenticated KYC asset delivery', () => {
     const service = new CloudinaryAssetService({ uploader: { upload_stream } });
     const result = await service.uploadPrivateEvidence(
       { buffer: Buffer.from('bytes') },
-      'properties/title-deeds',
-      AssetClassification.PRIVATE_PROPERTY_EVIDENCE,
+      'brokers/licences',
+      AssetClassification.PRIVATE_BROKER_EVIDENCE,
       { mime: 'image/png', format: 'png' },
     );
     expect(upload_stream).toHaveBeenCalledWith(
@@ -167,7 +167,7 @@ describe('authenticated KYC asset delivery', () => {
     expect(result).toMatchObject({
       publicId: 'private/random',
       deliveryType: 'authenticated',
-      classification: AssetClassification.PRIVATE_PROPERTY_EVIDENCE,
+      classification: AssetClassification.PRIVATE_BROKER_EVIDENCE,
     });
     expect(result).not.toHaveProperty('secureUrl');
   });
