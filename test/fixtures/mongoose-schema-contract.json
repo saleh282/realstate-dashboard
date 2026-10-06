@@ -274,7 +274,6 @@
             "ADMIN_CITY_CREATED": "admin_city_created",
             "ADMIN_CITY_DELETED": "admin_city_deleted",
             "ADMIN_CITY_UPDATED": "admin_city_updated",
-            "ADMIN_COMPANY_ACCOUNT_CREATED": "admin_company_account_created",
             "ADMIN_GOVERNORATE_CREATED": "admin_governorate_created",
             "ADMIN_GOVERNORATE_DELETED": "admin_governorate_deleted",
             "ADMIN_GOVERNORATE_UPDATED": "admin_governorate_updated",
@@ -1903,7 +1902,6 @@
         "constraints": {
           "enum": {
             "BROKER": "BROKER",
-            "COMPANY": "COMPANY",
             "USER": "USER"
           },
           "index": true

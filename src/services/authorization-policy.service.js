@@ -15,7 +15,6 @@ const {
 const { AuthorizationErrorCode } = require('../domain/authorization/authorization-error-codes');
 const { Capability } = require('../domain/authorization/capability');
 const ADMIN_CAPABILITIES = new Set([
-  Capability.COMPANY_CREATE,
   Capability.ADMIN_ACCOUNT_READ,
   Capability.ADMIN_ACCOUNT_MANAGE,
   Capability.ADMIN_AUDIT_READ,

@@ -2,7 +2,6 @@
 
 function registerRoutes(app, services) {
   app.use('/api/v1/admin/audit-logs', require('./admin-audit.routes').createRouter(services));
-  app.use('/api/v1/admin/companies', require('./admin-companies.routes').createRouter(services));
   app.use('/api/v1/admin/dashboard', require('./admin-dashboard.routes').createRouter(services));
   app.use('/api/v1/admin/kyc', require('./admin-kyc.routes').createRouter(services));
   app.use('/api/v1/admin/operations', require('./admin-operations.routes').createRouter(services));

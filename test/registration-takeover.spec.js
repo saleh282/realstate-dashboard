@@ -163,10 +163,10 @@ describe('pre-registration account takeover', () => {
     expect(error.getResponse()).toMatchObject({ code: 'ACCOUNT_ALREADY_VERIFIED' });
     expect(f.mail.sendOtp).toHaveBeenCalledTimes(1);
   });
-  it('does not touch admin, company, blocked or phone-verified accounts', async () => {
+  it('does not touch admin, broker, blocked or phone-verified accounts', async () => {
     for (const overrides of [
       { systemRole: 'ADMIN' },
-      { accountType: 'COMPANY' },
+      { accountType: 'BROKER' },
       { accountStatus: 'BLOCKED' },
       { phoneVerifiedAt: new Date() },
     ]) {

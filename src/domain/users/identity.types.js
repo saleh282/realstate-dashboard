@@ -6,7 +6,6 @@ var AccountType;
 (function (AccountType) {
   AccountType['USER'] = 'USER';
   AccountType['BROKER'] = 'BROKER';
-  AccountType['COMPANY'] = 'COMPANY';
 })(AccountType || (AccountType = {}));
 var AccountStatus;
 (function (AccountStatus) {

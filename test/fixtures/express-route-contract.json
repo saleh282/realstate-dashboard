@@ -10,16 +10,6 @@
     "status": "200"
   },
   {
-    "controller": "AdminCompaniesController",
-    "action": "create",
-    "method": "POST",
-    "path": "/api/v1/admin/companies",
-    "guards": ["JwtAuthGuard", "RolesGuard", "CapabilityGuard"],
-    "capabilities": ["Capability.COMPANY_CREATE"],
-    "roles": ["SystemRole.ADMIN"],
-    "status": "201"
-  },
-  {
     "controller": "AdminDashboardController",
     "action": "getMetrics",
     "method": "GET",

@@ -33,7 +33,7 @@ describe('MAZAD-007 identity contract', () => {
           password: 'ValidPassword1!',
           confirmPassword: 'ValidPassword1!',
           systemRole: SystemRole.SUPER_ADMIN,
-          accountType: AccountType.COMPANY,
+          accountType: AccountType.BROKER,
         },
         { type: 'body', metatype: RegisterDto },
       ),

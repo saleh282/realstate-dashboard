@@ -13,7 +13,6 @@ This inventory freezes the V1 authorization classification. Capability responses
 | `POST /kyc/submit` | Marketplace-account trust submission | `KYC_SELF_SUBMIT`; trust state is not a marketplace gate |
 | `GET /broker/requirements`, own applications/documents | Authenticated professional self read | `BROKER_APPLICATION_READ_OWN` plus applicant predicate for private evidence |
 | `POST /broker/applications` | Professional mutation | `BROKER_APPLICATION_SUBMIT`: ACTIVE USER with eligible broker state |
-| `/admin/companies` | Admin-only | `COMPANY_CREATE`; service creates only USER-role COMPANY principals |
 | `/admin/users` reads | Admin-only | `ADMIN_ACCOUNT_READ` |
 | Admin user status/session/delete | Admin-only target-scoped mutation | `ADMIN_ACCOUNT_MANAGE` plus target-governance rules |
 | Admin role update | SUPER_ADMIN-only | `SUPER_ADMIN_ROLE_MANAGE`; product cannot create/promote SUPER_ADMIN |

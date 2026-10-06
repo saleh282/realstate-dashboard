@@ -25,7 +25,6 @@ var AuditAction;
   AuditAction['ADMIN_USER_SESSIONS_REVOKED'] = 'admin_user_sessions_revoked';
   AuditAction['ADMIN_USER_ROLE_UPDATED'] = 'admin_user_role_updated';
   AuditAction['ADMIN_USER_PHOTO_REMOVED'] = 'admin_user_photo_removed';
-  AuditAction['ADMIN_COMPANY_ACCOUNT_CREATED'] = 'admin_company_account_created';
   AuditAction['ADMIN_KYC_REVIEWED'] = 'admin_kyc_reviewed';
   AuditAction['ADMIN_LEGAL_DOCUMENT_DRAFT_CREATED'] = 'admin_legal_document_draft_created';
   AuditAction['ADMIN_LEGAL_DOCUMENT_DRAFT_UPDATED'] = 'admin_legal_document_draft_updated';

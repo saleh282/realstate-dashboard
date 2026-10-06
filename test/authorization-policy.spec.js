@@ -43,7 +43,6 @@ describe('MAZAD-016 authorization policy matrix', () => {
   it.each([
     [AccountType.USER, BrokerStatus.NOT_APPLIED],
     [AccountType.BROKER, BrokerStatus.APPROVED],
-    [AccountType.COMPANY, BrokerStatus.NOT_APPLIED],
   ])('allows active %s marketplace property commands', (accountType, brokerStatus) => {
     expect(
       AuthorizationPolicyService.can(
@@ -130,7 +129,6 @@ describe('MAZAD-016 authorization policy matrix', () => {
     expect(AuthorizationPolicyService.can(admin, Capability.ADMIN_CATALOG_MANAGE)).toBe(true);
     for (const marketplace of [
       principal(),
-      principal({ accountType: AccountType.COMPANY }),
       principal({ accountType: AccountType.BROKER, brokerStatus: BrokerStatus.APPROVED }),
     ]) {
       expect(AuthorizationPolicyService.can(marketplace, Capability.ADMIN_CATALOG_MANAGE)).toBe(
@@ -157,9 +155,9 @@ describe('MAZAD-016 authorization policy matrix', () => {
   });
   it('allows only Admin proxy creation for an eligible marketplace target', () => {
     const admin = principal({ userId: id.admin, systemRole: SystemRole.ADMIN });
-    const target = principal({ userId: id.other, accountType: AccountType.COMPANY });
+    const target = principal({ userId: id.other });
     expect(AuthorizationPolicyService.assertPropertyAttribution(admin, target, true)).toBe(
-      AccountType.COMPANY,
+      AccountType.USER,
     );
     expect(
       codeOf(() => AuthorizationPolicyService.assertPropertyAttribution(principal(), target, true)),
@@ -179,7 +177,6 @@ describe('MAZAD-016 authorization policy matrix', () => {
   it.each([
     [AccountType.USER, BrokerStatus.NOT_APPLIED],
     [AccountType.BROKER, BrokerStatus.APPROVED],
-    [AccountType.COMPANY, BrokerStatus.NOT_APPLIED],
   ])('enforces own-resource and IDOR boundaries for %s', (accountType, brokerStatus) => {
     const actor = principal({ accountType, brokerStatus });
     expect(() => AuthorizationPolicyService.assertOwnResource(actor, id.user)).not.toThrow();
@@ -197,12 +194,6 @@ describe('MAZAD-016 authorization policy matrix', () => {
     expect(
       AuthorizationPolicyService.can(
         principal({ accountType: AccountType.USER }),
-        Capability.FAVORITE_MANAGE_OWN,
-      ),
-    ).toBe(true);
-    expect(
-      AuthorizationPolicyService.can(
-        principal({ accountType: AccountType.COMPANY }),
         Capability.FAVORITE_MANAGE_OWN,
       ),
     ).toBe(true);

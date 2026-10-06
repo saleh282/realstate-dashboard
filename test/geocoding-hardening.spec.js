@@ -408,7 +408,6 @@ describe('geocoding access control', () => {
   });
   it.each([
     ['an active user', {}, true],
-    ['an active company', { accountType: 'COMPANY' }, true],
     ['an approved broker', { accountType: 'BROKER', brokerStatus: 'APPROVED' }, true],
     ['an active admin', { systemRole: 'ADMIN' }, true],
     ['an active super admin', { systemRole: 'SUPER_ADMIN' }, true],

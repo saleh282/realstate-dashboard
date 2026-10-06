@@ -19,8 +19,6 @@ const {
   BrokerApplicationsController,
 } = require('../src/controllers/broker-applications.controller');
 const { BrokerApplicationsService } = require('../src/services/broker-applications.service');
-const { AdminCompaniesController } = require('../src/controllers/admin-companies.controller');
-const { CompanyAccountsService } = require('../src/services/company-accounts.service');
 const { AccountDeletionService } = require('../src/services/account-deletion.service');
 class TestJwtAuthGuard {
   canActivate(context) {
@@ -68,15 +66,6 @@ describe('admin controller authorization', () => {
       account: { accountType: 'BROKER', brokerStatus: 'APPROVED' },
     }),
   };
-  const companyAccountsService = {
-    create: jest.fn().mockResolvedValue({
-      account: {
-        userId: '64b000000000000000000004',
-        systemRole: 'USER',
-        accountType: 'COMPANY',
-      },
-    }),
-  };
   const accountDeletionService = {
     requestDeletionForAdmin: jest.fn(),
     getAdminImpact: jest.fn().mockResolvedValue({
@@ -95,7 +84,6 @@ describe('admin controller authorization', () => {
       services.CloudinaryAssetService = cloudinaryAssetService;
       services.AuditLogService = auditLogService;
       services.BrokerApplicationsService = brokerApplicationsService;
-      services.CompanyAccountsService = companyAccountsService;
       return {
         services,
         app: httpApp(
@@ -124,10 +112,6 @@ describe('admin controller authorization', () => {
             app.use(
               '/api/v1/broker',
               require('../src/routes/broker-applications.routes').createRouter(services),
-            );
-            app.use(
-              '/api/v1/admin/companies',
-              require('../src/routes/admin-companies.routes').createRouter(services),
             );
           },
           (req) =>
@@ -163,36 +147,6 @@ describe('admin controller authorization', () => {
       .set('Authorization', 'Bearer admin')
       .send({ systemRole: 'ADMIN', reason: 'privileged role update test' })
       .expect(403));
-  it('allows only ADMIN/SUPER_ADMIN to create a COMPANY account', async () => {
-    const payload = {
-      fullName: 'Company Account',
-      email: 'company@example.com',
-      initialPassword: 'CompanyPass123!',
-    };
-    await request(app.getHttpServer()).post('/api/v1/admin/companies').send(payload).expect(401);
-    await request(app.getHttpServer())
-      .post('/api/v1/admin/companies')
-      .set('Authorization', 'Bearer user')
-      .send(payload)
-      .expect(403);
-    await request(app.getHttpServer())
-      .post('/api/v1/admin/companies')
-      .set('Authorization', 'Bearer admin')
-      .send(payload)
-      .expect(201);
-    await request(app.getHttpServer())
-      .post('/api/v1/admin/companies')
-      .set('Authorization', 'Bearer super-admin')
-      .send({ ...payload, email: 'second-company@example.com' })
-      .expect(201);
-    expect(companyAccountsService.create).toHaveBeenCalledWith(
-      expect.objectContaining({ email: 'company@example.com' }),
-      expect.objectContaining({
-        actorUserId: '64b000000000000000000001',
-        requestId: expect.any(String),
-      }),
-    );
-  });
   it.each(['/api/v1/admin/kyc', '/api/v1/admin/dashboard/metrics', '/api/v1/admin/audit-logs'])(
     'enforces admin role on %s',
     async (path) => {

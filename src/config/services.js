@@ -7,7 +7,6 @@ const { GoogleGeocodingProvider } = require('../domain/geocoding/google-geocodin
 const { NominatimGeocodingProvider } = require('../domain/geocoding/nominatim-geocoding.provider');
 const { DisabledGeocodingProvider } = require('../domain/geocoding/disabled-geocoding.provider');
 const { AuditLogService } = require('./../services/audit-log.service');
-const { CompanyAccountsService } = require('./../services/company-accounts.service');
 const { RefreshTokenService } = require('./../services/refresh-token.service');
 const { OutboxService } = require('./../services/outbox.service');
 const { CloudinaryAssetService } = require('./../services/cloudinary-asset.service');
@@ -46,11 +45,6 @@ function createServices(connection, models, env = process.env) {
   });
   const geocoding = require('./geocoding').createGeocoding(config);
   services.AuditLogService = new AuditLogService(models.AuditLog);
-  services.CompanyAccountsService = new CompanyAccountsService(
-    models.User,
-    connection,
-    services.AuditLogService,
-  );
   services.RefreshTokenService = new RefreshTokenService(models.RefreshToken);
   services.OutboxService = new OutboxService(models.OutboxEvent);
   services.CloudinaryAssetService = new CloudinaryAssetService(
