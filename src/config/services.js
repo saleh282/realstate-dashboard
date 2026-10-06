@@ -2,10 +2,6 @@
 const { ConfigService } = require('./config');
 const { JwtService } = require('../common/security/jwt');
 const { v2: cloudinary } = require('cloudinary');
-const { readGeocodingOptions } = require('../domain/geocoding/geocoding.config');
-const { GoogleGeocodingProvider } = require('../domain/geocoding/google-geocoding.provider');
-const { NominatimGeocodingProvider } = require('../domain/geocoding/nominatim-geocoding.provider');
-const { DisabledGeocodingProvider } = require('../domain/geocoding/disabled-geocoding.provider');
 const { AuditLogService } = require('./../services/audit-log.service');
 const { RefreshTokenService } = require('./../services/refresh-token.service');
 const { OutboxService } = require('./../services/outbox.service');

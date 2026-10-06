@@ -1,6 +1,5 @@
 'use strict';
 
-const allowedKycMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 class KycController {
   constructor(kycService) {
     this.kycService = kycService;

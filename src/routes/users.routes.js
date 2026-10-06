@@ -25,20 +25,6 @@ function createRouter(services) {
     requireCapabilities(Capability.ACCOUNT_SELF_READ),
     asyncHandler(async (req, res) => sendResponse(res, await controller.getProfile(req), 200)),
   );
-  router.get(
-    '/profile',
-    rateLimit({ default: { limit: 20, ttl: 60000 } }),
-    authenticate(services.JwtStrategy),
-    requireCapabilities(Capability.ACCOUNT_SELF_READ),
-    asyncHandler(async (req, res) => sendResponse(res, await controller.getProfileAlias(req), 200)),
-  );
-  router.get(
-    '/me/capabilities',
-    rateLimit({ default: { limit: 20, ttl: 60000 } }),
-    authenticate(services.JwtStrategy),
-    requireCapabilities(Capability.ACCOUNT_SELF_READ),
-    asyncHandler(async (req, res) => sendResponse(res, await controller.capabilities(req), 200)),
-  );
   router.patch(
     '/me',
     rateLimit({ default: { limit: 20, ttl: 60000 } }),

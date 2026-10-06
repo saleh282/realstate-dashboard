@@ -17,15 +17,6 @@ class BrokerApplicationsController {
   ownHistory(request) {
     return this.brokerApplications.listOwnApplications(request.user.userId);
   }
-  async getOwnDocument(applicationId, documentId, request, response) {
-    const asset = await this.brokerApplications.getEvidenceForApplicant(
-      request.user.userId,
-      applicationId,
-      documentId,
-      request.ip,
-    );
-    return this.download(asset, response);
-  }
   async download(asset, response) {
     const downloaded = await this.assets.downloadAuthenticatedAsset(asset);
     response.set({

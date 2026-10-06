@@ -36,9 +36,6 @@ class AuthController {
   logout(req) {
     return this.authService.logout(req.user.userId, req.user.sessionId, req.ip);
   }
-  logoutAll(req) {
-    return this.authService.logoutAll(req.user.userId, req.ip);
-  }
 }
 
 Object.assign(exports, { AuthController });

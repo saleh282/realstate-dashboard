@@ -126,52 +126,6 @@ describe('profile photo', () => {
     expect(service.save).not.toHaveBeenCalled();
     expect(assets.deleteOrEnqueue).not.toHaveBeenCalled();
   });
-  it('lets an admin remove a photo and records who did it and why', async () => {
-    const targetId = new Types.ObjectId().toString();
-    const user = { profilePhoto: storedPhoto('old') };
-    const { service } = createService(user);
-    const result = await service.removeProfilePhotoForAdmin({
-      actorUserId: 'admin',
-      targetUserId: targetId,
-      reason: 'inappropriate',
-      ip: '2.2.2.2',
-    });
-    expect(result).toMatchObject({ removed: true });
-    expect(user.profilePhoto).toBeUndefined();
-    expect(service.auditLogService.logAdminAction).toHaveBeenCalledWith(
-      AuditAction.ADMIN_USER_PHOTO_REMOVED,
-      'admin',
-      targetId,
-      'inappropriate',
-      '2.2.2.2',
-    );
-    // Nothing to remove: no audit entry is written.
-    expect(
-      await service.removeProfilePhotoForAdmin({
-        actorUserId: 'admin',
-        targetUserId: targetId,
-        reason: 'again',
-      }),
-    ).toMatchObject({ removed: false });
-    expect(service.auditLogService.logAdminAction).toHaveBeenCalledTimes(1);
-  });
-  it('rejects admin removal for an invalid or unknown account', async () => {
-    const { service } = createService(null);
-    await expect(
-      service.removeProfilePhotoForAdmin({
-        actorUserId: 'admin',
-        targetUserId: 'nope',
-        reason: 'x',
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    await expect(
-      service.removeProfilePhotoForAdmin({
-        actorUserId: 'admin',
-        targetUserId: new Types.ObjectId().toString(),
-        reason: 'x',
-      }),
-    ).rejects.toBeInstanceOf(NotFoundException);
-  });
   it('guards the endpoints with the self-manage capability', () => {
     const policy = require('../src/middleware/auth');
     const next = jest.fn();

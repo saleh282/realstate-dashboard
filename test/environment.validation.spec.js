@@ -30,11 +30,6 @@ describe('environment validation', () => {
       }),
     ).toThrow('MAIL_TLS_REJECT_UNAUTHORIZED cannot be false in production');
   });
-  it('validates admin seed variables as one complete set', () => {
-    expect(() =>
-      validateEnvironment({ ...validDevelopment, ADMIN_EMAIL: 'admin@example.test' }),
-    ).toThrow('ADMIN_PASSWORD is required');
-  });
   it.each(['12345678', 'abcdefgh', 'password', 'ABCDEFGH', 'abc12345'])(
     'accepts ADMIN_PASSWORD=%s using the shared application policy',
     (password) => {
@@ -48,16 +43,6 @@ describe('environment validation', () => {
       ).toMatchObject({ ADMIN_PASSWORD: password });
     },
   );
-  it('rejects a seven-character ADMIN_PASSWORD', () => {
-    expect(() =>
-      validateEnvironment({
-        ...validDevelopment,
-        ADMIN_EMAIL: 'admin@example.test',
-        ADMIN_PASSWORD: '1234567',
-        ADMIN_FULL_NAME: 'Development Admin',
-      }),
-    ).toThrow('ADMIN_PASSWORD is invalid');
-  });
   it('restricts production CORS to the configured allowlist', () => {
     const options = buildCorsOptions({
       NODE_ENV: 'production',

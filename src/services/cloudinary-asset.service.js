@@ -16,48 +16,6 @@ class CloudinaryAssetService {
     this.cleanupTasks = cleanupTasks;
     this.logger = new Logger(CloudinaryAssetService.name);
   }
-  async uploadPublicPropertyMedia(file, detected) {
-    if (detected.mime === 'application/pdf') {
-      throw new ServiceUnavailableException({
-        message: 'صيغة صورة العقار غير مدعومة',
-        code: EvidenceErrorCode.FILE_TYPE_UNSUPPORTED,
-      });
-    }
-    try {
-      const result = await new Promise((resolve, reject) => {
-        const stream = this.cloudinary.uploader.upload_stream(
-          {
-            folder: 'real-estate-auction/public/properties/photos',
-            resource_type: 'image',
-            type: 'upload',
-            use_filename: false,
-            unique_filename: true,
-            overwrite: false,
-          },
-          (error, uploadResult) =>
-            error || !uploadResult
-              ? reject(error ?? new Error('Missing upload result'))
-              : resolve(uploadResult),
-        );
-        streamifier.createReadStream(file.buffer).pipe(stream);
-      });
-      return {
-        publicId: result.public_id,
-        secureUrl: result.secure_url,
-        resourceType: 'image',
-        deliveryType: 'upload',
-        classification: AssetClassification.PUBLIC_PROPERTY_MEDIA,
-        format: detected.format,
-        bytes: file.buffer.length,
-      };
-    } catch {
-      this.logger.error('Public property media upload failed');
-      throw new ServiceUnavailableException({
-        message: 'تعذر رفع صورة العقار، حاول مرة أخرى لاحقاً',
-        code: EvidenceErrorCode.UPLOAD_FAILED,
-      });
-    }
-  }
   /**
    * Stores a user's profile photo for public delivery. The image is cropped
    * to a square around the face on upload, so the original is never kept.
@@ -132,19 +90,6 @@ class CloudinaryAssetService {
       this.logger.error(`Private evidence upload failed (${classification})`);
       throw new ServiceUnavailableException({
         message: 'تعذر رفع ملف الإثبات بأمان، حاول مرة أخرى لاحقاً',
-        code: EvidenceErrorCode.UPLOAD_FAILED,
-      });
-    }
-  }
-  async deleteAssets(assets) {
-    const existing = assets.filter((asset) => Boolean(asset?.publicId));
-    if (!existing.length) return;
-    try {
-      await Promise.all(existing.map((asset) => this.destroy(asset)));
-    } catch {
-      this.logger.error('Private evidence deletion failed');
-      throw new ServiceUnavailableException({
-        message: 'تعذر حذف ملفات الإثبات بأمان، حاول مرة أخرى لاحقاً',
         code: EvidenceErrorCode.UPLOAD_FAILED,
       });
     }
@@ -265,8 +210,8 @@ class CloudinaryAssetService {
     const legacyPublic = !asset.deliveryType || asset.deliveryType === 'upload';
     const shouldAppendFormat = Boolean(
       asset.resourceType !== 'raw' &&
-        format &&
-        !asset.publicId.toLowerCase().endsWith(`.${format.toLowerCase()}`),
+      format &&
+      !asset.publicId.toLowerCase().endsWith(`.${format.toLowerCase()}`),
     );
     const deliveryUrl =
       legacyPublic && asset.secureUrl

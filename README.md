@@ -15,11 +15,10 @@ src/
   services/       # Business logic and background workers
   validators/     # Input validation and transformation
   domain/         # Domain constants, policies and provider adapters
-  middleware/     # JWT, roles, capabilities, errors, rate limits and uploads
+  middleware/     # JWT, capabilities, errors, rate limits and uploads
   config/         # Environment, database and explicit service construction
   common/         # Shared utilities
   migrations/     # Database migrations and integrity checks
-  seeds/          # Admin and catalog bootstrap scripts
   scripts/        # Operational commands
 ```
 
@@ -115,24 +114,6 @@ Observability (structured JSON log lines): `evidence_cleanup_run` (info/warn) af
 
 Registering an email whose account is still unverified replaces that account's password and name with the newest registration, revokes any sessions, and enforces the OTP resend cooldown. Verified accounts are never modified. Only the mailbox owner can complete verification, so a password chosen by a pre-registrant does not survive a later registration by the real owner.
 
-## Development admin seed
-
-Configure:
-
-```dotenv
-ADMIN_EMAIL=admin@example.test
-ADMIN_PASSWORD=ChangeThisDev1!
-ADMIN_FULL_NAME=Development Admin
-```
-
-Use your own development password; never commit a real production secret. Then run:
-
-```bash
-npm run seed:admin
-```
-
-The seed is idempotent. It creates a verified admin if the email is absent, or promotes the existing account to `admin`. It does not reset an existing password. Log in through `POST /api/v1/auth/login` with `ADMIN_EMAIL` and the password originally used to create that account.
-
 ## SMTP verification
 
 Set the SMTP variables and `TEST_EMAIL_TO` to an inbox you control, then run:
@@ -188,7 +169,6 @@ Some documents under `docs/` still mention those features (the outbox and notifi
 npm run check
 npm test
 npm run build
-npm run seed:admin
 npm run mail:test
 ```
 

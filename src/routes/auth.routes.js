@@ -129,14 +129,6 @@ function createRouter(services) {
       sendResponse(res, await controller.logout(req), HttpStatus.OK),
     ),
   );
-  router.post(
-    '/logout-all',
-    rateLimit({ default: { limit: 20, ttl: 60000 } }),
-    authenticate(services.JwtStrategy),
-    asyncHandler(async (req, res) =>
-      sendResponse(res, await controller.logoutAll(req), HttpStatus.OK),
-    ),
-  );
   return router;
 }
 

@@ -1,13 +1,8 @@
 'use strict';
 const jwt = require('jsonwebtoken');
-const {
-  UnauthorizedException,
-  ForbiddenException,
-  NotFoundException,
-} = require('../common/http/errors');
+const { UnauthorizedException, ForbiddenException } = require('../common/http/errors');
 const { AuthorizationPolicyService } = require('../services/authorization-policy.service');
 const { AuthorizationErrorCode } = require('../domain/authorization/authorization-error-codes');
-const { SystemRole } = require('../domain/auth/roles.enum');
 
 function authenticate(tokens, { optional = false } = {}) {
   return async (req, res, next) => {
@@ -31,23 +26,6 @@ function authenticate(tokens, { optional = false } = {}) {
     }
   };
 }
-function requireRoles(...roles) {
-  return (req, res, next) => {
-    const role = req.user?.systemRole;
-    if (
-      !roles.length ||
-      roles.includes(role) ||
-      (role === SystemRole.SUPER_ADMIN && roles.includes(SystemRole.ADMIN))
-    )
-      return next();
-    next(
-      new ForbiddenException({
-        message: 'ليس لديك صلاحية لتنفيذ هذا الإجراء',
-        code: AuthorizationErrorCode.FORBIDDEN,
-      }),
-    );
-  };
-}
 function requireCapabilities(...capabilities) {
   return (req, res, next) => {
     try {
@@ -64,4 +42,4 @@ function requireCapabilities(...capabilities) {
     }
   };
 }
-module.exports = { authenticate, requireRoles, requireCapabilities };
+module.exports = { authenticate, requireCapabilities };

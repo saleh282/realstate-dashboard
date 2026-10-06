@@ -11,7 +11,6 @@ const { validate } = require('class-validator');
 const { Types } = require('mongoose');
 const { AuthService } = require('../src/services/auth.service');
 const { RegisterDto } = require('../src/validators/auth/register.dto');
-const { renderLegalDocumentPage } = require('../src/views/legal-document-page');
 const { LEGAL_DOCUMENT_SEED } = require('../src/domain/legal-documents/legal-document.seed');
 const {
   LegalDocumentErrorCode,
@@ -152,97 +151,6 @@ describe('legal documents service', () => {
       NotFoundException,
     );
   });
-  it('creates drafts with the next version, optionally copied from the live text', async () => {
-    const { service, model, audit } = createService();
-    const copied = await service.createDraft(
-      { type: LegalDocumentType.TERMS, copyFromPublished: true },
-      ADMIN_ID,
-    );
-    expect(copied).toMatchObject({ version: 2, status: 'DRAFT', sections: [section('TERMS-1')] });
-    const written = await service.createDraft(
-      {
-        type: LegalDocumentType.TERMS,
-        titleAr: ' جديد ',
-        titleEn: ' New ',
-        sections: [section('3')],
-      },
-      ADMIN_ID,
-    );
-    expect(written).toMatchObject({ version: 3, titleAr: 'جديد', titleEn: 'New' });
-    expect(model.rows).toHaveLength(4);
-    expect(audit.logAdminResourceAction).toHaveBeenCalledTimes(2);
-    await expect(
-      service.createDraft({ type: LegalDocumentType.PRIVACY }, ADMIN_ID),
-    ).rejects.toMatchObject({ status: 400 });
-  });
-  it('edits drafts only; a published version is immutable', async () => {
-    const { service, model } = createService();
-    const draft = await service.createDraft(
-      { type: LegalDocumentType.TERMS, copyFromPublished: true },
-      ADMIN_ID,
-    );
-    const updated = await service.updateDraft(
-      draft.id,
-      { sections: [section('edited')] },
-      ADMIN_ID,
-    );
-    expect(updated.sections).toEqual([section('edited')]);
-    const live = model.rows[0];
-    const error = await service
-      .updateDraft(live._id.toString(), { titleEn: 'Changed' }, ADMIN_ID)
-      .catch((caught) => caught);
-    expect(error).toBeInstanceOf(ConflictException);
-    expect(error.getResponse()).toMatchObject({
-      code: LegalDocumentErrorCode.LEGAL_DOCUMENT_NOT_DRAFT,
-    });
-    expect(live.titleEn).toBe('Title TERMS');
-    await expect(
-      service.updateDraft(new Types.ObjectId().toString(), { titleEn: 'X' }, ADMIN_ID),
-    ).rejects.toBeInstanceOf(NotFoundException);
-  });
-  it('publishes a draft, archives the previous version and keeps it retrievable', async () => {
-    const { service, model, audit } = createService();
-    const draft = await service.createDraft(
-      { type: LegalDocumentType.TERMS, copyFromPublished: true },
-      ADMIN_ID,
-    );
-    const result = await service.publish(draft.id, ADMIN_ID, '1.1.1.1');
-    expect(result).toMatchObject({ version: 2, status: 'PUBLISHED' });
-    expect((await service.getCurrent(LegalDocumentType.TERMS)).version).toBe(2);
-    expect(
-      model.rows.filter((row) => row.type === 'TERMS').map((row) => [row.version, row.status]),
-    ).toEqual([
-      [1, 'ARCHIVED'],
-      [2, 'PUBLISHED'],
-    ]);
-    expect(model.rows.find((row) => row.type === 'PRIVACY')?.status).toBe('PUBLISHED');
-    expect(audit.logAdminResourceAction).toHaveBeenLastCalledWith(
-      'admin_legal_document_published',
-      ADMIN_ID,
-      draft.id,
-      'published TERMS v2',
-      '1.1.1.1',
-    );
-    await expect(service.publish(draft.id, ADMIN_ID)).rejects.toMatchObject({
-      response: { code: LegalDocumentErrorCode.LEGAL_DOCUMENT_NOT_DRAFT },
-    });
-  });
-  it('refuses to publish a draft older than the live version', async () => {
-    const { service } = createService();
-    const older = await service.createDraft(
-      { type: LegalDocumentType.TERMS, copyFromPublished: true },
-      ADMIN_ID,
-    );
-    const newer = await service.createDraft(
-      { type: LegalDocumentType.TERMS, copyFromPublished: true },
-      ADMIN_ID,
-    );
-    await service.publish(newer.id, ADMIN_ID);
-    await expect(service.publish(older.id, ADMIN_ID)).rejects.toMatchObject({
-      response: { code: LegalDocumentErrorCode.LEGAL_DOCUMENT_VERSION_CONFLICT },
-    });
-    expect((await service.getCurrent(LegalDocumentType.TERMS)).version).toBe(3);
-  });
   it('accepts only the live versions', async () => {
     const { service } = createService([
       published(LegalDocumentType.TERMS, 2),
@@ -379,36 +287,11 @@ describe('registration consent', () => {
     );
   });
 });
-describe('legal document page and type slugs', () => {
+describe('legal document type slugs', () => {
   it('maps URL slugs to stored types', () => {
     expect(parseLegalDocumentType('terms')).toBe(LegalDocumentType.TERMS);
     expect(parseLegalDocumentType(' Privacy ')).toBe(LegalDocumentType.PRIVACY);
     expect(parseLegalDocumentType('cookies')).toBeNull();
-  });
-  it('renders the requested language and escapes stored text', () => {
-    const document = {
-      titleAr: 'سياسة <الخصوصية>',
-      titleEn: 'Privacy & "Policy"',
-      version: 4,
-      publishedAt: new Date('2026-03-05T10:00:00Z'),
-      sections: [
-        {
-          headingAr: 'عنوان',
-          headingEn: 'Heading',
-          bodyAr: 'نص',
-          bodyEn: '<script>alert(1)</script>',
-        },
-      ],
-    };
-    const english = renderLegalDocumentPage(document, 'en');
-    expect(english).toContain('<html lang="en" dir="ltr">');
-    expect(english).toContain('Privacy &amp; &quot;Policy&quot;');
-    expect(english).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
-    expect(english).not.toContain('<script>');
-    expect(english).toContain('Version 4 · Last updated 2026-03-05');
-    const arabic = renderLegalDocumentPage(document, 'ar');
-    expect(arabic).toContain('<html lang="ar" dir="rtl">');
-    expect(arabic).toContain('سياسة &lt;الخصوصية&gt;');
   });
 });
 describe('039-legal-documents migration', () => {

@@ -54,24 +54,6 @@ function createRouter(services) {
     requireCapabilities(Capability.BROKER_APPLICATION_READ_OWN),
     asyncHandler(async (req, res) => sendResponse(res, await controller.ownHistory(req), 200)),
   );
-  router.get(
-    '/applications/:applicationId/documents/:documentId',
-    rateLimit({ default: { limit: 20, ttl: 60000 } }),
-    authenticate(services.JwtStrategy),
-    requireCapabilities(Capability.BROKER_APPLICATION_READ_OWN),
-    asyncHandler(async (req, res) =>
-      sendResponse(
-        res,
-        await controller.getOwnDocument(
-          req.params['applicationId'],
-          req.params['documentId'],
-          req,
-          res,
-        ),
-        200,
-      ),
-    ),
-  );
   return router;
 }
 

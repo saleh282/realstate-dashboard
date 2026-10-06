@@ -14,29 +14,9 @@ const {
 } = require('../domain/users/identity.types');
 const { AuthorizationErrorCode } = require('../domain/authorization/authorization-error-codes');
 const { Capability } = require('../domain/authorization/capability');
-const ADMIN_CAPABILITIES = new Set([
-  Capability.ADMIN_ACCOUNT_READ,
-  Capability.ADMIN_ACCOUNT_MANAGE,
-  Capability.ADMIN_AUDIT_READ,
-  Capability.ADMIN_DASHBOARD_READ,
-  Capability.ADMIN_KYC_REVIEW,
-  Capability.ADMIN_PROPERTY_REVIEW,
-  Capability.ADMIN_PROPERTY_PROXY_CREATE,
-  Capability.ADMIN_BROKER_REVIEW,
-  Capability.ADMIN_CATALOG_MANAGE,
-]);
-const MARKETPLACE_MUTATIONS = new Set([
-  Capability.PROPERTY_CREATE,
-  Capability.PROPERTY_MANAGE_OWN,
-  Capability.BROKER_APPLICATION_SUBMIT,
-]);
 const MARKETPLACE_CAPABILITIES = new Set([
   Capability.KYC_SELF_READ,
   Capability.KYC_SELF_SUBMIT,
-  Capability.PROPERTY_CREATE,
-  Capability.PROPERTY_READ_OWN,
-  Capability.PROPERTY_MANAGE_OWN,
-  Capability.FAVORITE_MANAGE_OWN,
   Capability.BROKER_APPLICATION_READ_OWN,
   Capability.BROKER_APPLICATION_SUBMIT,
 ]);
@@ -51,11 +31,6 @@ class AuthorizationPolicyService {
       brokerStatus: resolveBrokerStatus(identity),
       verificationTrustState: resolveVerificationTrustState(identity),
     };
-  }
-  static capabilitiesFor(identity) {
-    const principal = this.principal(identity);
-    if (!principal.userId) return [];
-    return Object.values(Capability).filter((capability) => this.can(principal, capability));
   }
   static can(identity, capability) {
     const principal = this.principal(identity);
@@ -72,15 +47,9 @@ class AuthorizationPolicyService {
     ) {
       return true;
     }
-    if (capability === Capability.SUPER_ADMIN_ROLE_MANAGE) {
-      return (
-        principal.systemRole === SystemRole.SUPER_ADMIN &&
-        principal.accountStatus === AccountStatus.ACTIVE
-      );
-    }
     if (capability === Capability.GEOCODING_USE) {
-      // Address lookup backs property entry, so it follows who may create
-      // listings (plus staff who create them on an account's behalf).
+      // Address lookup backs listing entry: active accounts, and brokers
+      // only once approved.
       if (principal.accountStatus !== AccountStatus.ACTIVE) return false;
       if (staff) return true;
       return (
@@ -89,39 +58,23 @@ class AuthorizationPolicyService {
           principal.brokerStatus === BrokerStatus.APPROVED)
       );
     }
-    if (ADMIN_CAPABILITIES.has(capability)) {
-      return staff && principal.accountStatus === AccountStatus.ACTIVE;
-    }
     if (staff) return false;
     const marketplace = principal.systemRole === SystemRole.USER;
     if (!marketplace) return false;
     if (
       capability === Capability.KYC_SELF_READ ||
       capability === Capability.KYC_SELF_SUBMIT ||
-      capability === Capability.PROPERTY_READ_OWN ||
-      capability === Capability.BROKER_APPLICATION_READ_OWN ||
-      capability === Capability.FAVORITE_MANAGE_OWN
+      capability === Capability.BROKER_APPLICATION_READ_OWN
     ) {
       return true;
     }
-    if (MARKETPLACE_MUTATIONS.has(capability) && principal.accountStatus !== AccountStatus.ACTIVE) {
-      return false;
-    }
     if (capability === Capability.BROKER_APPLICATION_SUBMIT) {
       return (
+        principal.accountStatus === AccountStatus.ACTIVE &&
         principal.accountType === AccountType.USER &&
         [BrokerStatus.NOT_APPLIED, BrokerStatus.REJECTED, BrokerStatus.REVOKED].includes(
           principal.brokerStatus,
         )
-      );
-    }
-    if (
-      capability === Capability.PROPERTY_CREATE ||
-      capability === Capability.PROPERTY_MANAGE_OWN
-    ) {
-      return (
-        principal.accountType !== AccountType.BROKER ||
-        principal.brokerStatus === BrokerStatus.APPROVED
       );
     }
     return false;
@@ -155,42 +108,6 @@ class AuthorizationPolicyService {
       );
     }
     throw this.denied('ليس لديك صلاحية لتنفيذ هذا الإجراء', AuthorizationErrorCode.FORBIDDEN);
-  }
-  static assertPropertyAttribution(actorIdentity, advertiserIdentity, proxy) {
-    const actor = this.principal(actorIdentity);
-    const advertiser = this.principal(advertiserIdentity);
-    if (proxy) {
-      this.assert(actor, Capability.ADMIN_PROPERTY_PROXY_CREATE);
-      if (
-        advertiser.systemRole !== SystemRole.USER ||
-        advertiser.accountStatus !== AccountStatus.ACTIVE ||
-        (advertiser.accountType === AccountType.BROKER &&
-          advertiser.brokerStatus !== BrokerStatus.APPROVED)
-      ) {
-        throw this.denied(
-          'الحساب المحدد غير مؤهل لعملية الإدارة بالنيابة',
-          AuthorizationErrorCode.PROXY_TARGET_INVALID,
-        );
-      }
-      return advertiser.accountType;
-    }
-    if (actor.userId !== advertiser.userId) {
-      throw this.denied(
-        'لا يمكنك تنفيذ عملية على موارد حساب آخر',
-        AuthorizationErrorCode.RESOURCE_ACCESS_FORBIDDEN,
-      );
-    }
-    this.assert(actor, Capability.PROPERTY_CREATE);
-    return advertiser.accountType;
-  }
-  static assertOwnResource(identity, ownerAccountId) {
-    const principal = this.principal(identity);
-    if (principal.systemRole !== SystemRole.USER || principal.userId !== ownerAccountId) {
-      throw this.denied(
-        'لا يمكنك الوصول إلى هذا المورد',
-        AuthorizationErrorCode.RESOURCE_ACCESS_FORBIDDEN,
-      );
-    }
   }
   static denied(message, code) {
     return new ForbiddenException({ message, code });

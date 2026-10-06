@@ -608,11 +608,6 @@ class AuthService {
     await this.auditLogService.log(AuditAction.LOGOUT, userId, ip);
     return { message: 'تم تسجيل الخروج' };
   }
-  async logoutAll(userId, ip) {
-    await this.refreshTokenService.revokeAllForUser(userId, 'LOGOUT_ALL');
-    await this.auditLogService.log(AuditAction.LOGOUT, userId, ip);
-    return { message: 'تم تسجيل الخروج من جميع الأجهزة' };
-  }
   async requestAccountRecovery(dto) {
     if (!this.accountDeletionService) throw new ServiceUnavailableException();
     const recovery = await this.accountDeletionService.validateRecoveryCredentials(

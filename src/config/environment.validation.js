@@ -3,10 +3,6 @@
 const { isPublicOsmNominatim } = require('../domain/geocoding/geocoding.config');
 const { parseTrustProxy } = require('./trust-proxy.config');
 const { deploymentEnvironmentErrors } = require('./deployment-environment');
-const {
-  PASSWORD_POLICY_MESSAGE,
-  isValidPassword,
-} = require('../common/validators/password.validator');
 const durationPattern = /^\d+[smhd]$/;
 const urlPattern = /^https?:\/\//i;
 const emailAddressPattern = /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/;
@@ -146,25 +142,6 @@ function validateEnvironment(config) {
   const cloudinaryKeys = ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'];
   const cloudinaryConfigured = cloudinaryKeys.some((key) => Boolean(valueOf(config, key)));
   if (cloudinaryConfigured || nodeEnv === 'production') requireKeys(config, cloudinaryKeys, errors);
-  const adminKeys = ['ADMIN_EMAIL', 'ADMIN_PASSWORD', 'ADMIN_FULL_NAME'];
-  const adminConfigured = adminKeys.some(
-    (key) => config[key] !== undefined && String(config[key]).length > 0,
-  );
-  const adminPassword =
-    config.ADMIN_PASSWORD === undefined || config.ADMIN_PASSWORD === null
-      ? ''
-      : String(config.ADMIN_PASSWORD);
-  if (adminConfigured) {
-    requireKeys(config, ['ADMIN_EMAIL', 'ADMIN_FULL_NAME'], errors);
-    if (!adminPassword) errors.push('ADMIN_PASSWORD is required');
-  }
-  const adminEmail = valueOf(config, 'ADMIN_EMAIL');
-  if (adminEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
-    errors.push('ADMIN_EMAIL must be a valid email address');
-  }
-  if (adminPassword && !isValidPassword(adminPassword)) {
-    errors.push(`ADMIN_PASSWORD is invalid: ${PASSWORD_POLICY_MESSAGE}`);
-  }
   for (const key of ['OTP_EXPIRES_MINUTES', 'OTP_RESEND_SECONDS']) {
     const value = valueOf(config, key);
     if (value && (!/^\d+$/.test(value) || Number(value) < 1)) {

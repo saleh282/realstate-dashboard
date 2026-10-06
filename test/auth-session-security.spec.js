@@ -104,7 +104,7 @@ describe('active-account session enforcement', () => {
       refreshToken: 'next-refresh',
     });
   });
-  it('revokes only the current session on logout and every session on logout-all', async () => {
+  it('revokes only the current session on logout', async () => {
     const service = Object.create(AuthService.prototype);
     service.refreshTokenService = {
       revokeSession: jest.fn(),
@@ -116,11 +116,6 @@ describe('active-account session enforcement', () => {
       payload.sub,
       'current-session',
       'LOGOUT',
-    );
-    await service.logoutAll(payload.sub);
-    expect(service.refreshTokenService.revokeAllForUser).toHaveBeenCalledWith(
-      payload.sub,
-      'LOGOUT_ALL',
     );
   });
   it('password reset revokes every existing session', async () => {

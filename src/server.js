@@ -1,6 +1,6 @@
- const dns = require('node:dns');
+const dns = require('node:dns');
 dns.setServers(['8.8.8.8', '1.1.1.1']);
- 'use strict';
+('use strict');
 require('dotenv/config');
 const { createApp, configureHttpServer } = require('./app');
 const { createContext } = require('./config/database');

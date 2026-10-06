@@ -100,16 +100,6 @@
     "status": "HttpStatus.OK"
   },
   {
-    "controller": "AuthController",
-    "action": "logoutAll",
-    "method": "POST",
-    "path": "/api/v1/auth/logout-all",
-    "guards": ["JwtAuthGuard"],
-    "capabilities": [],
-    "roles": [],
-    "status": "HttpStatus.OK"
-  },
-  {
     "controller": "BrokerApplicationsController",
     "action": "submit",
     "method": "POST",
@@ -124,16 +114,6 @@
     "action": "ownHistory",
     "method": "GET",
     "path": "/api/v1/broker/applications/me",
-    "guards": ["JwtAuthGuard", "CapabilityGuard"],
-    "capabilities": ["Capability.BROKER_APPLICATION_READ_OWN"],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "BrokerApplicationsController",
-    "action": "getOwnDocument",
-    "method": "GET",
-    "path": "/api/v1/broker/applications/:applicationId/documents/:documentId",
     "guards": ["JwtAuthGuard", "CapabilityGuard"],
     "capabilities": ["Capability.BROKER_APPLICATION_READ_OWN"],
     "roles": [],
@@ -220,16 +200,6 @@
     "status": "200"
   },
   {
-    "controller": "LegalDocumentsController",
-    "action": "page",
-    "method": "GET",
-    "path": "/api/v1/legal-documents/:type/page",
-    "guards": [],
-    "capabilities": [],
-    "roles": [],
-    "status": "200"
-  },
-  {
     "controller": "NotificationsController",
     "action": "list",
     "method": "GET",
@@ -294,26 +264,6 @@
     "action": "getProfile",
     "method": "GET",
     "path": "/api/v1/users/me",
-    "guards": ["JwtAuthGuard", "CapabilityGuard"],
-    "capabilities": ["Capability.ACCOUNT_SELF_READ"],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "UsersController",
-    "action": "getProfileAlias",
-    "method": "GET",
-    "path": "/api/v1/users/profile",
-    "guards": ["JwtAuthGuard", "CapabilityGuard"],
-    "capabilities": ["Capability.ACCOUNT_SELF_READ"],
-    "roles": [],
-    "status": "200"
-  },
-  {
-    "controller": "UsersController",
-    "action": "capabilities",
-    "method": "GET",
-    "path": "/api/v1/users/me/capabilities",
     "guards": ["JwtAuthGuard", "CapabilityGuard"],
     "capabilities": ["Capability.ACCOUNT_SELF_READ"],
     "roles": [],

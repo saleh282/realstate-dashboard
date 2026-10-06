@@ -1,7 +1,5 @@
 'use strict';
 
-const { AuthorizationPolicyService } = require('../services/authorization-policy.service');
-const allowedPhotoMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 class UsersController {
   constructor(usersService, accountDeletionService) {
     this.usersService = usersService;
@@ -9,15 +7,6 @@ class UsersController {
   }
   getProfile(req) {
     return this.usersService.getProfile(req.user.userId);
-  }
-  getProfileAlias(req) {
-    return this.usersService.getProfile(req.user.userId);
-  }
-  capabilities(req) {
-    return {
-      capabilities: AuthorizationPolicyService.capabilitiesFor(req.user),
-      advisoryOnly: true,
-    };
   }
   updateProfile(req, dto) {
     return this.usersService.updateProfile(

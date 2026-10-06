@@ -122,9 +122,6 @@ describe('Phase 13 action decision table', () => {
     DESTRUCTIVE_CONFIRM: 'RESET_DISPOSABLE_DATABASE',
   };
   const allowed = {
-    'seed:dev-admin': ['local', 'development'],
-    'seed:super-admin': [...DEPLOYMENT_ENVS],
-    'seed:baseline': [...DEPLOYMENT_ENVS],
     'migration:dry-run': [...DEPLOYMENT_ENVS],
     'migration:apply': [...DEPLOYMENT_ENVS],
     'integrity:read': [...DEPLOYMENT_ENVS],
@@ -146,8 +143,8 @@ describe('Phase 13 action decision table', () => {
       }
     },
   );
-  it('never lets production reset, seed the dev admin or run the local E2E', () => {
-    for (const action of ['destructive:reset', 'seed:dev-admin', 'e2e:local']) {
+  it('never lets production reset or run the local E2E', () => {
+    for (const action of ['destructive:reset', 'e2e:local']) {
       expect(() => assertActionAllowed(action, 'production', confirmations)).toThrow(
         EnvironmentSafetyError,
       );
@@ -157,12 +154,9 @@ describe('Phase 13 action decision table', () => {
     }
   });
   it.each([
-    ['seed:super-admin', 'production', 'PRODUCTION_BOOTSTRAP_CONFIRM'],
-    ['seed:super-admin', 'staging', 'SUPER_ADMIN_BOOTSTRAP_CONFIRM'],
     ['migration:apply', 'production', 'MIGRATION_BACKUP_CONFIRM'],
     ['migration:apply', 'staging', 'MIGRATION_BACKUP_CONFIRM'],
     ['manifest:apply', 'production', 'MANIFEST_APPLY_CONFIRM'],
-    ['seed:baseline', 'production', 'BASELINE_SEED_CONFIRM'],
     ['destructive:reset', 'local', 'DESTRUCTIVE_CONFIRM'],
   ])('%s in %s needs an explicit %s', (action, env, variable) => {
     expect(() => assertActionAllowed(action, env, {})).toThrow(variable);
@@ -171,9 +165,8 @@ describe('Phase 13 action decision table', () => {
       expect(() => assertActionAllowed(action, env, { [variable]: 'wrong' })).toThrow(variable);
     else expect(() => assertActionAllowed(action, env, { [variable]: 'snap-1' })).not.toThrow();
   });
-  it('does not require confirmations for development migrations or a local admin seed', () => {
+  it('does not require confirmations for development migrations', () => {
     expect(() => assertActionAllowed('migration:apply', 'development', {})).not.toThrow();
-    expect(() => assertActionAllowed('seed:dev-admin', 'local', {})).not.toThrow();
   });
 });
 describe('Phase 13 environment marker', () => {
@@ -248,8 +241,6 @@ describe('Phase 13 every seeding / destructive / migration tool calls its enviro
   const { join } = jest.requireActual('node:path');
   const source = (file) => readFileSync(join(__dirname, '..', file), 'utf8');
   it.each([
-    ['src/seeds/admin.seed.js', 'seed:dev-admin'],
-    ['src/seeds/super-admin.seed.js', 'seed:super-admin'],
     ['src/migrations/cli.js', 'migration:apply'],
     ['src/migrations/cli.js', 'migration:dry-run'],
     ['src/migrations/integrity-cli.js', 'integrity:read'],

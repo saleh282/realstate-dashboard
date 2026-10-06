@@ -108,37 +108,6 @@ const ALL = DEPLOYMENT_ENVS;
 const NON_PROTECTED = ['local', 'development'];
 /** The single decision table: which action may run in which deployment, and which explicit confirmation it needs. */
 const ACTION_RULES = {
-  'seed:dev-admin': { allowed: NON_PROTECTED },
-  'seed:super-admin': {
-    allowed: ALL,
-    confirm: {
-      staging: {
-        variable: 'SUPER_ADMIN_BOOTSTRAP_CONFIRM',
-        value: 'CREATE_SUPER_ADMIN',
-        hint: 'staging bootstrap',
-      },
-      production: {
-        variable: 'PRODUCTION_BOOTSTRAP_CONFIRM',
-        value: 'CREATE_PRODUCTION_SUPER_ADMIN',
-        hint: 'break-glass production bootstrap',
-      },
-    },
-  },
-  'seed:baseline': {
-    allowed: ALL,
-    confirm: {
-      staging: {
-        variable: 'BASELINE_SEED_CONFIRM',
-        value: 'APPLY_BASELINE',
-        hint: 'baseline seed',
-      },
-      production: {
-        variable: 'BASELINE_SEED_CONFIRM',
-        value: 'APPLY_BASELINE',
-        hint: 'baseline seed',
-      },
-    },
-  },
   'migration:dry-run': { allowed: ALL },
   'migration:apply': {
     allowed: ALL,

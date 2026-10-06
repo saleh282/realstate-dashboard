@@ -19,13 +19,6 @@ function createRouter(services) {
       sendResponse(res, await controller.get(req.params['type']), 200),
     ),
   );
-  router.get(
-    '/:type/page',
-    rateLimit({ default: { limit: 20, ttl: 60000 } }),
-    asyncHandler(async (req, res) =>
-      sendResponse(res, await controller.page(req.params['type'], req.query['lang'], res), 200),
-    ),
-  );
   return router;
 }
 

@@ -13,8 +13,6 @@
     "start": "node src/server.js",
     "start:dev": "node --watch src/server.js",
     "start:prod": "node src/server.js",
-    "seed:admin": "node src/seeds/admin.seed.js",
-    "seed:super-admin": "node src/seeds/super-admin.seed.js",
     "mail:test": "node src/scripts/send-test-email.js",
     "migration:list": "node src/migrations/cli.js --list",
     "migration:check": "node src/migrations/cli.js --dry-run",
