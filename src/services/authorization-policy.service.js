@@ -65,7 +65,8 @@ class AuthorizationPolicyService {
     if (
       capability === Capability.ADMIN_LISTING_REVIEW ||
       capability === Capability.ADMIN_KYC_REVIEW ||
-      capability === Capability.ADMIN_BROKER_REVIEW
+      capability === Capability.ADMIN_BROKER_REVIEW ||
+      capability === Capability.ADMIN_USER_MANAGE
     ) {
       return staff && principal.accountStatus === AccountStatus.ACTIVE;
     }

@@ -60,6 +60,41 @@ class UsersService {
     }
     return q.exec();
   }
+  async adminList(query = {}) {
+    const page = Math.max(1, Number.parseInt(query.page, 10) || 1);
+    const limit = Math.min(50, Math.max(1, Number.parseInt(query.limit, 10) || 20));
+    const filter = {};
+    if (query.search) {
+      const search = new RegExp(String(query.search).slice(0, 80), 'i');
+      filter.$or = [{ email: search }, { fullName: search }];
+    }
+    if (query.status) filter.accountStatus = query.status;
+    const [items, total] = await Promise.all([
+      this.userModel.find(filter).select('fullName email phone systemRole accountType accountStatus suspendReason suspendedAt createdAt').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean().exec(),
+      this.userModel.countDocuments(filter).exec(),
+    ]);
+    return { items, page, limit, total };
+  }
+  async adminSetStatus(actorId, targetId, status, reason, ip) {
+    if (![AccountStatus.ACTIVE, AccountStatus.SUSPENDED, AccountStatus.BLOCKED].includes(status)) {
+      throw new BadRequestException('حالة الحساب غير صحيحة');
+    }
+    const user = await this.findById(targetId);
+    if (!user) throw new NotFoundException('المستخدم غير موجود');
+    user.accountStatus = status;
+    user.isActive = status === AccountStatus.ACTIVE;
+    if (status === AccountStatus.ACTIVE) {
+      user.suspendReason = undefined;
+      user.suspendedAt = undefined;
+    } else {
+      user.suspendReason = String(reason || 'تم إيقاف الحساب من الإدارة').trim();
+      user.suspendedAt = new Date();
+      await this.refreshTokenService.revokeAllForUser(targetId);
+    }
+    await this.save(user);
+    await this.auditLogService.log('admin_user_status_updated', actorId, ip);
+    return this.getProfile(targetId);
+  }
   async getProfile(userId) {
     const user = await this.userModel.findById(userId).exec();
     if (!user) {

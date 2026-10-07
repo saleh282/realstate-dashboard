@@ -15,6 +15,7 @@ function registerRoutes(app, services) {
   );
   app.use('/api/v1/admin/listings', require('./admin-listings.routes').createRouter(services));
   app.use('/api/v1/admin/reports', require('./listing-reports.routes').createAdminRouter(services));
+  app.use('/api/v1/admin/users', require('./admin-users.routes').createRouter(services));
   app.use('/api/v1/listings', require('./listing-reports.routes').createRouter(services));
   app.use('/api/v1/listings', require('./listings.routes').createRouter(services));
   app.use('/api/v1/notifications', require('./notifications.routes').createRouter(services));

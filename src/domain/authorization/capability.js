@@ -15,6 +15,7 @@ var Capability;
   Capability['LISTING_REPORT'] = 'LISTING_REPORT';
   Capability['ADMIN_KYC_REVIEW'] = 'ADMIN_KYC_REVIEW';
   Capability['ADMIN_BROKER_REVIEW'] = 'ADMIN_BROKER_REVIEW';
+  Capability['ADMIN_USER_MANAGE'] = 'ADMIN_USER_MANAGE';
   Capability['ADMIN_LISTING_REVIEW'] = 'ADMIN_LISTING_REVIEW';
 })(Capability || (Capability = {}));
 
